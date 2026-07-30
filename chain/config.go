@@ -3,6 +3,8 @@ package chain
 import (
 	"fmt"
 	"math/big"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 // CyclesPerGas converts machine mcycles (the native cost unit) into the gas
@@ -32,6 +34,11 @@ type Config struct {
 	// MaxCyclesPerInput bounds machine execution for a single input; an input
 	// exceeding it is treated as rejected (no state effect).
 	MaxCyclesPerInput uint64
+	// AppContract is the L1 application contract address reported to the guest
+	// in each input envelope. It carries no meaning inside the machine yet; it
+	// becomes load-bearing when vouchers are executed through a Cartesi
+	// Application contract, which is where its value must match.
+	AppContract common.Address
 	// MaxSnapshots is how many recent blocks keep a live machine snapshot.
 	// Blocks older than this cannot be built on or re-verified locally.
 	MaxSnapshots int

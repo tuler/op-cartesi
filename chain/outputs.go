@@ -133,6 +133,15 @@ func (c *Chain) TxEmissions(txHash common.Hash) (TxEmissions, bool) {
 	return TxEmissions{}, false
 }
 
+// machineAt returns the machine snapshot held for a block, for tests that need
+// to interrogate the emulator directly.
+func (c *Chain) machineAt(hash common.Hash) (machine.Machine, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	m, ok := c.machines[hash]
+	return m, ok
+}
+
 // OutputTreeAt returns the cumulative outputs accumulator as of a block. The
 // second result is false if the block is unknown. Its root is what the block
 // commits to in the header's withdrawals root under Isthmus, and what an

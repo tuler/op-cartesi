@@ -46,7 +46,12 @@ func startServer(t *testing.T) *Remote {
 	listener.Close()
 
 	cmd := exec.Command(binary, "--server-address="+addr)
-	cmd.Stdout, cmd.Stderr = os.Stderr, os.Stderr
+	// The server's output is discarded rather than inherited: forked child
+	// servers inherit these descriptors and outlive the parent, so wiring them
+	// to the test's stderr leaves the test binary waiting on I/O after the
+	// tests have already passed.
+	cmd.Stdout, cmd.Stderr = nil, nil
+	cmd.WaitDelay = time.Second
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

@@ -34,6 +34,7 @@ type pendingPayload struct {
 	machine    machine.Machine
 	outputs    []TxOutputs
 	tree       OutputTree
+	firstInput uint64
 }
 
 type Chain struct {
@@ -52,6 +53,10 @@ type Chain struct {
 	// trees carries the cumulative outputs accumulator per block, so a child
 	// block can extend its parent's tree across forks and reorgs.
 	trees map[common.Hash]OutputTree
+	// inputs is the chain-wide count of inputs consumed as of each block, which
+	// gives the next block's first input index. Indices are chain-wide because
+	// the guest sees one gapless input sequence for the whole chain.
+	inputs map[common.Hash]uint64
 	// txBlocks maps a transaction to every block that contains it. Reorgs can
 	// put the same transaction in more than one block, so canonicality is
 	// resolved when a receipt is looked up rather than maintained here.
@@ -114,6 +119,7 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 		machines:    map[common.Hash]machine.Machine{genesis.Hash(): m},
 		outputs:     map[common.Hash][]TxOutputs{},
 		trees:       map[common.Hash]OutputTree{genesis.Hash(): NewOutputTree()},
+		inputs:      map[common.Hash]uint64{genesis.Hash(): 0},
 		txBlocks:    map[common.Hash][]common.Hash{},
 		pending:     map[engine.PayloadID]*pendingPayload{},
 		genesisHash: genesis.Hash(),
@@ -301,7 +307,13 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 	if err != nil {
 		return engine.PayloadID{}, fmt.Errorf("forking parent machine: %w", err)
 	}
-	exec, err := c.applyBuild(ctx, work, attrs.Transactions, poolTxs, gasLimit)
+	firstInput, ok := c.inputs[parent.Hash()]
+	if !ok {
+		work.Close(ctx)
+		return engine.PayloadID{}, fmt.Errorf("no input counter for parent %s", parent.Hash())
+	}
+	ic := c.cfg.inputContextFor(parent.Header, attrs.Timestamp, attrs.Random, firstInput)
+	exec, err := c.applyBuild(ctx, work, ic, attrs.Transactions, poolTxs, gasLimit)
 	if err != nil {
 		return engine.PayloadID{}, err
 	}
@@ -331,6 +343,7 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 		machine:    exec.machine,
 		outputs:    exec.outputs,
 		tree:       tree,
+		firstInput: firstInput,
 	}
 	return id, nil
 }
@@ -348,7 +361,7 @@ type execResult struct {
 // that reject or fail are dropped from the pool and excluded from the block.
 // Each input runs on a fork so a failed input leaves no state behind; the
 // returned machine holds the post-block state and the caller owns it.
-func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, poolTxs [][]byte, gasLimit uint64) (*execResult, error) {
+func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, ic inputContext, deposits, poolTxs [][]byte, gasLimit uint64) (*execResult, error) {
 	cur := work
 	out := &execResult{}
 	fail := func(e error) (*execResult, error) {
@@ -361,11 +374,15 @@ func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, 
 		out.gasUsed += res.Cycles / CyclesPerGas
 	}
 	for _, tx := range deposits {
+		envelope, err := ic.encodeInput(len(out.included), tx)
+		if err != nil {
+			return fail(err)
+		}
 		cand, err := cur.Fork(ctx)
 		if err != nil {
 			return fail(err)
 		}
-		res, err := cand.AdvanceInput(ctx, tx, c.cfg.MaxCyclesPerInput)
+		res, err := cand.AdvanceInput(ctx, envelope, c.cfg.MaxCyclesPerInput)
 		if err != nil {
 			cand.Close(ctx)
 			return fail(fmt.Errorf("deposit transaction failed: %w", err))
@@ -383,11 +400,15 @@ func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, 
 		if out.gasUsed >= gasLimit {
 			break
 		}
+		envelope, err := ic.encodeInput(len(out.included), tx)
+		if err != nil {
+			return fail(err)
+		}
 		cand, err := cur.Fork(ctx)
 		if err != nil {
 			return fail(err)
 		}
-		res, err := cand.AdvanceInput(ctx, tx, c.cfg.MaxCyclesPerInput)
+		res, err := cand.AdvanceInput(ctx, envelope, c.cfg.MaxCyclesPerInput)
 		if err != nil || !res.Accepted {
 			cand.Close(ctx)
 			if h, herr := txHash(tx); herr == nil {
@@ -410,16 +431,21 @@ func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, 
 // block is applied; one that rejects or fails contributes no state change
 // (and, on hard failure, no gas). The rules must mirror applyBuild exactly so
 // builder and verifiers agree on stateRoot, gasUsed and the recorded outputs.
-func (c *Chain) replayImport(ctx context.Context, work machine.Machine, txs [][]byte) (*execResult, error) {
+func (c *Chain) replayImport(ctx context.Context, work machine.Machine, ic inputContext, txs [][]byte) (*execResult, error) {
 	cur := work
 	out := &execResult{included: txs}
 	for i, tx := range txs {
+		envelope, err := ic.encodeInput(i, tx)
+		if err != nil {
+			cur.Close(ctx)
+			return nil, err
+		}
 		cand, err := cur.Fork(ctx)
 		if err != nil {
 			cur.Close(ctx)
 			return nil, err
 		}
-		res, err := cand.AdvanceInput(ctx, tx, c.cfg.MaxCyclesPerInput)
+		res, err := cand.AdvanceInput(ctx, envelope, c.cfg.MaxCyclesPerInput)
 		if err != nil {
 			cand.Close(ctx)
 			continue
@@ -492,7 +518,7 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 	// Adopt the machine of a locally built payload instead of re-executing.
 	for id, p := range c.pending {
 		if p.data.BlockHash == hash {
-			c.commit(newBlock(header, data.Transactions), p.machine, p.outputs, p.tree)
+			c.commit(newBlock(header, data.Transactions), p.machine, p.outputs, p.tree, p.firstInput)
 			delete(c.pending, id)
 			return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 		}
@@ -507,7 +533,13 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 	if err != nil {
 		return engine.PayloadStatusV1{}, fmt.Errorf("forking parent machine: %w", err)
 	}
-	exec, err := c.replayImport(ctx, work, data.Transactions)
+	firstInput, ok := c.inputs[data.ParentHash]
+	if !ok {
+		work.Close(ctx)
+		slog.Warn("cannot validate payload: parent input counter missing", "block", hash, "parent", data.ParentHash)
+		return engine.PayloadStatusV1{Status: engine.SYNCING}, nil
+	}
+	exec, err := c.replayImport(ctx, work, c.cfg.inputContextOf(header, firstInput), data.Transactions)
 	if err != nil {
 		return engine.PayloadStatusV1{}, err
 	}
@@ -539,18 +571,19 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 		exec.machine.Close(ctx)
 		return invalidStatus(&parentHash, fmt.Sprintf("outputs root mismatch: computed %s, payload claims %s", tree.Root(), *data.WithdrawalsRoot)), nil
 	}
-	c.commit(newBlock(header, data.Transactions), exec.machine, exec.outputs, tree)
+	c.commit(newBlock(header, data.Transactions), exec.machine, exec.outputs, tree, firstInput)
 	return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 }
 
 // commit stores a validated block, its post-state machine and the machine
 // emissions recorded while executing it. Canonicality is decided separately by
 // ForkchoiceUpdated. Callers hold c.mu.
-func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs, tree OutputTree) {
+func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs, tree OutputTree, firstInputIndex uint64) {
 	c.blocks[b.Hash()] = b
 	c.machines[b.Hash()] = m
 	c.outputs[b.Hash()] = outputs
 	c.trees[b.Hash()] = tree
+	c.inputs[b.Hash()] = firstInputIndex + uint64(len(b.Txs))
 	for _, txo := range outputs {
 		if txo.TxHash != (common.Hash{}) {
 			c.txBlocks[txo.TxHash] = append(c.txBlocks[txo.TxHash], b.Hash())

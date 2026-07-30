@@ -58,6 +58,8 @@ Estimated scope: a few thousand lines plus tests. It's the price of admission fo
 
 One design decision to make early: **input granularity**. Either (a) one CMIO input per transaction (simple, matches Cartesi Rollups today, coarse dispute granularity at the input level), or (b) one CMIO input per block containing the ordered tx list (fewer yields, block-atomic). (a) composes better with existing Cartesi tooling and with Plan A's dispute story.
 
+**Settled (a), with Cartesi's envelope.** Each transaction is one CMIO input, wrapped in `EvmAdvance(chainId, appContract, msgSender, blockNumber, blockTimestamp, prevRandao, index, bytes payload)` — the encoding Cartesi's guest tools already decode — with the raw transaction as the payload. Feeding raw transaction bytes was tried first and fails against a stock guest: the guest cannot parse them, exits, and halts the machine. The envelope is also what conveys the L2 block context, which the machine has no other way to learn. Indices are chain-wide, since an app-chain is one application. Every field is derivable from the block header, so verifiers reconstruct the builder's context exactly.
+
 ---
 
 ## 4. Plan A — OP Stack chassis + Cartesi-native settlement (Dave/PRT + `machine-solidity-step`)

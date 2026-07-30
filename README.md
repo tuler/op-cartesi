@@ -10,7 +10,14 @@ Roadmap step 1, in progress. The shim implements the full sequencing loop — `e
 
 Compatibility is verified against **op-node's own types** rather than hand-written JSON: the [`integration`](integration/) suite drives the shim over authenticated HTTP using `op-service/eth`, and checks each block with op-node's `ExecutionPayloadEnvelope.CheckBlockHash`, which independently reconstructs the header. A deliberate one-field mutation to header construction is caught there, so the check has teeth.
 
-Still outstanding for the milestone: running against a real `cartesi-jsonrpc-machine` server (the emulator's JSON-RPC encodings are decoded tolerantly and need pinning to a release), and a live op-node on an L1 devnet with deployed contracts. See [devnet/](devnet/).
+The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client is pinned to machine-emulator 0.21 by probing a running server, and `chain` and `machine` carry tests that boot a real machine, build blocks on it, re-execute them as a verifier, and check that the outputs commitment the host computes is byte-identical to the one the guest maintains. They are skipped unless a snapshot is supplied:
+
+```sh
+./devnet/build-snapshot.sh
+OP_CARTESI_TEST_SNAPSHOT=./devnet/snapshot go test ./...
+```
+
+Still outstanding for the milestone: a live op-node on an L1 devnet with deployed contracts. See [devnet/](devnet/).
 
 See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, covering:
 
@@ -52,7 +59,17 @@ Reports are not logs, because a log implies provability. They are served through
 | `integration` | Separate Go module: compatibility tests driving the shim with op-node's wire types. Kept out of the main module so the shim itself depends only on op-geth. |
 | `devnet` | Scripts and instructions for running the shim alongside op-node. |
 
-Transactions are ordinary signed Ethereum transactions (plus OP deposit transactions injected by op-node); the raw transaction bytes are what the machine receives as CMIO inputs. Keeping them RLP-parseable is what lets stock op-node and op-batcher handle our blocks unmodified.
+Transactions are ordinary signed Ethereum transactions (plus OP deposit transactions injected by op-node), which is what lets stock op-node and op-batcher handle our blocks unmodified.
+
+Each one reaches the machine wrapped in Cartesi's **`EvmAdvance` envelope**, with the raw transaction as the payload:
+
+```
+EvmAdvance(chainId, appContract, msgSender, blockNumber, blockTimestamp, prevRandao, index, payload)
+```
+
+That is the encoding Cartesi's guest tools already decode, so a stock guest-tools rootfs and existing Cartesi applications run unmodified — the same reuse argument that picked the OP Stack. It also carries the L2 block context the guest could not otherwise learn, since the machine has no clock and no view of the chain. `msgSender` is the transaction's own sender (for a deposit, the L1 originator it carries); `index` is chain-wide, so the guest sees one gapless input sequence as it would from an InputBox. `appContract` is configurable and becomes load-bearing only when vouchers are executed through a Cartesi `Application` contract.
+
+Every field of the envelope is derivable from the block header, so a verifier re-executing a block reconstructs the exact context the builder used.
 
 ## Development
 
