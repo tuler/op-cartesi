@@ -2,6 +2,9 @@ package machine
 
 import (
 	"context"
+	"fmt"
+	"os"
+	"path/filepath"
 	"sync"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -102,5 +105,31 @@ func (m *Mock) Fork(context.Context) (Machine, error) {
 		InspectFn: m.InspectFn,
 	}, nil
 }
+
+// Store writes the mock's whole state — its root hash — to a file, which is
+// enough for the checkpoint machinery to be exercised without an emulator.
+func (m *Mock) Store(_ context.Context, directory string) error {
+	m.mu.Lock()
+	root := m.root
+	m.mu.Unlock()
+	if err := os.MkdirAll(directory, 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(directory, mockStateFile), root.Bytes(), 0o644)
+}
+
+// LoadMock reads back a machine written by Mock.Store.
+func LoadMock(directory string) (*Mock, error) {
+	data, err := os.ReadFile(filepath.Join(directory, mockStateFile))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) != common.HashLength {
+		return nil, fmt.Errorf("%s holds %d bytes, want a %d-byte root", directory, len(data), common.HashLength)
+	}
+	return &Mock{root: common.BytesToHash(data)}, nil
+}
+
+const mockStateFile = "mock-root"
 
 func (m *Mock) Close(context.Context) error { return nil }

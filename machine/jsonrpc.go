@@ -236,6 +236,30 @@ func (r *Remote) sendCmioResponse(ctx context.Context, reason uint16, data []byt
 	}, nil)
 }
 
+// storeSharing is the sharing mode Store uses, and it is not a free choice.
+//
+// The emulator's three modes describe how a stored machine's address ranges
+// relate to backing files, and only "all" writes the machine as it is *now*:
+// "none" and "config" write the contents of the backing stores the machine was
+// loaded from, so a machine that has consumed inputs since is stored at the
+// state it was loaded at. That failure is silent — the call succeeds, the
+// files look right, and the checkpoint reloads to a stale root. TestRemoteStore
+// pins it.
+//
+// The name suggests the stored copy would go on being written to as execution
+// continues, which would make it useless as a checkpoint. It does not: the
+// stored directory is independent once written.
+const storeSharing = "all"
+
+// Store writes the machine's state to a directory that machine.load can later
+// read. The receiver is unaffected and stays usable.
+func (r *Remote) Store(ctx context.Context, directory string) error {
+	return r.call(ctx, "machine.store", map[string]any{
+		"directory": directory,
+		"sharing":   storeSharing,
+	}, nil)
+}
+
 // CheckReady verifies the loaded machine is already parked at a manual yield
 // waiting for its first input, which is the state `cartesi-machine --store`
 // leaves it in and the state Cartesi Rollups templates are distributed in.

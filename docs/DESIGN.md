@@ -220,26 +220,36 @@ since they are synthesized from the emissions. A handful of tables in the same
 key-value store.
 
 **Machine state — Cartesi's own `cm_store`.** The emulator exposes it as
-`machine.store` over JSON-RPC, and three measured facts shape the design:
+`machine.store` over JSON-RPC, and the measurements shape the design:
 
 | | |
 |---|---|
-| A stored machine | **532 MiB** (371 MiB for the devnet's genesis snapshot) |
-| Time to store | **1.7 s** |
-| Storing from a fork | **works**, in 1.9 s |
+| A stored machine | **532 MiB apparent, ~380 MiB on disk** |
+| Time to store | **~1.8 s** |
+| Storing from a fork | **works**, and the parent is unaffected |
+| Reflink/dedup between checkpoints | not available; every checkpoint is a full copy |
 
-That last one is what makes this cheap. The chain already forks a machine
+Storing from a fork is what makes this cheap. The chain already forks a machine
 server per block for snapshots, so a checkpoint is `machine.store` on a fork
-that exists anyway — the live machine never stalls. (The call also needs a
-`sharing` parameter that its schema does not advertise, which is the third time
-the 0.21 schema has been ahead of the build.)
+that exists anyway — the live machine never stalls for the write.
 
-Half a gigabyte per checkpoint rules out storing one per block, so the shape is
-**checkpoint plus replay**: store every N blocks, and on restart load the newest
-checkpoint and re-execute the persisted blocks after it. Replay costs one block
-execution each — about 1.9 s in the devnet, dominated by the guest rather than
-the emulator — so N bounds the worst-case restart, and N = 100 puts it near
-three minutes.
+One trap, and it is a silent one. `machine.store` takes a `sharing` parameter
+its schema does not advertise, with three modes, and **only `all` stores the
+machine as it is now**. Under `none` and `config` the call succeeds, writes a
+plausible directory, and stores the state the machine was *loaded* at — so a
+checkpoint taken after a thousand inputs reloads to the root from before the
+first one. Nothing reports an error; the files simply describe the wrong
+machine. `machine.Remote.Store` pins `all`, and `TestRemoteStoreCapturesLiveState`
+fails if that ever changes. The mode's name suggests the stored copy would keep
+being written to as execution continues, which would make it useless as a
+checkpoint; measured, it does not — the directory is independent once written.
+
+Half a gigabyte per checkpoint, with no deduplication available, rules out one
+per block, so the shape is **checkpoint plus replay**: store every N blocks, and
+on restart load the newest checkpoint and re-execute the persisted blocks after
+it. Replay costs one block execution each — about 1.9 s in the devnet,
+dominated by the guest rather than the emulator — so N bounds the worst-case
+restart, and N = 100 puts it near three minutes.
 
 The genuinely new code is the checkpoint-and-replay controller and the outputs
 tables. Note there is no OP analogue for the controller and there could not be:
@@ -247,11 +257,9 @@ op-geth's state *is* its database, so the OP Stack has never needed a notion of
 "snapshot the execution engine and replay forward". Cartesi's `cm_store` does
 the hard half.
 
-Three things to settle before writing it: whether checkpoints are triggered by
-block count or by finalization (finalized never needs reverting, but nothing
-finalizes on a devnet L1); how many to retain and when to prune; and whether
-the `sharing` modes let successive checkpoints share backing files, which would
-change the retention arithmetic entirely and has not been measured.
+Checkpoints are triggered by block count and by finalization both: finalized
+blocks can never be reorged away, so a checkpoint at one never needs discarding,
+but nothing finalizes on a devnet L1 and the count is what makes progress there.
 
 ## 8. The app-chain dimension: one machine, many applications
 

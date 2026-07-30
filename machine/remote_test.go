@@ -399,3 +399,139 @@ func TestRemoteCloseOnlyShutsDownForks(t *testing.T) {
 		t.Logf("fork closed with: %v", err)
 	}
 }
+
+// bareServer starts an emulator server holding no machine, which is what
+// reloading a stored checkpoint needs: machine.load refuses to replace one.
+func bareServer(t *testing.T) *Remote {
+	t.Helper()
+	binary, err := exec.LookPath("cartesi-jsonrpc-machine")
+	if err != nil {
+		t.Skip("cartesi-jsonrpc-machine is not on PATH")
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := listener.Addr().String()
+	listener.Close()
+
+	cmd := exec.Command(binary, "--server-address="+addr)
+	cmd.Stdout, cmd.Stderr = nil, nil
+	cmd.WaitDelay = time.Second
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cmd.Process.Kill(); cmd.Wait() })
+
+	ctx := context.Background()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		remote, err := DialRemote(ctx, "http://"+addr)
+		if err == nil {
+			return remote
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("emulator server never became reachable: %v", err)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// A checkpoint has to hold the state the machine was in when it was taken, and
+// go on holding it while the machine keeps running. Neither is free: the
+// emulator's other two sharing modes write the state the machine was *loaded*
+// at, succeeding silently, so a checkpoint taken this way reloads to a root
+// from before every input it was supposed to include.
+func TestRemoteStoreCapturesLiveState(t *testing.T) {
+	ctx := context.Background()
+	remote := startServer(t)
+	if err := remote.CheckReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	for i := range 2 {
+		if _, err := remote.AdvanceInput(ctx, evmAdvance(t, uint64(i), sampleDeposit(t)), 10_000_000_000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	at, err := remote.RootHash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir() + "/checkpoint"
+	if err := remote.Store(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+
+	reload := func() common.Hash {
+		t.Helper()
+		server := bareServer(t)
+		if err := server.Load(ctx, dir); err != nil {
+			t.Fatalf("loading the checkpoint: %v", err)
+		}
+		root, err := server.RootHash(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return root
+	}
+	if got := reload(); got != at {
+		t.Fatalf("checkpoint reloads to %s, was taken at %s", got, at)
+	}
+
+	// Running on does not reach back into what was written.
+	for i := range 2 {
+		if _, err := remote.AdvanceInput(ctx, evmAdvance(t, uint64(10+i), sampleDeposit(t)), 10_000_000_000); err != nil {
+			t.Fatal(err)
+		}
+	}
+	moved, err := remote.RootHash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved == at {
+		t.Fatal("the machine did not advance, so this proves nothing")
+	}
+	if got := reload(); got != at {
+		t.Fatalf("after running on, the checkpoint reloads to %s instead of %s", got, at)
+	}
+}
+
+// Checkpoints come off a fork so the live machine never stalls for the write.
+func TestRemoteStoreFromFork(t *testing.T) {
+	ctx := context.Background()
+	remote := startServer(t)
+	if err := remote.CheckReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := remote.AdvanceInput(ctx, evmAdvance(t, 0, sampleDeposit(t)), 10_000_000_000); err != nil {
+		t.Fatal(err)
+	}
+	at, _ := remote.RootHash(ctx)
+
+	forked, err := remote.Fork(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir() + "/checkpoint"
+	if err := forked.Store(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	forked.Close(ctx)
+
+	server := bareServer(t)
+	if err := server.Load(ctx, dir); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := server.RootHash(ctx); err != nil {
+		t.Fatal(err)
+	} else if got != at {
+		t.Fatalf("fork checkpoint reloads to %s, want %s", got, at)
+	}
+
+	// The parent must be unharmed by having been forked and stored.
+	if _, err := remote.AdvanceInput(ctx, evmAdvance(t, 1, sampleDeposit(t)), 10_000_000_000); err != nil {
+		t.Fatalf("the machine broke after a fork stored from it: %v", err)
+	}
+}

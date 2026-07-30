@@ -111,6 +111,13 @@ type Machine interface {
 	// mutable state with the receiver. Both remain usable.
 	Fork(ctx context.Context) (Machine, error)
 
+	// Store writes the machine's current state to a directory it can later be
+	// loaded from. The receiver stays usable and unchanged, and the written
+	// copy is independent: continuing to run does not alter it.
+	//
+	// The directory must not already exist.
+	Store(ctx context.Context, directory string) error
+
 	// Close releases the instance. The machine must not be used afterwards.
 	Close(ctx context.Context) error
 }
