@@ -71,8 +71,8 @@ func newRealChain(t *testing.T) *Chain {
 	if err := remote.Load(ctx, snapshot); err != nil {
 		t.Fatal(err)
 	}
-	if err := remote.EnsureReady(ctx, 10_000_000_000); err != nil {
-		t.Fatalf("booting the machine: %v", err)
+	if err := remote.CheckReady(ctx); err != nil {
+		t.Fatalf("stored machine is not ready for input: %v", err)
 	}
 
 	c, err := New(ctx, testConfig(), remote, mempool.New(16))
@@ -80,6 +80,33 @@ func newRealChain(t *testing.T) *Chain {
 		t.Fatal(err)
 	}
 	return c
+}
+
+// The chain's genesis state root must be the stored machine's own root hash,
+// with nothing run in between. That is what makes genesis a property of the
+// snapshot rather than of how a particular node started up — two operators
+// handed the same template must compute the same genesis block, and so the
+// same rollup config, without having to agree on a boot procedure.
+func TestGenesisIsTheStoredMachineRoot(t *testing.T) {
+	ctx := context.Background()
+	c := newRealChain(t)
+
+	head, ok := c.machineAt(c.GenesisHash())
+	if !ok {
+		t.Fatal("no machine for genesis")
+	}
+	remote, ok := head.(*machine.Remote)
+	if !ok {
+		t.Skip("not running against a remote machine")
+	}
+	stored, err := remote.RootHash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := c.BlockByNumber(0).Header.Root; got != stored {
+		t.Fatalf("genesis state root %s, stored machine root %s", got, stored)
+	}
+	t.Logf("genesis state root is the snapshot's own root %s", stored)
 }
 
 // TestRealMachineBuildsBlocks is the end-to-end milestone: the sequencer path

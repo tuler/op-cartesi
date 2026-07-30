@@ -117,9 +117,30 @@ Two operational notes the script encodes, both easy to trip over by hand:
 
 - A machine server holds exactly one machine, and `machine.load` refuses to
   replace it. Config generation and the node each need their own server.
-- Linux boots inside the machine before the engine answers, which takes tens of
-  seconds. op-node must not be started before the engine logs
-  `chain initialized`.
+- op-node must not be started before the engine logs `chain initialized`.
+
+## The snapshot is stored already booted
+
+`build-snapshot.sh` stores the machine where `cartesi-machine --store` leaves
+it: booted, and parked at its first input yield. This is how Cartesi Rollups
+distributes templates, and op-cartesi requires it — it refuses a machine stored
+at mcycle 0 rather than booting one itself:
+
+```
+the stored machine is not parked at an input yield — store it with
+`cartesi-machine ... --store=<dir>`, which runs to the first yield,
+rather than with --max-mcycle=0
+```
+
+The reason is genesis. The chain's genesis state root is the machine's root
+hash, so if the node did the booting, genesis would depend on how the node ran
+it rather than on the snapshot — and two operators handed the same template
+could compute different genesis blocks, and so different rollup configs. With
+the machine stored after boot there is nothing to disagree about: genesis is
+the stored machine's own root hash. It is also the hash Cartesi anchors on
+chain as the template hash.
+
+Node startup drops from tens of seconds to about one as a side effect.
 
 ## Quick start (no L1, no contracts)
 

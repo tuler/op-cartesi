@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Builds the Cartesi Machine snapshot that becomes the chain's genesis state.
 #
-# The snapshot is stored before boot, at mcycle 0: op-cartesi runs the machine
-# through Linux boot itself on startup, so the stored template stays small and
-# the boot path is exercised by the node rather than baked in.
+# The machine is stored where `cartesi-machine --store` leaves it: booted, and
+# parked at its first input yield. That is how Cartesi Rollups distributes
+# templates, and it is what makes genesis reproducible — the chain's genesis
+# state root is the stored machine's own root hash, rather than something that
+# depends on how each node happened to run the boot.
 #
 # Images are not vendored. Fetch them once with:
 #   curl -L -o "$IMAGES_DIR/linux.bin"   <machine-linux-image release asset>
@@ -26,7 +28,6 @@ rm -rf "$SNAPSHOT_DIR"
 cartesi-machine \
   --flash-drive="label:root,data_filename:$IMAGES_DIR/rootfs.ext2" \
   --append-init-file="$GUEST_APP" \
-  --max-mcycle=0 \
   --store="$SNAPSHOT_DIR"
 
 echo "stored machine snapshot in $SNAPSHOT_DIR" >&2

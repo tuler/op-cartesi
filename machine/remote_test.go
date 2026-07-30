@@ -159,7 +159,7 @@ const emptyOutputsTreeRoot = "0x0a162946e56158bac0673e6dd3bdfdc1e4a0e7744a120fdb
 func TestRemoteOutputsRootMatchesHostTree(t *testing.T) {
 	ctx := context.Background()
 	remote := startServer(t)
-	if err := remote.EnsureReady(ctx, 10_000_000_000); err != nil {
+	if err := remote.CheckReady(ctx); err != nil {
 		t.Fatal(err)
 	}
 
@@ -200,15 +200,28 @@ func TestRemoteOutputsRootMatchesHostTree(t *testing.T) {
 	t.Logf("guest outputs root: empty %s -> after one output %s", atBoot, res.GuestOutputsRoot)
 }
 
-// The machine must boot to its first input yield and report a stable root
-// hash. This exercises machine.run, machine.read_register and
-// machine.get_root_hash against the real server.
-func TestRemoteBootsAndReportsRootHash(t *testing.T) {
+// A loaded machine must already be waiting for input, and report a stable root
+// hash without being run at all. Nothing here advances a cycle: the state the
+// chain calls genesis is the state the snapshot was stored in.
+func TestRemoteLoadsReadyForInput(t *testing.T) {
 	ctx := context.Background()
 	remote := startServer(t)
 
-	if err := remote.EnsureReady(ctx, 10_000_000_000); err != nil {
-		t.Fatalf("booting to first input yield: %v", err)
+	if err := remote.CheckReady(ctx); err != nil {
+		t.Fatalf("stored machine is not ready for input: %v", err)
+	}
+	// Nothing ran, so the cycle counter is exactly where the snapshot left it.
+	before, err := remote.readMcycle(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := remote.CheckReady(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if after, err := remote.readMcycle(ctx); err != nil {
+		t.Fatal(err)
+	} else if after != before {
+		t.Fatalf("checking readiness advanced the machine from cycle %d to %d", before, after)
 	}
 	root, err := remote.RootHash(ctx)
 	if err != nil {
@@ -234,7 +247,7 @@ func TestRemoteBootsAndReportsRootHash(t *testing.T) {
 func TestRemoteAdvanceInput(t *testing.T) {
 	ctx := context.Background()
 	remote := startServer(t)
-	if err := remote.EnsureReady(ctx, 10_000_000_000); err != nil {
+	if err := remote.CheckReady(ctx); err != nil {
 		t.Fatal(err)
 	}
 	before, err := remote.RootHash(ctx)
@@ -281,7 +294,7 @@ func TestRemoteAdvanceInput(t *testing.T) {
 func TestRemoteForkIsolation(t *testing.T) {
 	ctx := context.Background()
 	parent := startServer(t)
-	if err := parent.EnsureReady(ctx, 10_000_000_000); err != nil {
+	if err := parent.CheckReady(ctx); err != nil {
 		t.Fatal(err)
 	}
 	before, err := parent.RootHash(ctx)
@@ -327,7 +340,7 @@ func TestRemoteForkIsolation(t *testing.T) {
 func TestRemoteDeterminism(t *testing.T) {
 	ctx := context.Background()
 	remote := startServer(t)
-	if err := remote.EnsureReady(ctx, 10_000_000_000); err != nil {
+	if err := remote.CheckReady(ctx); err != nil {
 		t.Fatal(err)
 	}
 

@@ -20,7 +20,6 @@ import (
 type chainFlags struct {
 	machineRemote   string
 	machineSnapshot string
-	bootCycles      uint64
 	chainID         uint64
 	genesisTime     uint64
 	gasLimit        uint64
@@ -33,7 +32,6 @@ type chainFlags struct {
 func (f *chainFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.machineRemote, "machine.remote", "", "URL of a cartesi-jsonrpc-machine server; empty runs the in-memory mock (dev only)")
 	fs.StringVar(&f.machineSnapshot, "machine.snapshot", "", "directory of a stored machine to load into the server; empty uses whatever it already has")
-	fs.Uint64Var(&f.bootCycles, "machine.boot-cycles", 4_000_000_000, "cycle budget for booting the machine to its first input yield")
 	fs.Uint64Var(&f.chainID, "chain-id", 901, "L2 chain id")
 	fs.Uint64Var(&f.genesisTime, "genesis.timestamp", 0, "timestamp of the genesis block")
 	fs.Uint64Var(&f.gasLimit, "gas-limit", 30_000_000, "fallback block gas limit")
@@ -56,8 +54,9 @@ func (f *chainFlags) chainConfig() chain.Config {
 	return cfg
 }
 
-// openMachine connects to the emulator and boots it to its first input-wait
-// yield, or returns the deterministic mock when no remote is configured.
+// openMachine connects to the emulator and checks the machine it holds is
+// ready for input, or returns the deterministic mock when no remote is
+// configured. The machine is never booted here — see Remote.CheckReady.
 func (f *chainFlags) openMachine(ctx context.Context) (machine.Machine, error) {
 	if f.machineRemote == "" {
 		slog.Warn("no -machine.remote given; using deterministic in-memory mock machine (dev only)")
@@ -77,9 +76,8 @@ func (f *chainFlags) openMachine(ctx context.Context) (machine.Machine, error) {
 	} else if !loaded {
 		return nil, fmt.Errorf("the machine server has no machine loaded; pass -machine.snapshot")
 	}
-	slog.Info("booting machine to first input yield", "remote", f.machineRemote)
-	if err := remote.EnsureReady(ctx, f.bootCycles); err != nil {
-		return nil, fmt.Errorf("machine boot: %w", err)
+	if err := remote.CheckReady(ctx); err != nil {
+		return nil, fmt.Errorf("machine at %s: %w", f.machineRemote, err)
 	}
 	return remote, nil
 }

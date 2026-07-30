@@ -184,16 +184,21 @@ func (r *Remote) run(ctx context.Context, mcycleEnd uint64) (breakReason, error)
 	return br, err
 }
 
-// readMcycle reads the cycle counter.
+// readReg reads one machine register.
 //
 // The method is machine.read_reg. The server's rpc.discover schema advertises
 // machine.read_register instead, but 0.21.0-test7 does not implement that name
 // — the schema is ahead of the build in a few places, so every method here was
 // probed against a running server rather than taken from the schema.
-func (r *Remote) readMcycle(ctx context.Context) (uint64, error) {
+func (r *Remote) readReg(ctx context.Context, reg string) (uint64, error) {
 	var v uint64
-	err := r.call(ctx, "machine.read_reg", map[string]any{"reg": "mcycle"}, &v)
+	err := r.call(ctx, "machine.read_reg", map[string]any{"reg": reg}, &v)
 	return v, err
+}
+
+// readMcycle reads the cycle counter.
+func (r *Remote) readMcycle(ctx context.Context) (uint64, error) {
+	return r.readReg(ctx, "mcycle")
 }
 
 type cmioRequest struct {
@@ -231,32 +236,34 @@ func (r *Remote) sendCmioResponse(ctx context.Context, reason uint16, data []byt
 	}, nil)
 }
 
-// EnsureReady runs the machine (through Linux boot, for a stored template
-// captured before boot) until it parks at a manual yield waiting for its first
-// input. It must be called once before the machine is handed to the chain.
-func (r *Remote) EnsureReady(ctx context.Context, maxCycles uint64) error {
-	start, err := r.readMcycle(ctx)
+// CheckReady verifies the loaded machine is already parked at a manual yield
+// waiting for its first input, which is the state `cartesi-machine --store`
+// leaves it in and the state Cartesi Rollups templates are distributed in.
+//
+// The node deliberately does not boot the machine itself. If it did, the
+// genesis state root would depend on how the node ran the boot rather than on
+// the snapshot alone, and two operators booting the same template with
+// different cycle budgets could disagree about genesis. With the machine
+// stored after boot, genesis is simply the stored machine's own root hash.
+//
+// It reads no more than it needs to: iflags_Y says whether the machine is
+// yielded at all, and the pending request says which yield it is.
+func (r *Remote) CheckReady(ctx context.Context) error {
+	yielded, err := r.readReg(ctx, "iflags_Y")
 	if err != nil {
 		return err
 	}
-	for {
-		br, err := r.run(ctx, start+maxCycles)
-		if err != nil {
-			return err
-		}
-		switch br {
-		case breakYieldedManual:
-			return nil
-		case breakYieldedAuto, breakYieldedSoft, breakConsoleOutput, breakConsoleInput:
-			continue
-		case breakHalted:
-			return ErrHalted
-		case breakReachedTarget:
-			return ErrCycleLimit
-		default:
-			return fmt.Errorf("unexpected break reason %q during boot", br)
-		}
+	if yielded == 0 {
+		return fmt.Errorf("the stored machine is not parked at an input yield — store it with `cartesi-machine ... --store=<dir>`, which runs to the first yield, rather than with --max-mcycle=0")
 	}
+	req, err := r.receiveCmioRequest(ctx)
+	if err != nil {
+		return err
+	}
+	if req.Reason != CmioYieldManualReasonRxAccepted {
+		return fmt.Errorf("the stored machine is yielded, but waiting on reason %d rather than an input (%d)", req.Reason, CmioYieldManualReasonRxAccepted)
+	}
+	return nil
 }
 
 // yieldLoop runs the machine after an input has been delivered, collecting the
