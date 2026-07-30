@@ -7,6 +7,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/misc/eip1559"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/trie"
 )
@@ -46,10 +47,48 @@ func txsRoot(txs [][]byte) common.Hash {
 	return types.DeriveSha(rawTxs(txs), trie.NewStackTrie(nil))
 }
 
+// extraData computes the header extraData for a block built from payload
+// attributes. Before Holocene it must be empty; from Holocene onward op-node
+// is required to supply the EIP-1559 parameters, and zeroed parameters mean
+// "use the chain defaults". op-geth's own encoder produces the bytes, so they
+// match what an op-geth engine would have committed to.
+func (c Config) extraData(timestamp uint64, params []byte) ([]byte, error) {
+	if !c.IsHolocene(timestamp) {
+		if len(params) != 0 {
+			return nil, fmt.Errorf("eip1559Params supplied for pre-Holocene block")
+		}
+		return []byte{}, nil
+	}
+	if err := eip1559.ValidateHolocene1559Params(params); err != nil {
+		return nil, err
+	}
+	denominator, elasticity := eip1559.DecodeHolocene1559Params(params)
+	if denominator == 0 {
+		denominator, elasticity = c.EIP1559Denominator, c.EIP1559Elasticity
+	}
+	return c.encodeExtraData(timestamp, denominator, elasticity), nil
+}
+
+// genesisExtraData encodes the chain's default EIP-1559 parameters for the
+// genesis header, which is built without payload attributes.
+func (c Config) genesisExtraData() []byte {
+	return c.encodeExtraData(c.GenesisTimestamp, c.EIP1559Denominator, c.EIP1559Elasticity)
+}
+
+func (c Config) encodeExtraData(timestamp, denominator, elasticity uint64) []byte {
+	extra := eip1559.EncodeOptimismExtraData(c, timestamp, denominator, elasticity, nil)
+	if extra == nil {
+		return []byte{}
+	}
+	return extra
+}
+
 // buildHeader assembles the header for a new block. Field choices follow the
 // OP Stack post-Ecotone shape: no uncles, empty withdrawals list, zero blob
-// gas, parentBeaconRoot from the payload attributes.
-func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoot common.Hash, txs [][]byte, gasUsed, gasLimit uint64, baseFee *big.Int) *types.Header {
+// gas, parentBeaconRoot from the payload attributes. They must match op-node's
+// ExecutionPayloadEnvelope.CheckBlockHash exactly, since op-node recomputes
+// the block hash from the payload it receives.
+func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoot common.Hash, txs [][]byte, gasUsed, gasLimit uint64, baseFee *big.Int, extra []byte) *types.Header {
 	withdrawalsHash := types.EmptyWithdrawalsHash
 	blobGasUsed := uint64(0)
 	excessBlobGas := uint64(0)
@@ -70,7 +109,7 @@ func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoo
 		GasLimit:         gasLimit,
 		GasUsed:          gasUsed,
 		Time:             attrs.Timestamp,
-		Extra:            []byte{},
+		Extra:            extra,
 		MixDigest:        attrs.Random,
 		Nonce:            types.BlockNonce{},
 		BaseFee:          baseFee,
@@ -107,7 +146,7 @@ func executableData(h *types.Header, txs [][]byte) *engine.ExecutableData {
 // so its hash can be checked against payload.BlockHash. It mirrors
 // buildHeader's field choices; a payload that deviates (uncles, withdrawals,
 // blob gas) simply fails the block-hash check.
-func headerFromPayload(data *engine.ExecutableData, beaconRoot *common.Hash) (*types.Header, error) {
+func (c Config) headerFromPayload(data *engine.ExecutableData, beaconRoot *common.Hash) (*types.Header, error) {
 	if len(data.LogsBloom) != types.BloomByteLength {
 		return nil, fmt.Errorf("logsBloom has %d bytes, want %d", len(data.LogsBloom), types.BloomByteLength)
 	}
@@ -116,6 +155,9 @@ func headerFromPayload(data *engine.ExecutableData, beaconRoot *common.Hash) (*t
 	}
 	if data.BaseFeePerGas == nil {
 		return nil, fmt.Errorf("missing baseFeePerGas")
+	}
+	if err := eip1559.ValidateOptimismExtraData(c, data.Timestamp, data.ExtraData); err != nil {
+		return nil, fmt.Errorf("invalid extraData: %w", err)
 	}
 	withdrawalsHash := types.EmptyWithdrawalsHash
 	if beaconRoot == nil {

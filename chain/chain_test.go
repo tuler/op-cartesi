@@ -3,6 +3,7 @@ package chain
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"math/big"
 	"strings"
 	"testing"
@@ -24,9 +25,14 @@ func testConfig() Config {
 
 func newTestChain(t *testing.T, seed string) (*Chain, *mempool.Pool, *machine.Mock) {
 	t.Helper()
+	return newTestChainWithConfig(t, seed, testConfig())
+}
+
+func newTestChainWithConfig(t *testing.T, seed string, cfg Config) (*Chain, *mempool.Pool, *machine.Mock) {
+	t.Helper()
 	m := machine.NewMock([]byte(seed))
 	pool := mempool.New(64)
-	c, err := New(context.Background(), testConfig(), m, pool)
+	c, err := New(context.Background(), cfg, m, pool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +192,7 @@ func TestImportRejectsWrongStateRoot(t *testing.T) {
 
 	tampered := *env.ExecutionPayload
 	tampered.StateRoot = common.HexToHash("0xbad")
-	header, err := headerFromPayload(&tampered, env.ParentBeaconBlockRoot)
+	header, err := sequencer.Config().headerFromPayload(&tampered, env.ParentBeaconBlockRoot)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,6 +279,64 @@ func TestRejectedPoolTxExcluded(t *testing.T) {
 	}
 	if pool.Len() != 0 {
 		t.Fatal("rejected tx not dropped from pool")
+	}
+}
+
+// Holocene moves the EIP-1559 parameters into each header's extraData. The
+// bytes must match what an op-geth engine would produce, since op-node
+// recomputes the block hash over them.
+func TestHoloceneExtraData(t *testing.T) {
+	holocene := uint64(0)
+	cfg := testConfig()
+	cfg.HoloceneTime = &holocene
+	c, _, _ := newTestChainWithConfig(t, "seed", cfg)
+
+	genesisExtra := c.HeadBlock().Header.Extra
+	if len(genesisExtra) != 9 || genesisExtra[0] != 0x00 {
+		t.Fatalf("genesis extraData = %x, want 9-byte version-0 encoding", genesisExtra)
+	}
+
+	// Zeroed parameters from op-node mean "use the chain defaults".
+	attrs := attrsOn(c.HeadBlock(), [][]byte{depositTx(t, "l1-info")}, true)
+	attrs.EIP1559Params = make([]byte, 8)
+	env := buildBlock(c, t, attrs)
+	extra := env.ExecutionPayload.ExtraData
+	if len(extra) != 9 {
+		t.Fatalf("extraData = %x, want 9 bytes", extra)
+	}
+	denominator := binary.BigEndian.Uint32(extra[1:5])
+	elasticity := binary.BigEndian.Uint32(extra[5:9])
+	if uint64(denominator) != DefaultEIP1559Denominator || uint64(elasticity) != DefaultEIP1559Elasticity {
+		t.Fatalf("extraData encodes %d/%d, want chain defaults %d/%d",
+			denominator, elasticity, DefaultEIP1559Denominator, DefaultEIP1559Elasticity)
+	}
+
+	// Explicit parameters are echoed through verbatim.
+	attrs2 := attrsOn(c.HeadBlock(), [][]byte{depositTx(t, "l1-info-2")}, true)
+	attrs2.EIP1559Params = []byte{0, 0, 0, 100, 0, 0, 0, 4}
+	env2 := buildBlock(c, t, attrs2)
+	if got := env2.ExecutionPayload.ExtraData; !bytes.Equal(got, []byte{0x00, 0, 0, 0, 100, 0, 0, 0, 4}) {
+		t.Fatalf("extraData = %x, want explicit params echoed", got)
+	}
+}
+
+// Before Holocene, extraData must be empty; a payload carrying any is invalid.
+func TestPreHoloceneRejectsExtraData(t *testing.T) {
+	sequencer, _, _ := newTestChain(t, "seed")
+	env := buildBlock(sequencer, t, attrsOn(sequencer.HeadBlock(), [][]byte{depositTx(t, "l1-info")}, true))
+	if len(env.ExecutionPayload.ExtraData) != 0 {
+		t.Fatalf("pre-Holocene extraData = %x, want empty", env.ExecutionPayload.ExtraData)
+	}
+
+	tampered := *env.ExecutionPayload
+	tampered.ExtraData = []byte{0x00, 0, 0, 0, 250, 0, 0, 0, 6}
+	verifier, _, _ := newTestChain(t, "seed")
+	st, err := verifier.ImportPayload(context.Background(), &tampered, env.ParentBeaconBlockRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Status != engine.INVALID {
+		t.Fatalf("expected INVALID for pre-Holocene extraData, got %s", st.Status)
 	}
 }
 

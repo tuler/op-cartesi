@@ -5,6 +5,7 @@ package engineapi
 
 import (
 	"context"
+	"errors"
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
@@ -32,6 +33,15 @@ func (e *EngineAPI) GetPayloadV3(_ context.Context, id engine.PayloadID) (*engin
 	return envelope, nil
 }
 
-func (e *EngineAPI) NewPayloadV3(ctx context.Context, data engine.ExecutableData, _ []common.Hash, beaconRoot common.Hash) (engine.PayloadStatusV1, error) {
-	return e.chain.ImportPayload(ctx, &data, &beaconRoot)
+// NewPayloadV3 mirrors geth's signature, including the pointer beacon root:
+// V3 requires it, so a payload without one is rejected rather than silently
+// treated as the zero hash (which would yield a different block hash).
+func (e *EngineAPI) NewPayloadV3(ctx context.Context, data engine.ExecutableData, versionedHashes []common.Hash, beaconRoot *common.Hash) (engine.PayloadStatusV1, error) {
+	if beaconRoot == nil {
+		return engine.PayloadStatusV1{}, engine.InvalidParams.With(errors.New("nil parentBeaconBlockRoot post-cancun"))
+	}
+	if len(versionedHashes) != 0 {
+		return engine.PayloadStatusV1{}, engine.InvalidParams.With(errors.New("no blob transactions on the L2 chain"))
+	}
+	return e.chain.ImportPayload(ctx, &data, beaconRoot)
 }

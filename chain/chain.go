@@ -55,10 +55,14 @@ type Chain struct {
 // takes ownership of the machine.
 func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool) (*Chain, error) {
 	cfg = cfg.withDefaults()
+	if err := cfg.Validate(); err != nil {
+		return nil, err
+	}
 	root, err := m.RootHash(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading genesis root hash: %w", err)
 	}
+	genesisExtra := cfg.genesisExtraData()
 	withdrawalsHash := types.EmptyWithdrawalsHash
 	blobGasUsed := uint64(0)
 	excessBlobGas := uint64(0)
@@ -75,7 +79,7 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 		GasLimit:         cfg.GasLimit,
 		GasUsed:          0,
 		Time:             cfg.GenesisTimestamp,
-		Extra:            []byte{},
+		Extra:            genesisExtra,
 		MixDigest:        common.Hash{},
 		Nonce:            types.BlockNonce{},
 		BaseFee:          cfg.BaseFee,
@@ -287,7 +291,12 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 		return engine.PayloadID{}, fmt.Errorf("reading root hash: %w", err)
 	}
 
-	header := buildHeader(parent.Header, attrs, root, included, min(gasUsed, gasLimit), gasLimit, c.cfg.BaseFee)
+	extra, err := c.cfg.extraData(attrs.Timestamp, attrs.EIP1559Params)
+	if err != nil {
+		final.Close(ctx)
+		return engine.PayloadID{}, err
+	}
+	header := buildHeader(parent.Header, attrs, root, included, min(gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra)
 	beaconRoot := header.ParentBeaconRoot
 	c.pending[id] = &pendingPayload{
 		data:       executableData(header, included),
@@ -408,7 +417,7 @@ func (c *Chain) Payload(id engine.PayloadID) (*engine.ExecutionPayloadEnvelope, 
 // hash, then either adopt the locally built block or re-execute the payload's
 // transactions and check the resulting state root.
 func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, beaconRoot *common.Hash) (engine.PayloadStatusV1, error) {
-	header, err := headerFromPayload(data, beaconRoot)
+	header, err := c.cfg.headerFromPayload(data, beaconRoot)
 	if err != nil {
 		return invalidStatus(nil, err.Error()), nil
 	}
