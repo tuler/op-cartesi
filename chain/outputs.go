@@ -65,10 +65,34 @@ func collectOutputs(index int, tx []byte, res *machine.AdvanceResult) TxOutputs 
 	return out
 }
 
+// outputLeaves flattens a block's provable outputs into tree leaves, in the
+// order the machine emitted them. Reports are excluded by construction: they
+// never reach TxOutputs.Outputs, so they cannot influence the commitment.
+func outputLeaves(txs []TxOutputs) []common.Hash {
+	var leaves []common.Hash
+	for _, tx := range txs {
+		for _, output := range tx.Outputs {
+			leaves = append(leaves, OutputLeaf(output))
+		}
+	}
+	return leaves
+}
+
 // BlockOutputs returns the per-transaction machine emissions recorded for a
 // block, or nil if the block is unknown or its outputs were pruned.
 func (c *Chain) BlockOutputs(hash common.Hash) []TxOutputs {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.outputs[hash]
+}
+
+// OutputTreeAt returns the cumulative outputs accumulator as of a block. The
+// second result is false if the block is unknown. Its root is what the block
+// commits to in the header's withdrawals root under Isthmus, and what an
+// output proof for any output produced up to this block verifies against.
+func (c *Chain) OutputTreeAt(hash common.Hash) (OutputTree, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	tree, ok := c.trees[hash]
+	return tree, ok
 }

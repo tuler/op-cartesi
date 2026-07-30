@@ -38,10 +38,28 @@ type harness struct {
 	pool       *mempool.Pool
 	engine     *engineClient
 	holocene   bool
+	isthmus    bool
 	genesisRef eth.L2BlockRef
 }
 
 func newHarness(t *testing.T, holocene bool) *harness {
+	t.Helper()
+	return newHarnessWithForks(t, holocene, false, nil)
+}
+
+// newIsthmusHarness builds a chain with Isthmus active, where the machine emits
+// one provable output per input so the outputs commitment is exercised.
+func newIsthmusHarness(t *testing.T) *harness {
+	t.Helper()
+	return newHarnessWithForks(t, true, true, func(input []byte) []machine.Output {
+		return []machine.Output{
+			{Reason: machine.CmioYieldAutomaticReasonTxOutput, Data: append([]byte("voucher:"), input[:8]...)},
+			{Reason: machine.CmioYieldAutomaticReasonTxReport, Data: []byte("diagnostic")},
+		}
+	})
+}
+
+func newHarnessWithForks(t *testing.T, holocene, isthmus bool, outputFn func([]byte) []machine.Output) *harness {
 	t.Helper()
 	ctx := context.Background()
 
@@ -54,8 +72,13 @@ func newHarness(t *testing.T, holocene bool) *harness {
 		at := uint64(0)
 		cfg.HoloceneTime = &at
 	}
+	if isthmus {
+		at := uint64(0)
+		cfg.IsthmusTime = &at
+	}
 
 	m := machine.NewMock([]byte("op-cartesi-integration"))
+	m.OutputFn = outputFn
 	pool := mempool.New(256)
 	c, err := chain.New(ctx, cfg, m, pool)
 	if err != nil {
@@ -83,8 +106,9 @@ func newHarness(t *testing.T, holocene bool) *harness {
 		t:        t,
 		chain:    c,
 		pool:     pool,
-		engine:   newEngineClient(rpcClient),
+		engine:   newEngineClient(rpcClient, isthmus),
 		holocene: holocene,
+		isthmus:  isthmus,
 		genesisRef: eth.L2BlockRef{
 			Hash:   genesis.Hash(),
 			Number: 0,
@@ -114,6 +138,10 @@ func (h *harness) rollupParams() opcrollup.Params {
 	if h.holocene {
 		at := uint64(0)
 		p.HoloceneTime = &at
+	}
+	if h.isthmus {
+		at := uint64(0)
+		p.IsthmusTime = &at
 	}
 	return p
 }

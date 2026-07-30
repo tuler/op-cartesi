@@ -59,6 +59,7 @@ type Config struct {
 	FjordTime    *uint64 `json:"fjord_time,omitempty"`
 	GraniteTime  *uint64 `json:"granite_time,omitempty"`
 	HoloceneTime *uint64 `json:"holocene_time,omitempty"`
+	IsthmusTime  *uint64 `json:"isthmus_time,omitempty"`
 
 	BatchInboxAddress      common.Address `json:"batch_inbox_address"`
 	DepositContractAddress common.Address `json:"deposit_contract_address"`
@@ -88,6 +89,10 @@ type Params struct {
 	// HoloceneTime activates Holocene; nil leaves it inactive. All earlier
 	// forks are activated at genesis, which is what a new chain wants.
 	HoloceneTime *uint64
+	// IsthmusTime activates Isthmus; nil leaves it inactive. Isthmus is what
+	// makes op-node read the withdrawal commitment from the header instead of
+	// proving it out of the state trie, so op-proposer only works with it on.
+	IsthmusTime *uint64
 	// EIP1559Denominator and EIP1559Elasticity seed the SystemConfig's
 	// Holocene parameters. Ignored when Holocene is inactive.
 	EIP1559Denominator uint32
@@ -103,9 +108,9 @@ type L2Genesis struct {
 
 // Build assembles the rollup config. Every fork through Granite activates at
 // genesis: a new chain has no pre-fork history to preserve, and op-node picks
-// the Engine API version from these timestamps. Isthmus and later are
-// deliberately absent — they require the V4 engine methods, which this shim
-// does not implement yet.
+// the Engine API version from these timestamps. Jovian and later are
+// deliberately absent — Jovian adds a minimum-base-fee field the shim does not
+// implement.
 func Build(l2 L2Genesis, p Params) (*Config, error) {
 	if p.L1ChainID == 0 || p.L2ChainID == 0 {
 		return nil, fmt.Errorf("both l1 and l2 chain ids must be set")
@@ -124,6 +129,14 @@ func Build(l2 L2Genesis, p Params) (*Config, error) {
 	}
 	if p.HoloceneTime != nil && *p.HoloceneTime > l2.Timestamp {
 		return nil, fmt.Errorf("holocene activation %d is after L2 genesis %d; mid-chain activation is not supported by the generator", *p.HoloceneTime, l2.Timestamp)
+	}
+	if p.IsthmusTime != nil {
+		if p.HoloceneTime == nil {
+			return nil, fmt.Errorf("isthmus requires holocene to be activated as well")
+		}
+		if *p.IsthmusTime > l2.Timestamp {
+			return nil, fmt.Errorf("isthmus activation %d is after L2 genesis %d; mid-chain activation is not supported by the generator", *p.IsthmusTime, l2.Timestamp)
+		}
 	}
 
 	atGenesis := new(uint64)
@@ -154,6 +167,7 @@ func Build(l2 L2Genesis, p Params) (*Config, error) {
 		FjordTime:              atGenesis,
 		GraniteTime:            atGenesis,
 		HoloceneTime:           p.HoloceneTime,
+		IsthmusTime:            p.IsthmusTime,
 		BatchInboxAddress:      p.BatchInboxAddress,
 		DepositContractAddress: p.DepositContractAddress,
 		L1SystemConfigAddress:  p.L1SystemConfigAddress,

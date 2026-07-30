@@ -33,6 +33,7 @@ type pendingPayload struct {
 	beaconRoot *common.Hash
 	machine    machine.Machine
 	outputs    []TxOutputs
+	tree       OutputTree
 }
 
 type Chain struct {
@@ -48,6 +49,9 @@ type Chain struct {
 	// answering for old blocks. Like blocks, they are in-memory only and will
 	// need persistence and a retention policy before this is long-lived.
 	outputs map[common.Hash][]TxOutputs
+	// trees carries the cumulative outputs accumulator per block, so a child
+	// block can extend its parent's tree across forks and reorgs.
+	trees   map[common.Hash]OutputTree
 	pending map[engine.PayloadID]*pendingPayload
 
 	genesisHash common.Hash
@@ -70,9 +74,16 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 	}
 	genesisExtra := cfg.genesisExtraData()
 	withdrawalsHash := types.EmptyWithdrawalsHash
+	var requestsHash *common.Hash
+	if cfg.IsIsthmus(cfg.GenesisTimestamp) {
+		// Genesis has produced no outputs, so it commits to the empty tree.
+		withdrawalsHash = NewOutputTree().Root()
+		requestsHash = &types.EmptyRequestsHash
+	}
 	blobGasUsed := uint64(0)
 	excessBlobGas := uint64(0)
 	header := &types.Header{
+		RequestsHash:     requestsHash,
 		ParentHash:       common.Hash{},
 		UncleHash:        types.EmptyUncleHash,
 		Coinbase:         common.Address{},
@@ -102,6 +113,7 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 		canonical:   map[uint64]common.Hash{0: genesis.Hash()},
 		machines:    map[common.Hash]machine.Machine{genesis.Hash(): m},
 		outputs:     map[common.Hash][]TxOutputs{},
+		trees:       map[common.Hash]OutputTree{genesis.Hash(): NewOutputTree()},
 		pending:     map[engine.PayloadID]*pendingPayload{},
 		genesisHash: genesis.Hash(),
 		head:        genesis.Hash(),
@@ -303,13 +315,21 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 		exec.machine.Close(ctx)
 		return engine.PayloadID{}, err
 	}
-	header := buildHeader(parent.Header, attrs, root, exec.included, min(exec.gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra)
+	tree, ok := c.trees[parent.Hash()]
+	if !ok {
+		exec.machine.Close(ctx)
+		return engine.PayloadID{}, fmt.Errorf("no outputs accumulator for parent %s", parent.Hash())
+	}
+	tree = tree.Append(outputLeaves(exec.outputs)...)
+
+	header := buildHeader(c.cfg, parent.Header, attrs, root, exec.included, min(exec.gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra, tree.Root())
 	beaconRoot := header.ParentBeaconRoot
 	c.pending[id] = &pendingPayload{
 		data:       executableData(header, exec.included),
 		beaconRoot: beaconRoot,
 		machine:    exec.machine,
 		outputs:    exec.outputs,
+		tree:       tree,
 	}
 	return id, nil
 }
@@ -471,7 +491,7 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 	// Adopt the machine of a locally built payload instead of re-executing.
 	for id, p := range c.pending {
 		if p.data.BlockHash == hash {
-			c.commit(newBlock(header, data.Transactions), p.machine, p.outputs)
+			c.commit(newBlock(header, data.Transactions), p.machine, p.outputs, p.tree)
 			delete(c.pending, id)
 			return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 		}
@@ -503,17 +523,33 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 		exec.machine.Close(ctx)
 		return invalidStatus(&parentHash, fmt.Sprintf("gas used mismatch: computed %d, payload claims %d", capped, data.GasUsed)), nil
 	}
-	c.commit(newBlock(header, data.Transactions), exec.machine, exec.outputs)
+	// Re-derive the outputs commitment from the outputs this node just
+	// observed. A payload claiming a withdrawal set the machine did not
+	// produce is rejected here, which is what keeps the output root — and so
+	// the withdrawals proven against it — honest.
+	tree, ok := c.trees[data.ParentHash]
+	if !ok {
+		exec.machine.Close(ctx)
+		slog.Warn("cannot validate payload: parent outputs accumulator missing", "block", hash, "parent", data.ParentHash)
+		return engine.PayloadStatusV1{Status: engine.SYNCING}, nil
+	}
+	tree = tree.Append(outputLeaves(exec.outputs)...)
+	if data.WithdrawalsRoot != nil && tree.Root() != *data.WithdrawalsRoot {
+		exec.machine.Close(ctx)
+		return invalidStatus(&parentHash, fmt.Sprintf("outputs root mismatch: computed %s, payload claims %s", tree.Root(), *data.WithdrawalsRoot)), nil
+	}
+	c.commit(newBlock(header, data.Transactions), exec.machine, exec.outputs, tree)
 	return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 }
 
 // commit stores a validated block, its post-state machine and the machine
 // emissions recorded while executing it. Canonicality is decided separately by
 // ForkchoiceUpdated. Callers hold c.mu.
-func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs) {
+func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs, tree OutputTree) {
 	c.blocks[b.Hash()] = b
 	c.machines[b.Hash()] = m
 	c.outputs[b.Hash()] = outputs
+	c.trees[b.Hash()] = tree
 	if c.pool != nil {
 		var hashes []common.Hash
 		for _, tx := range b.Txs {

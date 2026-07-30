@@ -81,6 +81,7 @@ func genesisCommand(args []string) error {
 		DepositContractAddress: common.HexToAddress(*portal),
 		L1SystemConfigAddress:  common.HexToAddress(*sysConfig),
 		HoloceneTime:           cfg.HoloceneTime,
+		IsthmusTime:            cfg.IsthmusTime,
 		EIP1559Denominator:     uint32(cf.denominator),
 		EIP1559Elasticity:      uint32(cf.elasticity),
 	}

@@ -59,7 +59,7 @@ func generateRollupJSON(t *testing.T, h *harness) map[string]json.RawMessage {
 // `genesis` subcommand writes against op-node's rollup.Config schema, and
 // against the chain the shim actually serves.
 func TestGeneratedRollupConfigMatchesOpNodeSchema(t *testing.T) {
-	h := newHarness(t, true)
+	h := newIsthmusHarness(t)
 	doc := generateRollupJSON(t, h)
 
 	for _, key := range requiredRollupKeys {
@@ -107,10 +107,10 @@ func TestGeneratedRollupConfigMatchesOpNodeSchema(t *testing.T) {
 		}
 	}
 
-	// Every fork through Granite activates at genesis, and Isthmus (which
-	// would require the V4 engine methods the shim does not implement) must be
-	// absent rather than set to a future time.
-	for _, fork := range []string{"regolith_time", "canyon_time", "delta_time", "ecotone_time", "fjord_time", "granite_time", "holocene_time"} {
+	// Every supported fork activates at genesis. op-node picks the Engine API
+	// version from these timestamps, so a missing one silently downgrades the
+	// protocol rather than failing loudly.
+	for _, fork := range []string{"regolith_time", "canyon_time", "delta_time", "ecotone_time", "fjord_time", "granite_time", "holocene_time", "isthmus_time"} {
 		raw, ok := doc[fork]
 		if !ok {
 			t.Errorf("%s is not activated; op-node would select the wrong Engine API version", fork)
@@ -120,8 +120,10 @@ func TestGeneratedRollupConfigMatchesOpNodeSchema(t *testing.T) {
 			t.Errorf("%s = %s, want activation at genesis (0)", fork, raw)
 		}
 	}
-	if _, ok := doc["isthmus_time"]; ok {
-		t.Error("isthmus_time is set, but the shim does not implement the V4 engine methods it requires")
+	// Jovian requires a minimum-base-fee field the shim does not implement, so
+	// it must be absent rather than set to some future time.
+	if _, ok := doc["jovian_time"]; ok {
+		t.Error("jovian_time is set, but the shim does not implement its minimum-base-fee field")
 	}
 }
 

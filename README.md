@@ -25,6 +25,8 @@ See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, cov
 
 The machine's emissions are recorded per transaction (`chain.TxOutputs`), split along the Cartesi provability boundary: **outputs** (vouchers and notices) are provable and destined for the block's outputs commitment; **reports** are diagnostic and must never enter a commitment. Outputs of a rejected input are dropped, since a rejection rolls the machine back; its reports are kept, because they usually explain the failure.
 
+Provable outputs accumulate into a Merkle tree that matches Cartesi's on-chain tree exactly — height 63, leaves `keccak256(output)`, parents `keccak256(left‖right)`, zero-padded — so existing voucher proofs verify against it unchanged. The tree is cumulative over the chain, and under Isthmus its root is published in the header's `withdrawalsRoot`, which is what op-node turns into the L2 output root. Verifiers re-derive it from re-execution, so a payload claiming outputs the machine did not produce is rejected.
+
 Receipts are not yet served. Nothing on the OP Stack's critical path reads L2 receipts — they are for wallets and explorers — so they will be synthesized from these records (notices → logs, reports → failure detail) with `receiptsRoot` left empty until the encoding is stable, rather than freezing a moving format into consensus.
 
 ## Layout
@@ -69,9 +71,11 @@ The chain flags passed to `genesis` and `run` must match: they determine the L2 
 
 ## Fork support
 
-The shim implements the **V3** Engine API methods, covering Ecotone through Holocene; the generated rollup config activates those forks at genesis. Holocene's EIP-1559 parameters are encoded into header `extraData` using op-geth's own encoder, so the bytes match what an op-geth engine would commit to.
+The shim implements the **V3 and V4** Engine API methods, covering Ecotone through Isthmus; the generated rollup config activates those forks at genesis. Holocene's EIP-1559 parameters are encoded into header `extraData` using op-geth's own encoder, so the bytes match what an op-geth engine would commit to.
 
-Isthmus is not implemented yet, but it is **required, not optional**, and is scheduled for the next milestone. From Isthmus onward op-node reads the withdrawal commitment from the header's `withdrawalsRoot` field instead of proving it against the state trie with `eth_getProof` — and the proof path is unimplementable for a Cartesi execution layer, which has no Ethereum MPT to prove against. That header field is where the Cartesi outputs Merkle root belongs. See [DESIGN.md §7](docs/DESIGN.md).
+**Isthmus is required, not optional.** From Isthmus onward op-node reads the withdrawal commitment from the header's `withdrawalsRoot` field instead of proving it against the state trie with `eth_getProof` — and that proof path is unimplementable for a Cartesi execution layer, which has no Ethereum MPT to prove against. Without Isthmus, `op-proposer` cannot compute an output root at all. It can be turned off with `-isthmus=false` for experiments, but such a chain cannot be proposed. See [DESIGN.md §7](docs/DESIGN.md).
+
+Jovian and later are not supported: Jovian adds a minimum-base-fee field the shim does not implement.
 
 ## Roadmap (from the design doc)
 

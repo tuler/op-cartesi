@@ -88,8 +88,17 @@ func (c Config) encodeExtraData(timestamp, denominator, elasticity uint64) []byt
 // gas, parentBeaconRoot from the payload attributes. They must match op-node's
 // ExecutionPayloadEnvelope.CheckBlockHash exactly, since op-node recomputes
 // the block hash from the payload it receives.
-func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoot common.Hash, txs [][]byte, gasUsed, gasLimit uint64, baseFee *big.Int, extra []byte) *types.Header {
+func buildHeader(cfg Config, parent *types.Header, attrs *engine.PayloadAttributes, stateRoot common.Hash, txs [][]byte, gasUsed, gasLimit uint64, baseFee *big.Int, extra []byte, outputsRoot common.Hash) *types.Header {
 	withdrawalsHash := types.EmptyWithdrawalsHash
+	var requestsHash *common.Hash
+	if cfg.IsIsthmus(attrs.Timestamp) {
+		// From Isthmus the withdrawals root is set directly rather than
+		// derived from a withdrawals list, which is where this chain publishes
+		// its outputs Merkle root. op-node pairs that with an empty requests
+		// hash when it reconstructs the header, so this must match.
+		withdrawalsHash = outputsRoot
+		requestsHash = &types.EmptyRequestsHash
+	}
 	blobGasUsed := uint64(0)
 	excessBlobGas := uint64(0)
 	beaconRoot := attrs.BeaconRoot
@@ -97,6 +106,7 @@ func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoo
 		beaconRoot = &common.Hash{}
 	}
 	return &types.Header{
+		RequestsHash:     requestsHash,
 		ParentHash:       parent.Hash(),
 		UncleHash:        types.EmptyUncleHash,
 		Coinbase:         attrs.SuggestedFeeRecipient,
@@ -121,24 +131,31 @@ func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoo
 }
 
 func executableData(h *types.Header, txs [][]byte) *engine.ExecutableData {
+	// Under Isthmus the withdrawals root travels as its own payload field
+	// instead of being derived from the (empty) withdrawals list.
+	var withdrawalsRoot *common.Hash
+	if h.RequestsHash != nil {
+		withdrawalsRoot = h.WithdrawalsHash
+	}
 	return &engine.ExecutableData{
-		ParentHash:    h.ParentHash,
-		FeeRecipient:  h.Coinbase,
-		StateRoot:     h.Root,
-		ReceiptsRoot:  h.ReceiptHash,
-		LogsBloom:     h.Bloom.Bytes(),
-		Random:        h.MixDigest,
-		Number:        h.Number.Uint64(),
-		GasLimit:      h.GasLimit,
-		GasUsed:       h.GasUsed,
-		Timestamp:     h.Time,
-		ExtraData:     h.Extra,
-		BaseFeePerGas: h.BaseFee,
-		BlockHash:     h.Hash(),
-		Transactions:  txs,
-		Withdrawals:   []*types.Withdrawal{},
-		BlobGasUsed:   h.BlobGasUsed,
-		ExcessBlobGas: h.ExcessBlobGas,
+		WithdrawalsRoot: withdrawalsRoot,
+		ParentHash:      h.ParentHash,
+		FeeRecipient:    h.Coinbase,
+		StateRoot:       h.Root,
+		ReceiptsRoot:    h.ReceiptHash,
+		LogsBloom:       h.Bloom.Bytes(),
+		Random:          h.MixDigest,
+		Number:          h.Number.Uint64(),
+		GasLimit:        h.GasLimit,
+		GasUsed:         h.GasUsed,
+		Timestamp:       h.Time,
+		ExtraData:       h.Extra,
+		BaseFeePerGas:   h.BaseFee,
+		BlockHash:       h.Hash(),
+		Transactions:    txs,
+		Withdrawals:     []*types.Withdrawal{},
+		BlobGasUsed:     h.BlobGasUsed,
+		ExcessBlobGas:   h.ExcessBlobGas,
 	}
 }
 
@@ -160,10 +177,21 @@ func (c Config) headerFromPayload(data *engine.ExecutableData, beaconRoot *commo
 		return nil, fmt.Errorf("invalid extraData: %w", err)
 	}
 	withdrawalsHash := types.EmptyWithdrawalsHash
+	var requestsHash *common.Hash
+	if isthmus := c.IsIsthmus(data.Timestamp); isthmus != (data.WithdrawalsRoot != nil) {
+		if isthmus {
+			return nil, fmt.Errorf("missing withdrawalsRoot in post-Isthmus payload")
+		}
+		return nil, fmt.Errorf("withdrawalsRoot set in pre-Isthmus payload")
+	} else if isthmus {
+		withdrawalsHash = *data.WithdrawalsRoot
+		requestsHash = &types.EmptyRequestsHash
+	}
 	if beaconRoot == nil {
 		beaconRoot = &common.Hash{}
 	}
 	return &types.Header{
+		RequestsHash:     requestsHash,
 		ParentHash:       data.ParentHash,
 		UncleHash:        types.EmptyUncleHash,
 		Coinbase:         data.FeeRecipient,

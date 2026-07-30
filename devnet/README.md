@@ -56,14 +56,18 @@ op-node \
 
 ## Fork support
 
-op-cartesi implements the **V3** Engine API methods, which covers every fork from
-Ecotone through Holocene. `generate-config.sh` therefore activates Regolith
-through Holocene at genesis and leaves Isthmus and later unset.
+op-cartesi implements the **V3 and V4** Engine API methods, covering every fork
+from Ecotone through Isthmus. `generate-config.sh` activates them all at genesis.
 
-Isthmus is not supported yet: it switches op-node to `engine_newPayloadV4` /
-`engine_getPayloadV4` and adds the `withdrawalsRoot` header field. Setting
-`isthmus_time` in `rollup.json` will make op-node call methods the shim does not
-serve.
+Isthmus is required for a chain you intend to propose: from Isthmus onward
+op-node reads the withdrawal commitment from the header instead of proving it
+against the state trie, and the proof path cannot work here — there is no
+Ethereum MPT to prove against. `op-proposer` therefore only functions on an
+Isthmus chain. It can be disabled with `HOLOCENE`/`ISTHMUS` overrides for
+experiments, but such a chain cannot be proposed.
+
+Jovian and later are not supported: Jovian adds a minimum-base-fee field the
+shim does not implement.
 
 ## Genesis hash consistency
 
