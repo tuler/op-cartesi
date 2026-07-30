@@ -195,6 +195,64 @@ The consequence is a deliberate ordering: serve receipts *before* committing the
 
 Storage is the loose end: outputs are currently in memory and retained for as long as their block, which — like the block store itself — needs persistence and a retention policy before this runs for any length of time.
 
+## 7b. Persistence: what to keep, and what already exists to keep it with
+
+Everything is in memory today — blocks, outputs, receipts, and the forked
+machine servers that serve as snapshots — so a restart loses the chain. It is
+recoverable in principle, since a second node already rebuilds it from L1
+alone, but only by re-executing every input from genesis. That does not scale,
+so this is the remaining work in step 2.
+
+The state splits into three kinds, and they want three different answers.
+
+**Blocks, the canonical chain, and head pointers — reuse.** An op-cartesi block
+*is* a `types.Header` plus a transaction list, which is exactly what
+go-ethereum's `core/rawdb` stores. Round-tripping a real block through
+`WriteHeader`/`WriteBody`/`WriteCanonicalHash` and back preserves the hash, so
+this is glue rather than design: `ethdb/pebble` underneath, `rawdb` on top,
+both already in the dependency tree. Canonical-hash rewriting also gives the
+unsafe-head reorgs op-node performs, for free.
+
+**Outputs, the tree frontier, and per-transaction emissions — ours, but small.**
+No OP component models these. The frontier is 63 hashes per block; outputs are
+raw bytes keyed by their chain-wide index; receipts need not be stored at all,
+since they are synthesized from the emissions. A handful of tables in the same
+key-value store.
+
+**Machine state — Cartesi's own `cm_store`.** The emulator exposes it as
+`machine.store` over JSON-RPC, and three measured facts shape the design:
+
+| | |
+|---|---|
+| A stored machine | **532 MiB** (371 MiB for the devnet's genesis snapshot) |
+| Time to store | **1.7 s** |
+| Storing from a fork | **works**, in 1.9 s |
+
+That last one is what makes this cheap. The chain already forks a machine
+server per block for snapshots, so a checkpoint is `machine.store` on a fork
+that exists anyway — the live machine never stalls. (The call also needs a
+`sharing` parameter that its schema does not advertise, which is the third time
+the 0.21 schema has been ahead of the build.)
+
+Half a gigabyte per checkpoint rules out storing one per block, so the shape is
+**checkpoint plus replay**: store every N blocks, and on restart load the newest
+checkpoint and re-execute the persisted blocks after it. Replay costs one block
+execution each — about 1.9 s in the devnet, dominated by the guest rather than
+the emulator — so N bounds the worst-case restart, and N = 100 puts it near
+three minutes.
+
+The genuinely new code is the checkpoint-and-replay controller and the outputs
+tables. Note there is no OP analogue for the controller and there could not be:
+op-geth's state *is* its database, so the OP Stack has never needed a notion of
+"snapshot the execution engine and replay forward". Cartesi's `cm_store` does
+the hard half.
+
+Three things to settle before writing it: whether checkpoints are triggered by
+block count or by finalization (finalized never needs reverting, but nothing
+finalizes on a devnet L1); how many to retain and when to prune; and whether
+the `sharing` modes let successive checkpoints share backing files, which would
+change the retention arithmetic entirely and has not been measured.
+
 ## 8. The app-chain dimension: one machine, many applications
 
 A Cartesi-machine L2 is natively an **app-chain**: the chain's state transition function is whatever the guest program does, which puts it closer to a Cosmos appchain (Monomer's world) than to a general smart-contract L2. That's the point — full Linux, any language, no gas-VM straitjacket. But "one machine = one application" is a configuration choice, not an architectural constraint. Because the guest is a Linux system and the block boundary is just a sequence of CMIO inputs, there is a clean spectrum of ways to host multiple applications on one chain and to add new ones over time — with the crucial property that **none of them change the proving story**. Dave, Asterisc, or RISC Zero prove *the machine*, not any particular application; whatever the guest does, including loading new code, is automatically covered by the same root-hash commitments. Extending the chain is a guest-software problem, not a protocol problem.
