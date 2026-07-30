@@ -1,0 +1,4 @@
+/op-cartesi
+/bin/
+*.test
+jwt.hex
