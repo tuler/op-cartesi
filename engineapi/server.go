@@ -23,6 +23,11 @@ func NewHandler(c *chain.Chain, pool *mempool.Pool, withEngine bool, jwtSecret [
 	if err := server.RegisterName("cartesi", NewCartesiAPI(c)); err != nil {
 		return nil, err
 	}
+	// op-batcher calls miner_setMaxDASize on the sequencer's L2 endpoint and
+	// treats its absence as fatal, so the namespace is served on both ports.
+	if err := server.RegisterName("miner", NewMinerAPI(c)); err != nil {
+		return nil, err
+	}
 	if withEngine {
 		if err := server.RegisterName("engine", NewEngineAPI(c)); err != nil {
 			return nil, err

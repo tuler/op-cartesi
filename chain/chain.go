@@ -62,6 +62,9 @@ type Chain struct {
 	// resolved when a receipt is looked up rather than maintained here.
 	txBlocks map[common.Hash][]common.Hash
 	pending  map[engine.PayloadID]*pendingPayload
+	// da carries op-batcher's backpressure. It is read while building blocks
+	// and written from the RPC, so it is atomic rather than guarded by mu.
+	da daLimits
 
 	genesisHash common.Hash
 	head        common.Hash
@@ -396,9 +399,20 @@ func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, ic inputCo
 		}
 	}
 	var dropped []common.Hash
+	// Deposits are already in; only mempool transactions are subject to the
+	// batcher's data-availability budget.
+	var daUsed uint64
+	for _, tx := range out.included {
+		daUsed += uint64(len(tx))
+	}
 	for _, tx := range poolTxs {
 		if out.gasUsed >= gasLimit {
 			break
+		}
+		if !c.admits(daUsed, uint64(len(tx))) {
+			// Left in the pool: the batcher is asking for smaller blocks, not
+			// for this transaction to be thrown away.
+			continue
 		}
 		envelope, err := ic.encodeInput(len(out.included), tx)
 		if err != nil {
@@ -417,6 +431,7 @@ func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, ic inputCo
 			continue
 		}
 		record(tx, res)
+		daUsed += uint64(len(tx))
 		cur.Close(ctx)
 		cur = cand
 	}

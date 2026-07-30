@@ -17,9 +17,11 @@ The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client 
 OP_CARTESI_TEST_SNAPSHOT=./devnet/snapshot go test ./...
 ```
 
-**op-node drives the chain live.** `./devnet/start-devnet.sh` brings up anvil as L1, a Cartesi Machine, op-cartesi, and op-node in sequencer mode; op-node then sequences L2 blocks continuously, each carrying the L1-attributes deposit it injects, wrapped in the `EvmAdvance` envelope and executed by the machine. The block's state root is the machine's Merkle root and its `withdrawalsRoot` is the outputs commitment.
+**The chain round-trips through L1.** `./devnet/start-devnet.sh` brings up anvil as L1, a Cartesi Machine, op-cartesi, and op-node in sequencer mode; op-node sequences L2 blocks continuously, each carrying the L1-attributes deposit it injects, wrapped in the `EvmAdvance` envelope and executed by the machine. The block's state root is the machine's Merkle root and its `withdrawalsRoot` is the outputs commitment.
 
-Still outstanding: the OP contract suite (via `op-deployer`) with `op-batcher` and `op-proposer`, which is what turns the advancing unsafe head into a safe, proposed chain. See [devnet/](devnet/).
+`op-batcher` posts those blocks to L1 as calldata batches, which advances the safe head. A **second node** then runs alongside — its own machine, engine and op-node, sequencing nothing — and rebuilds the chain purely from what the batcher put on L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
+
+Still outstanding: the OP contract suite (via `op-deployer`), which is what lets real user deposits and `op-proposer` join the loop. See [devnet/](devnet/).
 
 See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, covering:
 

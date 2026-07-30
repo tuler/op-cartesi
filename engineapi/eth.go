@@ -134,6 +134,27 @@ func (e *EthAPI) Call(ctx context.Context, args CallArgs, id *rpc.BlockNumberOrH
 	return out, nil
 }
 
+// MinerAPI serves the miner namespace op-batcher requires.
+type MinerAPI struct {
+	chain *chain.Chain
+}
+
+func NewMinerAPI(c *chain.Chain) *MinerAPI {
+	return &MinerAPI{chain: c}
+}
+
+// SetMaxDASize is op-batcher's backpressure: when batches back up on L1 it
+// asks the sequencer to build smaller blocks. The limits are honoured for
+// mempool transactions; deposits are forced by op-node and cannot be shed.
+//
+// op-batcher treats an engine that does not serve this method as a fatal
+// error and shuts down, so serving it is not optional for a chain that wants
+// to be batched.
+func (m *MinerAPI) SetMaxDASize(maxTxSize, maxBlockSize hexutil.Big) bool {
+	m.chain.SetMaxDASize((*big.Int)(&maxTxSize), (*big.Int)(&maxBlockSize))
+	return true
+}
+
 func marshalReceipt(r *chain.Receipt) map[string]any {
 	logs := make([]map[string]any, 0, len(r.Logs))
 	for _, l := range r.Logs {
@@ -251,6 +272,13 @@ func marshalBlock(b *chain.Block, fullTx bool) (map[string]any, error) {
 	}
 	if h.ParentBeaconRoot != nil {
 		m["parentBeaconBlockRoot"] = *h.ParentBeaconRoot
+	}
+	// requestsHash is part of the header from Isthmus onward, so it is part of
+	// the block hash. Omitting it makes every client that reconstructs a block
+	// from this JSON — op-batcher does, to chain blocks together — compute a
+	// different hash and reject the chain.
+	if h.RequestsHash != nil {
+		m["requestsHash"] = *h.RequestsHash
 	}
 	txs := make([]any, 0, len(b.Txs))
 	for i, raw := range b.Txs {
