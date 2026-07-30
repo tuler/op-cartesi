@@ -39,6 +39,18 @@ REPO_DIR="$(dirname "$DEVNET_DIR")"
 : "${DEPOSIT_CONTRACT_ADDRESS:=0x6900000000000000000000000000000000000001}"
 : "${L1_SYSTEM_CONFIG_ADDRESS:=0x6900000000000000000000000000000000000002}"
 
+# --- op-node / op-batcher --------------------------------------------------
+# The OP monorepo ships no binaries: its releases carry source archives only,
+# so docker is the official distribution and the only way to get these on a
+# machine you would rather not compile Go on. `auto` uses whatever is on PATH
+# and falls back to the published images; force either with OP_RUNTIME=docker
+# or OP_RUNTIME=native.
+#
+# The two are versioned independently upstream, so the tags do not match.
+: "${OP_RUNTIME:=auto}"
+: "${OP_NODE_IMAGE:=us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.3}"
+: "${OP_BATCHER_IMAGE:=us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.16.11}"
+
 # --- endpoints -------------------------------------------------------------
 : "${ENGINE_ADDR:=127.0.0.1:8551}"
 : "${HTTP_ADDR:=127.0.0.1:8545}"

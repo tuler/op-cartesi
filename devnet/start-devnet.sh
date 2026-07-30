@@ -34,12 +34,16 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 : "${L1_CHAIN_CONFIG:=$DEVNET_DIR/l1-chain-config.json}"
 
 mkdir -p "$LOG_DIR"
+# op-node needs the secret before op-cartesi would otherwise create it, and in
+# docker it is a bind mount, which docker would silently create as a directory
+# if the file were missing.
+ensure_jwt
 if [ ! -d "$SNAPSHOT_DIR" ]; then
   echo "no machine snapshot at $SNAPSHOT_DIR — run ./devnet/build-snapshot.sh first" >&2
   exit 1
 fi
 
-# Teardown works from the pids this script started, not from process names.
+# Teardown works from what this script started, never from process names.
 # Matching by name was both too narrow and too wide: `pkill -x cartesi-jsonrpc`
 # only matches on Linux, where the process name is truncated to 15 characters,
 # so on macOS the machine servers survived and the next run inherited a server
@@ -48,8 +52,9 @@ fi
 PIDS=()
 track() { PIDS+=("$1"); }
 
-# Killing a machine server does not kill the servers it forked — op-cartesi
-# forks one per block for snapshots — so teardown walks the whole tree.
+# Walking parent to child is the fallback, not the mechanism: op-cartesi forks
+# a machine server per block and shuts down the ones it no longer needs, which
+# reparents their own forks to init and puts them out of reach of any walk.
 kill_tree() {
   local pid=$1 kids
   kids=$(pgrep -P "$pid" 2>/dev/null || true)
@@ -58,13 +63,119 @@ kill_tree() {
   for kid in $kids; do kill_tree "$kid"; done
 }
 
+# Containers are not children of this script, so they need removing by name.
+# The names are prefixed so this only ever touches containers it started.
+CONTAINER_PREFIX="op-cartesi-devnet"
+DOCKER_NETWORK="op-cartesi-devnet"
+
+# Teardown goes by process group. Everything this script starts inherits it,
+# including the emulator's forks, and — unlike a parent — a process group
+# survives its members being reparented to init, which is what happens to every
+# fork whose snapshot op-cartesi has pruned. A short run leaks a handful that
+# way; a long one leaked 67 of 205.
+#
+# The group covers this script's descendants and nothing else, so this is not
+# the blunt instrument that killing by process name was. It only holds when the
+# script leads its own group, which it does when run normally; if it does not,
+# the pid walk is the fallback.
 cleanup() {
-  local pid
-  for pid in "${PIDS[@]:-}"; do
-    [ -n "$pid" ] && kill_tree "$pid"
+  # Containers are not in the process group, so they go first.
+  if [ "${OP_RUNTIME:-native}" = "docker" ]; then
+    local names
+    names=$(docker ps -aq --filter "name=^${CONTAINER_PREFIX}-" 2>/dev/null || true)
+    [ -n "$names" ] && docker rm -f $names > /dev/null 2>&1 || true
+    docker network rm "$DOCKER_NETWORK" > /dev/null 2>&1 || true
+  fi
+
+  local pgid
+  pgid=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+  if [ "$pgid" = "$$" ]; then
+    # This kills the script too, so nothing may follow it — and the trap is
+    # cleared first so the signal does not re-enter here.
+    trap - EXIT
+    kill -TERM -- "-$pgid" 2>/dev/null || true
+    sleep 1
+    kill -KILL -- "-$pgid" 2>/dev/null || true
+    return
+  fi
+
+  local i
+  for (( i=${#PIDS[@]}-1 ; i>=0 ; i-- )); do
+    kill_tree "${PIDS[i]}"
   done
 }
 trap cleanup EXIT
+
+# op-node and op-batcher run either as binaries on PATH or as the images the OP
+# monorepo publishes, since it publishes no binaries at all.
+if [ "$OP_RUNTIME" = "auto" ]; then
+  if command -v op-node > /dev/null 2>&1 && command -v op-batcher > /dev/null 2>&1; then
+    OP_RUNTIME=native
+  elif command -v docker > /dev/null 2>&1; then
+    OP_RUNTIME=docker
+  else
+    echo "neither op-node/op-batcher binaries nor docker were found" >&2
+    exit 1
+  fi
+fi
+
+if [ "$OP_RUNTIME" = "docker" ]; then
+  # A container reaches anvil and op-cartesi over the host gateway rather than
+  # its own loopback, which in turn means those two have to listen on more
+  # than loopback. That is a devnet-only trade: on a shared network it exposes
+  # them, which is why it is not the default when running natively.
+  HOST_ADDR="host.docker.internal"
+  BIND_ADDR="0.0.0.0"
+  ROLLUP_CONFIG_ARG=/config/rollup.json
+  JWT_ARG=/config/jwt.hex
+  L1_CHAIN_CONFIG_ARG=/config/l1-chain-config.json
+  # Exported, because start-shim.sh reads these from the environment and would
+  # otherwise fall back to env.sh's loopback defaults — which the containers
+  # cannot reach.
+  export ENGINE_ADDR="$BIND_ADDR:${ENGINE_ADDR##*:}"
+  export HTTP_ADDR="$BIND_ADDR:${HTTP_ADDR##*:}"
+  VERIFIER_ENGINE_ADDR="$BIND_ADDR:${VERIFIER_ENGINE_ADDR##*:}"
+  VERIFIER_HTTP_ADDR="$BIND_ADDR:${VERIFIER_HTTP_ADDR##*:}"
+  # op-batcher talks to op-node, and both are containers, so they share a
+  # user-defined network and address each other by name. Going back out
+  # through the host would mean publishing op-node's RPC on every interface
+  # rather than just loopback — a port bound to the host's loopback is not
+  # reachable from the bridge gateway, which is exactly how this first failed.
+  docker network create "$DOCKER_NETWORK" > /dev/null 2>&1 || true
+  SEQUENCER_RPC="http://$CONTAINER_PREFIX-sequencer:$OPNODE_RPC_PORT"
+  echo "running op-node and op-batcher from docker images" >&2
+else
+  HOST_ADDR="127.0.0.1"
+  BIND_ADDR="127.0.0.1"
+  ROLLUP_CONFIG_ARG="$ROLLUP_CONFIG_FILE"
+  JWT_ARG="$JWT_SECRET_FILE"
+  L1_CHAIN_CONFIG_ARG="$L1_CHAIN_CONFIG"
+  SEQUENCER_RPC="http://127.0.0.1:$OPNODE_RPC_PORT"
+fi
+
+# run_op starts one of the two, either way, and streams its output to a log.
+# In docker the foreground CLI is what gets tracked; the container itself is
+# torn down by name, since killing the client would leave it running.
+run_op() {
+  local kind=$1 name=$2 rpc_port=$3 log=$4
+  shift 4
+  if [ "$OP_RUNTIME" = "docker" ]; then
+    local image=$OP_NODE_IMAGE
+    [ "$kind" = "op-batcher" ] && image=$OP_BATCHER_IMAGE
+    docker rm -f "$CONTAINER_PREFIX-$name" > /dev/null 2>&1 || true
+    docker run --rm --name "$CONTAINER_PREFIX-$name" \
+      --network "$DOCKER_NETWORK" \
+      --add-host="host.docker.internal:host-gateway" \
+      -p "127.0.0.1:$rpc_port:$rpc_port" \
+      -v "$ROLLUP_CONFIG_FILE:$ROLLUP_CONFIG_ARG:ro" \
+      -v "$JWT_SECRET_FILE:$JWT_ARG:ro" \
+      -v "$L1_CHAIN_CONFIG:$L1_CHAIN_CONFIG_ARG:ro" \
+      "$image" "$kind" "$@" > "$log" 2>&1 &
+  else
+    "$kind" "$@" > "$log" 2>&1 &
+  fi
+  track $!
+}
 
 port_free() {
   ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
@@ -107,7 +218,7 @@ REQUIRED_PORTS=("$L1_PORT" "$MACHINE_PORT" "$GENESIS_MACHINE_PORT" "$OPNODE_RPC_
 require_free_ports "${REQUIRED_PORTS[@]}"
 
 echo "starting anvil (L1, chain $L1_CHAIN_ID) on :$L1_PORT" >&2
-anvil --host 127.0.0.1 --port "$L1_PORT" --chain-id "$L1_CHAIN_ID" --block-time 2 --silent \
+anvil --host "$BIND_ADDR" --port "$L1_PORT" --chain-id "$L1_CHAIN_ID" --block-time 2 --silent \
   > "$LOG_DIR/anvil.log" 2>&1 &
 track $!
 wait_for_port "$L1_PORT"
@@ -154,31 +265,28 @@ grep "chain initialized" "$LOG_DIR/op-cartesi.log" >&2 || {
 }
 
 echo "starting op-node in sequencer mode" >&2
-op-node \
-  --l1="http://127.0.0.1:$L1_PORT" --l1.rpckind=basic --l1.trustrpc \
-  --rollup.l1-chain-config="$L1_CHAIN_CONFIG" \
-  --l2="http://$ENGINE_ADDR" --l2.jwt-secret="$JWT_SECRET_FILE" \
-  --rollup.config="$ROLLUP_CONFIG_FILE" \
+run_op op-node sequencer "$OPNODE_RPC_PORT" "$LOG_DIR/op-node.log" \
+  --l1="http://$HOST_ADDR:$L1_PORT" --l1.rpckind=basic --l1.trustrpc \
+  --rollup.l1-chain-config="$L1_CHAIN_CONFIG_ARG" \
+  --l2="http://$HOST_ADDR:${ENGINE_ADDR##*:}" --l2.jwt-secret="$JWT_ARG" \
+  --rollup.config="$ROLLUP_CONFIG_ARG" \
   --sequencer.enabled --sequencer.l1-confs=0 --verifier.l1-confs=0 \
   --p2p.disable --l1.beacon.ignore \
-  --rpc.addr=127.0.0.1 --rpc.port="$OPNODE_RPC_PORT" > "$LOG_DIR/op-node.log" 2>&1 &
-track $!
+  --rpc.addr="$BIND_ADDR" --rpc.port="$OPNODE_RPC_PORT"
 
 if [ "$WITH_BATCHER" = "1" ]; then
   # Batches go to L1 as calldata: blobs would need a beacon endpoint, and this
   # devnet deliberately runs without one.
   echo "starting op-batcher (calldata mode)" >&2
-  op-batcher \
-    --l1-eth-rpc="http://127.0.0.1:$L1_PORT" \
-    --l2-eth-rpc="http://$HTTP_ADDR" \
-    --rollup-rpc="http://127.0.0.1:$OPNODE_RPC_PORT" \
+  run_op op-batcher batcher "$BATCHER_RPC_PORT" "$LOG_DIR/op-batcher.log" \
+    --l1-eth-rpc="http://$HOST_ADDR:$L1_PORT" \
+    --l2-eth-rpc="http://$HOST_ADDR:${HTTP_ADDR##*:}" \
+    --rollup-rpc="$SEQUENCER_RPC" \
     --private-key="$BATCHER_KEY" \
     --data-availability-type=calldata \
     --sub-safety-margin=4 --poll-interval=2s --num-confirmations=1 \
     --max-channel-duration=2 \
-    --rpc.addr=127.0.0.1 --rpc.port="$BATCHER_RPC_PORT" \
-    > "$LOG_DIR/op-batcher.log" 2>&1 &
-  track $!
+    --rpc.addr="$BIND_ADDR" --rpc.port="$BATCHER_RPC_PORT"
 fi
 
 if [ "$WITH_VERIFIER" = "1" ]; then
@@ -200,26 +308,24 @@ if [ "$WITH_VERIFIER" = "1" ]; then
     tail -10 "$LOG_DIR/op-cartesi-verifier.log" >&2
     exit 1
   }
-  op-node \
-    --l1="http://127.0.0.1:$L1_PORT" --l1.rpckind=basic --l1.trustrpc \
-    --rollup.l1-chain-config="$L1_CHAIN_CONFIG" \
-    --l2="http://$VERIFIER_ENGINE_ADDR" --l2.jwt-secret="$JWT_SECRET_FILE" \
-    --rollup.config="$ROLLUP_CONFIG_FILE" \
+  run_op op-node verifier "$VERIFIER_OPNODE_RPC_PORT" "$LOG_DIR/op-node-verifier.log" \
+    --l1="http://$HOST_ADDR:$L1_PORT" --l1.rpckind=basic --l1.trustrpc \
+    --rollup.l1-chain-config="$L1_CHAIN_CONFIG_ARG" \
+    --l2="http://$HOST_ADDR:${VERIFIER_ENGINE_ADDR##*:}" --l2.jwt-secret="$JWT_ARG" \
+    --rollup.config="$ROLLUP_CONFIG_ARG" \
     --verifier.l1-confs=0 --p2p.disable --l1.beacon.ignore \
-    --rpc.addr=127.0.0.1 --rpc.port="$VERIFIER_OPNODE_RPC_PORT" \
-    > "$LOG_DIR/op-node-verifier.log" 2>&1 &
-  track $!
+    --rpc.addr="$BIND_ADDR" --rpc.port="$VERIFIER_OPNODE_RPC_PORT"
 fi
 
 echo >&2
-echo "stack is up. logs in $LOG_DIR" >&2
+echo "stack is up ($OP_RUNTIME op-node/op-batcher). logs in $LOG_DIR" >&2
 echo "  L1     http://127.0.0.1:$L1_PORT" >&2
-echo "  L2     http://$HTTP_ADDR" >&2
+echo "  L2     http://127.0.0.1:${HTTP_ADDR##*:}" >&2
 echo "  opnode http://127.0.0.1:$OPNODE_RPC_PORT" >&2
 if [ "$WITH_VERIFIER" = "1" ]; then
-  echo "  verifier L2     http://$VERIFIER_HTTP_ADDR" >&2
+  echo "  verifier L2     http://127.0.0.1:${VERIFIER_HTTP_ADDR##*:}" >&2
   echo "  verifier opnode http://127.0.0.1:$VERIFIER_OPNODE_RPC_PORT" >&2
 fi
-echo "watch blocks:  cast block-number --rpc-url http://$HTTP_ADDR" >&2
+echo "watch blocks:  cast block-number --rpc-url http://127.0.0.1:${HTTP_ADDR##*:}" >&2
 echo "ctrl-c to tear the stack down" >&2
 wait

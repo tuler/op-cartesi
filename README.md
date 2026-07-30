@@ -24,6 +24,8 @@ The second variable turns on the deposit tests, which need a guest that means so
 
 `op-batcher` posts those blocks to L1 as calldata batches, which advances the safe head. A **second node** then runs alongside — its own machine, engine and op-node, sequencing nothing — and rebuilds the chain purely from what the batcher put on L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
 
+The stack has been run against the **official released images** — op-node v1.19.3 and op-batcher v1.16.11 — as well as against locally built binaries. The OP monorepo ships no binaries of its own, so `./devnet/start-devnet.sh` falls back to docker when they are not on your `PATH`; nothing needs compiling but op-cartesi itself.
+
 **Deposits reach the guest.** `./devnet/deposit.sh <address> <wei>` emits the canonical `TransactionDeposited` event on L1; op-node derives it into an L2 deposit transaction, and the guest — a small ledger app in [`devnet/bank-app.sh`](devnet/bank-app.sh) — decodes it and credits the recipient. The balance is machine state, so the state root commits to it, and `eth_call` reads it back through the machine's inspect protocol. The verifier, deriving from L1 alone, arrives at the same balance.
 
 Still outstanding: the OP contract suite (via `op-deployer`), which is what `op-proposer` and the withdrawal path need. See [devnet/](devnet/).

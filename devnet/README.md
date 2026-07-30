@@ -9,6 +9,8 @@ Running op-cartesi as a real OP Stack L2 needs four pieces:
 
 Steps 1 and 2 are ordinary OP Stack chain-bringup and are not automated here: `op-deployer` needs a funded L1 deployer key and produces the addresses that go into `rollup.json`. What *is* automated is step 3 and the configuration that ties it to step 4, which is where op-cartesi differs from an op-geth chain.
 
+You do not need to build op-node or op-batcher: `start-devnet.sh` will run the official docker images if the binaries are not on your `PATH`. See [below](#where-op-node-and-op-batcher-come-from).
+
 ## Quick start: the whole stack on anvil
 
 `start-devnet.sh` brings up anvil as L1, a Cartesi Machine, op-cartesi as the
@@ -18,6 +20,41 @@ execution engine, and op-node sequencing on top:
 ./devnet/build-snapshot.sh     # once, needs the guest images (see that script)
 ./devnet/start-devnet.sh
 ```
+
+### Where op-node and op-batcher come from
+
+The OP monorepo publishes **no binaries** — its releases carry source archives
+only — so unless you want to compile Go, docker is the official way to get
+them. `start-devnet.sh` uses whichever is available:
+
+| `OP_RUNTIME` | Behaviour |
+|---|---|
+| `auto` (default) | binaries on `PATH` if both are there, otherwise docker |
+| `native` | `op-node` and `op-batcher` from `PATH` |
+| `docker` | the images below, pulled on first use |
+
+```sh
+OP_RUNTIME=docker ./devnet/start-devnet.sh
+```
+
+The images are pinned in `env.sh` and versioned independently upstream, so the
+tags do not match:
+
+```
+us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.3
+us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.16.11
+```
+
+Two consequences of running them in containers, both handled by the script but
+worth knowing:
+
+- anvil and op-cartesi bind `0.0.0.0` instead of loopback, because a container
+  reaches the host over the host gateway. On a shared network that exposes
+  them, which is why it is not how the native path runs. macOS may also raise a
+  firewall prompt the first time.
+- op-batcher and op-node share a user-defined docker network and address each
+  other by container name. Publishing op-node's RPC to the host's loopback is
+  not enough — loopback is not reachable from the bridge gateway.
 
 `build-snapshot.sh` builds the ledger guest (`bank-app.sh`) by default. Pass
 `GUEST_APP=$PWD/devnet/echo-app.sh` for one that only echoes, or `probe-app.sh`
