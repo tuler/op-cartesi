@@ -70,6 +70,11 @@ type AdvanceResult struct {
 	// the chain's native gas unit.
 	Cycles  uint64
 	Outputs []Output
+	// GuestOutputsRoot is the outputs Merkle root the guest reports when it
+	// finishes an input, where the guest maintains one. The chain computes the
+	// commitment itself rather than trusting this, so that verifiers can
+	// re-derive it; the value is kept for cross-checking the two.
+	GuestOutputsRoot common.Hash
 }
 
 // InspectResult is the machine's answer to a read-only query.

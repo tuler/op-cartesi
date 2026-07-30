@@ -18,19 +18,21 @@ import (
 // The fork schedule is not among them: every fork through Isthmus is active
 // from genesis and none of them is optional. See chain.Config.
 type chainFlags struct {
-	machineRemote string
-	bootCycles    uint64
-	chainID       uint64
-	genesisTime   uint64
-	gasLimit      uint64
-	maxCycles     uint64
-	snapshots     int
-	denominator   uint64
-	elasticity    uint64
+	machineRemote   string
+	machineSnapshot string
+	bootCycles      uint64
+	chainID         uint64
+	genesisTime     uint64
+	gasLimit        uint64
+	maxCycles       uint64
+	snapshots       int
+	denominator     uint64
+	elasticity      uint64
 }
 
 func (f *chainFlags) register(fs *flag.FlagSet) {
 	fs.StringVar(&f.machineRemote, "machine.remote", "", "URL of a cartesi-jsonrpc-machine server; empty runs the in-memory mock (dev only)")
+	fs.StringVar(&f.machineSnapshot, "machine.snapshot", "", "directory of a stored machine to load into the server; empty uses whatever it already has")
 	fs.Uint64Var(&f.bootCycles, "machine.boot-cycles", 4_000_000_000, "cycle budget for booting the machine to its first input yield")
 	fs.Uint64Var(&f.chainID, "chain-id", 901, "L2 chain id")
 	fs.Uint64Var(&f.genesisTime, "genesis.timestamp", 0, "timestamp of the genesis block")
@@ -64,6 +66,16 @@ func (f *chainFlags) openMachine(ctx context.Context) (machine.Machine, error) {
 	remote, err := machine.DialRemote(ctx, f.machineRemote)
 	if err != nil {
 		return nil, err
+	}
+	if f.machineSnapshot != "" {
+		slog.Info("loading stored machine", "dir", f.machineSnapshot)
+		if err := remote.Load(ctx, f.machineSnapshot); err != nil {
+			return nil, fmt.Errorf("loading machine from %s: %w", f.machineSnapshot, err)
+		}
+	} else if loaded, err := remote.Loaded(ctx); err != nil {
+		return nil, err
+	} else if !loaded {
+		return nil, fmt.Errorf("the machine server has no machine loaded; pass -machine.snapshot")
 	}
 	slog.Info("booting machine to first input yield", "remote", f.machineRemote)
 	if err := remote.EnsureReady(ctx, f.bootCycles); err != nil {

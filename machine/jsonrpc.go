@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -16,31 +15,74 @@ import (
 )
 
 // Remote drives a cartesi-jsonrpc-machine server (the emulator's remote
-// machine protocol). Snapshots map onto the server's "fork" method, which
-// spawns a copy-on-write child server, so Fork/Close are process lifecycle
-// operations on the emulator side.
+// machine protocol), pinned to the protocol of machine-emulator 0.21
+// (JSON-RPC "get_version" reports 0.6.x).
 //
-// Wire-format note: hash and byte-buffer encodings are decoded tolerantly
-// (0x-hex, bare hex, or base64) because they have varied across emulator
-// releases; pin and integration-test against the emulator version you deploy.
+// The wire format was established by probing a running server, not by reading
+// its rpc.discover schema: in 0.21.0-test7 the schema advertises methods the
+// build does not implement (machine.read_register, is_empty), so it cannot be
+// trusted on its own. Byte buffers and hashes are base64, registers are read
+// through machine.read_reg, cmio requests are fetched with an explicit length,
+// and responses carry the root hash to revert to on rejection.
+//
+// Snapshots map onto the server's "fork" method, which spawns a copy-on-write
+// child server, so Fork and Close are process lifecycle operations on the
+// emulator side.
 type Remote struct {
 	endpoint string
 	client   *http.Client
 	reqID    atomic.Uint64
+	// owned is false for the server the operator started and handed to us.
+	// Closing that one would kill their process, so only forks — which this
+	// package spawned — are shut down by Close.
+	owned bool
 }
 
 var _ Machine = (*Remote)(nil)
 
-// DialRemote connects to a cartesi-jsonrpc-machine server that already has a
-// machine loaded. endpoint is the server's HTTP base URL, e.g.
-// "http://127.0.0.1:6000".
+// maxCmioReadLength caps a single cmio data fetch. Requests larger than this
+// are re-fetched at their exact length, so the cap only bounds the common case
+// rather than the maximum output size.
+const maxCmioReadLength = 1 << 21 // 2 MiB
+
+// DialRemote connects to a cartesi-jsonrpc-machine server. The server may or
+// may not have a machine loaded yet; use Load or check Loaded.
 func DialRemote(ctx context.Context, endpoint string) (*Remote, error) {
 	r := &Remote{endpoint: strings.TrimSuffix(endpoint, "/"), client: &http.Client{}}
-	var version any
+	var version struct {
+		Major uint32 `json:"major"`
+		Minor uint32 `json:"minor"`
+		Patch uint32 `json:"patch"`
+	}
 	if err := r.call(ctx, "get_version", nil, &version); err != nil {
 		return nil, fmt.Errorf("machine server unreachable at %s: %w", endpoint, err)
 	}
 	return r, nil
+}
+
+// Load makes the server load a stored machine from a directory, which is how a
+// snapshot produced by `cartesi-machine --store=<dir>` becomes the chain's
+// genesis state.
+func (r *Remote) Load(ctx context.Context, directory string) error {
+	return r.call(ctx, "machine.load", map[string]any{"directory": directory}, nil)
+}
+
+// Loaded reports whether the server currently holds a machine.
+//
+// The natural method for this is is_empty, which the server advertises in its
+// rpc.discover schema but does not implement in 0.21.0-test7 (it answers
+// method-not-found). So the check probes with a harmless machine read
+// instead: a server with no machine answers a distinct "no machine" error.
+func (r *Remote) Loaded(ctx context.Context) (bool, error) {
+	var hash binary
+	err := r.call(ctx, "machine.get_root_hash", nil, &hash)
+	if err == nil {
+		return true, nil
+	}
+	if strings.Contains(err.Error(), "no machine") {
+		return false, nil
+	}
+	return false, err
 }
 
 type rpcRequest struct {
@@ -92,7 +134,8 @@ func (r *Remote) call(ctx context.Context, method string, params any, result any
 	return nil
 }
 
-// binary is a byte slice decoded tolerantly from hex or base64 JSON strings.
+// binary is a byte slice carried as a base64 string, which is how the emulator
+// encodes both Base64String and Base64Hash.
 type binary []byte
 
 func (b *binary) UnmarshalJSON(data []byte) error {
@@ -100,55 +143,32 @@ func (b *binary) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
-	decoded, err := decodeBinaryString(s)
+	decoded, err := base64.StdEncoding.DecodeString(s)
 	if err != nil {
-		return err
+		return fmt.Errorf("expected base64, got %q: %w", s, err)
 	}
 	*b = decoded
 	return nil
 }
 
-func decodeBinaryString(s string) ([]byte, error) {
-	if h, ok := strings.CutPrefix(s, "0x"); ok {
-		return hex.DecodeString(h)
-	}
-	if b, err := hex.DecodeString(s); err == nil && len(s) > 0 && len(s)%2 == 0 {
-		return b, nil
-	}
-	if b, err := base64.StdEncoding.DecodeString(s); err == nil {
-		return b, nil
-	}
-	return nil, fmt.Errorf("undecodable binary string %q", s)
+func (b binary) MarshalJSON() ([]byte, error) {
+	return json.Marshal(base64.StdEncoding.EncodeToString(b))
 }
 
-// breakReason normalizes the machine.run result across emulator releases
-// (plain string vs {"break_reason": ...} object).
+// breakReason is the InterpreterBreakReason enum machine.run returns.
 type breakReason string
 
 const (
-	breakHalted        breakReason = "halted"
-	breakYieldedManual breakReason = "yielded_manually"
-	breakYieldedAuto   breakReason = "yielded_automatically"
-	breakYieldedSoft   breakReason = "yielded_softly"
-	breakReachedTarget breakReason = "reached_target_mcycle"
-	breakFailed        breakReason = "failed"
+	breakFailed         breakReason = "failed"
+	breakHalted         breakReason = "halted"
+	breakYieldedManual  breakReason = "yielded_manually"
+	breakYieldedAuto    breakReason = "yielded_automatically"
+	breakYieldedSoft    breakReason = "yielded_softly"
+	breakReachedTarget  breakReason = "reached_target_mcycle"
+	breakConsoleOutput  breakReason = "console_output"
+	breakConsoleInput   breakReason = "console_input"
+	breakMcycleOverflow breakReason = "mcycle_overflow"
 )
-
-func (br *breakReason) UnmarshalJSON(data []byte) error {
-	var s string
-	if err := json.Unmarshal(data, &s); err == nil {
-		*br = breakReason(strings.ToLower(s))
-		return nil
-	}
-	var obj struct {
-		BreakReason string `json:"break_reason"`
-	}
-	if err := json.Unmarshal(data, &obj); err != nil {
-		return err
-	}
-	*br = breakReason(strings.ToLower(obj.BreakReason))
-	return nil
-}
 
 func (r *Remote) run(ctx context.Context, mcycleEnd uint64) (breakReason, error) {
 	var br breakReason
@@ -156,6 +176,12 @@ func (r *Remote) run(ctx context.Context, mcycleEnd uint64) (breakReason, error)
 	return br, err
 }
 
+// readMcycle reads the cycle counter.
+//
+// The method is machine.read_reg. The server's rpc.discover schema advertises
+// machine.read_register instead, but 0.21.0-test7 does not implement that name
+// — the schema is ahead of the build in a few places, so every method here was
+// probed against a running server rather than taken from the schema.
 func (r *Remote) readMcycle(ctx context.Context) (uint64, error) {
 	var v uint64
 	err := r.call(ctx, "machine.read_reg", map[string]any{"reg": "mcycle"}, &v)
@@ -163,27 +189,43 @@ func (r *Remote) readMcycle(ctx context.Context) (uint64, error) {
 }
 
 type cmioRequest struct {
-	Cmd    uint8  `json:"cmd"`
-	Reason uint16 `json:"reason"`
-	Data   binary `json:"data"`
+	Cmd             uint8  `json:"cmd"`
+	Reason          uint16 `json:"reason"`
+	AvailableLength uint64 `json:"available_length"`
+	Data            binary `json:"data"`
 }
 
+// receiveCmioRequest fetches the pending request. The server truncates the
+// data to the requested length and reports the true size, so an emission
+// larger than the default cap is fetched again at its exact length rather than
+// being silently cut short.
 func (r *Remote) receiveCmioRequest(ctx context.Context) (*cmioRequest, error) {
 	var req cmioRequest
-	err := r.call(ctx, "machine.receive_cmio_request", nil, &req)
-	return &req, err
+	if err := r.call(ctx, "machine.receive_cmio_request", map[string]any{"length": maxCmioReadLength}, &req); err != nil {
+		return nil, err
+	}
+	if req.AvailableLength > uint64(len(req.Data)) {
+		if err := r.call(ctx, "machine.receive_cmio_request", map[string]any{"length": req.AvailableLength}, &req); err != nil {
+			return nil, err
+		}
+	}
+	return &req, nil
 }
 
-func (r *Remote) sendCmioResponse(ctx context.Context, reason uint16, data []byte) error {
+// sendCmioResponse hands the guest its input. revertRootHash is the state the
+// emulator returns to if the guest ends up rejecting this input, which is what
+// makes a rejection leave no trace.
+func (r *Remote) sendCmioResponse(ctx context.Context, reason uint16, data []byte, revertRootHash common.Hash) error {
 	return r.call(ctx, "machine.send_cmio_response", map[string]any{
-		"reason": reason,
-		"data":   base64.StdEncoding.EncodeToString(data),
+		"revert_root_hash": base64.StdEncoding.EncodeToString(revertRootHash.Bytes()),
+		"reason":           reason,
+		"data":             base64.StdEncoding.EncodeToString(data),
 	}, nil)
 }
 
-// EnsureReady runs the machine (e.g. through Linux boot) until it parks at a
-// manual yield waiting for its first input. It must be called once before the
-// machine is handed to the chain.
+// EnsureReady runs the machine (through Linux boot, for a stored template
+// captured before boot) until it parks at a manual yield waiting for its first
+// input. It must be called once before the machine is handed to the chain.
 func (r *Remote) EnsureReady(ctx context.Context, maxCycles uint64) error {
 	start, err := r.readMcycle(ctx)
 	if err != nil {
@@ -197,7 +239,7 @@ func (r *Remote) EnsureReady(ctx context.Context, maxCycles uint64) error {
 		switch br {
 		case breakYieldedManual:
 			return nil
-		case breakYieldedAuto, breakYieldedSoft:
+		case breakYieldedAuto, breakYieldedSoft, breakConsoleOutput, breakConsoleInput:
 			continue
 		case breakHalted:
 			return ErrHalted
@@ -209,52 +251,77 @@ func (r *Remote) EnsureReady(ctx context.Context, maxCycles uint64) error {
 	}
 }
 
-func (r *Remote) AdvanceInput(ctx context.Context, input []byte, maxCycles uint64) (*AdvanceResult, error) {
-	start, err := r.readMcycle(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := r.sendCmioResponse(ctx, CmioRxRequestAdvanceState, input); err != nil {
-		return nil, err
-	}
-	res := &AdvanceResult{}
+// yieldLoop runs the machine after an input has been delivered, collecting the
+// automatic yields until the guest parks at a manual yield. It is shared by
+// AdvanceInput and Inspect, which differ only in how they classify emissions.
+func (r *Remote) yieldLoop(ctx context.Context, start, maxCycles uint64, emit func(*cmioRequest), manual func(*cmioRequest)) (accepted bool, cycles uint64, err error) {
 	for {
 		br, err := r.run(ctx, start+maxCycles)
 		if err != nil {
-			return nil, err
+			return false, 0, err
 		}
 		switch br {
 		case breakYieldedAuto:
 			req, err := r.receiveCmioRequest(ctx)
 			if err != nil {
-				return nil, err
+				return false, 0, err
 			}
-			switch req.Reason {
-			case CmioYieldAutomaticReasonTxOutput, CmioYieldAutomaticReasonTxReport:
-				res.Outputs = append(res.Outputs, Output{Reason: req.Reason, Data: req.Data})
-			}
-		case breakYieldedSoft:
+			emit(req)
+		case breakYieldedSoft, breakConsoleOutput, breakConsoleInput:
 			continue
 		case breakYieldedManual:
 			req, err := r.receiveCmioRequest(ctx)
 			if err != nil {
-				return nil, err
+				return false, 0, err
 			}
-			res.Accepted = req.Reason == CmioYieldManualReasonRxAccepted
 			end, err := r.readMcycle(ctx)
 			if err != nil {
-				return nil, err
+				return false, 0, err
 			}
-			res.Cycles = end - start
-			return res, nil
+			manual(req)
+			return req.Reason == CmioYieldManualReasonRxAccepted, end - start, nil
 		case breakHalted:
-			return nil, ErrHalted
-		case breakReachedTarget:
-			return nil, ErrCycleLimit
+			return false, 0, ErrHalted
+		case breakReachedTarget, breakMcycleOverflow:
+			return false, 0, ErrCycleLimit
 		default:
-			return nil, fmt.Errorf("unexpected break reason %q", br)
+			return false, 0, fmt.Errorf("unexpected break reason %q", br)
 		}
 	}
+}
+
+func (r *Remote) AdvanceInput(ctx context.Context, input []byte, maxCycles uint64) (*AdvanceResult, error) {
+	start, err := r.readMcycle(ctx)
+	if err != nil {
+		return nil, err
+	}
+	revert, err := r.RootHash(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.sendCmioResponse(ctx, CmioRxRequestAdvanceState, input, revert); err != nil {
+		return nil, err
+	}
+	res := &AdvanceResult{}
+	accepted, cycles, err := r.yieldLoop(ctx, start, maxCycles, func(req *cmioRequest) {
+		switch req.Reason {
+		case CmioYieldAutomaticReasonTxOutput, CmioYieldAutomaticReasonTxReport:
+			res.Outputs = append(res.Outputs, Output{Reason: req.Reason, Data: req.Data})
+		}
+	}, func(req *cmioRequest) {
+		// The guest reports its own outputs Merkle root in the manual yield
+		// that ends an input. It is not used as the commitment — the host
+		// computes that itself so verifiers can re-derive it — but it is a
+		// direct cross-check that the two agree.
+		if len(req.Data) == len(res.GuestOutputsRoot) {
+			copy(res.GuestOutputsRoot[:], req.Data)
+		}
+	})
+	if err != nil {
+		return nil, err
+	}
+	res.Accepted, res.Cycles = accepted, cycles
+	return res, nil
 }
 
 // Inspect sends the query as an inspect-state CMIO request and collects the
@@ -265,48 +332,44 @@ func (r *Remote) Inspect(ctx context.Context, query []byte, maxCycles uint64) (*
 	if err != nil {
 		return nil, err
 	}
-	if err := r.sendCmioResponse(ctx, CmioRxRequestInspectState, query); err != nil {
+	revert, err := r.RootHash(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.sendCmioResponse(ctx, CmioRxRequestInspectState, query, revert); err != nil {
 		return nil, err
 	}
 	res := &InspectResult{}
-	for {
-		br, err := r.run(ctx, start+maxCycles)
-		if err != nil {
-			return nil, err
+	accepted, cycles, err := r.yieldLoop(ctx, start, maxCycles, func(req *cmioRequest) {
+		// Inspect answers in reports; a tx-output during inspect would be a
+		// guest bug, since nothing it emits can be proven.
+		if req.Reason == CmioYieldAutomaticReasonTxReport {
+			res.Reports = append(res.Reports, req.Data)
 		}
-		switch br {
-		case breakYieldedAuto:
-			req, err := r.receiveCmioRequest(ctx)
-			if err != nil {
-				return nil, err
-			}
-			// Inspect answers in reports; a tx-output during inspect would be
-			// a guest bug, since nothing it emits can be proven.
-			if req.Reason == CmioYieldAutomaticReasonTxReport {
-				res.Reports = append(res.Reports, req.Data)
-			}
-		case breakYieldedSoft:
-			continue
-		case breakYieldedManual:
-			req, err := r.receiveCmioRequest(ctx)
-			if err != nil {
-				return nil, err
-			}
-			res.Accepted = req.Reason == CmioYieldManualReasonRxAccepted
-			end, err := r.readMcycle(ctx)
-			if err != nil {
-				return nil, err
-			}
-			res.Cycles = end - start
-			return res, nil
-		case breakHalted:
-			return nil, ErrHalted
-		case breakReachedTarget:
-			return nil, ErrCycleLimit
-		default:
-			return nil, fmt.Errorf("unexpected break reason %q", br)
-		}
+	}, func(*cmioRequest) {})
+	if err != nil {
+		return nil, err
 	}
+	res.Accepted, res.Cycles = accepted, cycles
+	return res, nil
+}
+
+// GuestOutputsRoot reads the outputs Merkle root the guest is reporting at the
+// manual yield it is currently parked on. Guests built with Cartesi's guest
+// tools publish it there; guests that do not will return a zero hash.
+//
+// The chain does not use this as its commitment — it computes that itself, so
+// verifiers can re-derive it from re-execution — but it is a direct check that
+// the host's tree and the guest's agree.
+func (r *Remote) GuestOutputsRoot(ctx context.Context) (common.Hash, error) {
+	req, err := r.receiveCmioRequest(ctx)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if req.Cmd != CmioYieldCommandManual || len(req.Data) != common.HashLength {
+		return common.Hash{}, nil
+	}
+	return common.BytesToHash(req.Data), nil
 }
 
 func (r *Remote) RootHash(ctx context.Context) (common.Hash, error) {
@@ -332,9 +395,14 @@ func (r *Remote) Fork(ctx context.Context) (Machine, error) {
 	if !strings.Contains(addr, "://") {
 		addr = "http://" + addr
 	}
-	return &Remote{endpoint: addr, client: r.client}, nil
+	return &Remote{endpoint: addr, client: r.client, owned: true}, nil
 }
 
+// Close shuts down a forked server. The server the operator started is left
+// running: this package did not spawn it and must not take it down.
 func (r *Remote) Close(ctx context.Context) error {
+	if !r.owned {
+		return nil
+	}
 	return r.call(ctx, "shutdown", nil, nil)
 }

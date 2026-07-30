@@ -14,6 +14,9 @@ REPO_DIR="$(dirname "$DEVNET_DIR")"
 # Empty runs the deterministic in-memory mock. Point this at a
 # cartesi-jsonrpc-machine server to run a real Cartesi Machine.
 : "${MACHINE_REMOTE:=}"
+# Directory of a stored machine for the server to load. Produced by
+# ./devnet/build-snapshot.sh.
+: "${MACHINE_SNAPSHOT:=}"
 
 # --- chain identity (consensus-relevant) -----------------------------------
 : "${L1_CHAIN_ID:=900}"
@@ -49,6 +52,9 @@ CHAIN_FLAGS=(
 )
 if [ -n "$MACHINE_REMOTE" ]; then
   CHAIN_FLAGS+=(-machine.remote "$MACHINE_REMOTE")
+fi
+if [ -n "$MACHINE_SNAPSHOT" ]; then
+  CHAIN_FLAGS+=(-machine.snapshot "$MACHINE_SNAPSHOT")
 fi
 
 # ensure_jwt writes a fresh 32-byte hex secret if none exists yet.
