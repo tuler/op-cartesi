@@ -11,6 +11,15 @@
 # machine's inspect protocol: call the chain with a 20-byte address and the
 # reply is that address's balance as a uint256.
 #
+# Withdrawing emits a Cartesi *voucher*: a single-use permission to make one
+# call from the application contract's context on L1. That is this chain's
+# whole withdrawal path. The voucher enters the outputs tree, the tree root is
+# the block's withdrawalsRoot, an op-proposer proposal on L1 commits to it, and
+# an L1 contract proves the voucher against that proposal and runs the call.
+# Nothing goes through OptimismPortal's withdrawal path, which wants an MPT
+# proof of a storage slot against a state root that here is a Cartesi hash
+# tree. See DESIGN §4.
+#
 # Written in Lua because the guest-tools rootfs ships lua5.4, and RLP wants
 # real arithmetic rather than shell.
 
@@ -42,6 +51,20 @@ local ZERO = string.rep("0", 64)
 local function pad(hex)
   hex = hex:gsub("^0x", "")
   return string.rep("0", 64 - #hex) .. hex
+end
+
+-- sub returns a - b, or nil when b is larger; balances must never wrap.
+local function sub(a, b)
+  a, b = pad(a), pad(b)
+  local limbs, borrow = {}, 0
+  for i = 57, 1, -8 do
+    local diff = tonumber(a:sub(i, i + 7), 16) - tonumber(b:sub(i, i + 7), 16) - borrow
+    borrow = diff < 0 and 1 or 0
+    if diff < 0 then diff = diff + 0x100000000 end
+    table.insert(limbs, 1, string.format("%08x", diff))
+  end
+  if borrow ~= 0 then return nil end
+  return table.concat(limbs)
 end
 
 local function add(a, b)
@@ -124,6 +147,31 @@ local function hexdecode(s)
   return (s:gsub("^0x", ""):gsub("%x%x", function(cc) return string.char(tonumber(cc, 16)) end))
 end
 
+-- -------------------------------------------------------------- withdrawals
+-- A withdrawal request is "w" ‖ 20-byte recipient ‖ 32-byte amount, carried in
+-- the calldata of an ordinary L2 transaction. It is not an Ethereum call: this
+-- guest has no account model, so there is nothing to authorise against beyond
+-- the balance itself, which is enough to exercise the path end to end.
+local WITHDRAW = 0x77 -- "w"
+
+-- callData pulls the data field out of a legacy transaction, which is
+--   rlp[nonce, gasPrice, gasLimit, to, value, data, v, r, s]
+-- The envelope hands the guest the whole signed transaction, not its calldata:
+-- deciding what the bytes mean is the execution layer's job, and here that is
+-- the guest.
+local function callData(raw)
+  if #raw < 1 or raw:byte(1) < 0xc0 then return nil end
+  local from, _, _, isList = decode(raw, 1)
+  if not isList then return nil end
+  local i = from
+  for field = 1, 6 do
+    local f, t, nxt = decode(raw, i)
+    if field == 6 then return raw:sub(f, t) end
+    i = nxt
+  end
+  return nil
+end
+
 -- ---------------------------------------------------------------- main loop
 local status = "accept"
 while true do
@@ -135,6 +183,23 @@ while true do
   if field(req, "request_type") == "inspect_state" then
     -- eth_call: a 20-byte address in, that address's balance out.
     rollup("report", '{"payload":"0x' .. balanceOf(hex(raw, 1, #raw)) .. '"}')
+  elseif callData(raw) and #callData(raw) == 53 and callData(raw):byte(1) == WITHDRAW then
+    local data = callData(raw)
+    local who, amount = hex(data, 2, 21), hex(data, 22, 53)
+    local left = sub(balanceOf(who), amount)
+    if left then
+      balances[who] = left
+      -- The voucher pays the recipient from the application contract. The
+      -- rollup tool wraps this in Outputs.Voucher(address,uint256,bytes),
+      -- which is exactly what an L1 executor decodes.
+      rollup("voucher", '{"destination":"0x' .. who .. '","value":"0x' .. amount .. '","payload":"0x"}')
+      rollup("report", '{"payload":"0x' .. pad(who) .. left .. '"}')
+    else
+      -- Rejecting rolls the machine back, so the balance is untouched and no
+      -- output survives — which is the behaviour an overdraft should have.
+      rollup("report", '{"payload":"0x' .. pad(who) .. pad("") .. '"}')
+      status = "reject"
+    end
   else
     local d = parseDeposit(raw)
     if d then

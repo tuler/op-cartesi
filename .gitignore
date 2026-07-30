@@ -7,3 +7,5 @@ devnet/snapshot/
 devnet/logs/
 devnet/deployment/
 devnet/l1-addresses.env
+devnet/outputs-addresses.env
+contracts/out/

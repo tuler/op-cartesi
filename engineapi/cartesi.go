@@ -147,3 +147,61 @@ func (a *CartesiAPI) Inspect(ctx context.Context, query hexutil.Bytes, id *rpc.B
 	}
 	return out, nil
 }
+
+// OutputProof is what Cartesi's Application.executeOutput needs, plus enough
+// context to find the output again.
+type OutputProof struct {
+	// Output is the raw bytes the machine emitted — the first argument of
+	// executeOutput.
+	Output hexutil.Bytes `json:"output"`
+	// OutputIndex and OutputHashesSiblings are Cartesi's OutputValidityProof,
+	// named as its ABI names them so the reply can be passed through.
+	OutputIndex          hexutil.Uint64 `json:"outputIndex"`
+	OutputHashesSiblings []common.Hash  `json:"outputHashesSiblings"`
+	// OutputsMerkleRoot is the root the proof reproduces, which is the block's
+	// withdrawalsRoot and the value an L1 validator must have accepted.
+	OutputsMerkleRoot common.Hash `json:"outputsMerkleRoot"`
+	// ProvenAgainst names the block whose commitment this proof is against.
+	ProvenAgainst common.Hash    `json:"provenAgainst"`
+	BlockNumber   hexutil.Uint64 `json:"blockNumber"`
+	// EmittedIn and EmittedBy name where the output came from.
+	EmittedIn hexutil.Uint64 `json:"emittedIn"`
+	EmittedBy common.Hash    `json:"emittedBy"`
+}
+
+// GetOutputProof proves an output belongs to the outputs commitment of a
+// block, which is what lets it be executed on L1.
+//
+// The block matters: the outputs tree is cumulative, so an output is provable
+// against the commitment of the block that emitted it and of every block
+// after. A caller executing on L1 wants the proof against a block that has
+// actually been proposed, which is usually not the one that emitted the
+// output — hence the second argument, defaulting to the safe head, since
+// proposals follow the safe chain.
+func (a *CartesiAPI) GetOutputProof(_ context.Context, index hexutil.Uint64, id *rpc.BlockNumberOrHash) (*OutputProof, error) {
+	target := a.chain.SafeBlock()
+	if id != nil {
+		b, err := blockFromChain(a.chain, *id)
+		if err != nil {
+			return nil, err
+		}
+		target = b
+	}
+	if target == nil {
+		return nil, fmt.Errorf("no block to prove against")
+	}
+	found, proof, err := a.chain.OutputProofAt(uint64(index), target.Hash())
+	if err != nil {
+		return nil, err
+	}
+	return &OutputProof{
+		Output:               found.Output,
+		OutputIndex:          hexutil.Uint64(proof.OutputIndex),
+		OutputHashesSiblings: proof.Siblings,
+		OutputsMerkleRoot:    *target.Header.WithdrawalsHash,
+		ProvenAgainst:        target.Hash(),
+		BlockNumber:          hexutil.Uint64(target.NumberU64()),
+		EmittedIn:            hexutil.Uint64(found.BlockNumber),
+		EmittedBy:            found.TxHash,
+	}, nil
+}

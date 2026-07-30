@@ -72,6 +72,8 @@ One design decision to make early: **input granularity**. Either (a) one CMIO in
 - You write a `CartesiDisputeGame` contract implementing OP's `IDisputeGame` interface, which internally *is* a Dave/PRT tournament (or delegates to one). The one-step leaf is either `machine-solidity-step` uarch replay (pure Solidity, exists today) or a `cm_log_step` → RISC Zero receipt → Groth16 verification against the on-chain image ID (also exists today, in `risc0/solidity/`). The second option makes the on-chain leaf a single ~300k-gas verification instead of a uarch replay, and shrinks the tournament depth because one proof can cover a large `mcycle_count`.
 - `OptimismPortal` is configured with your game type as the respected game; withdrawals then flow through the standard `proveWithdrawalTransaction` path — except withdrawal proofs are Merkle proofs **into the machine's hash tree** (via `cm_get_proof`) rather than MPT storage proofs. This needs a small portal/`CartesiOutputVerifier` adaptation: either fork `OptimismPortal`'s proof-verification library to verify Cartesi hash-tree proofs against a designated "outputs" memory range, or — lower-effort and closer to what you run today — keep OP's portal for ETH/token deposits only and route withdrawals through Cartesi Rollups' existing voucher/`executeVoucher` flow anchored to the accepted game outcome. For applications already built on the voucher path, the second option is nearly free.
 
+  **Settled by implementation:** option 2 is built and works — see §7c. The bridge turned out to be one small contract, because an OP proposal already commits to the Cartesi outputs root and Cartesi's `Application` asks exactly one question before executing an output.
+
   **Refined by §7:** both options stay on the table, but they now verify against a commitment the stock OP plumbing already publishes. From Isthmus onward, op-node reads the withdrawal commitment straight out of the header's `withdrawalsRoot` field instead of proving it against the state trie, so the Cartesi outputs Merkle root goes there directly and `op-proposer` needs no changes. What Isthmus does *not* do is teach `OptimismPortal` to verify Cartesi proofs — that still requires option 1 or option 2. See §7 for both, and for why the pre-Isthmus path cannot be implemented at all.
 
 **The subtle hard part: disputes must cover derivation, not just execution.** In stock OP, the fault-proof program (op-program/Kona) re-derives the disputed block *from L1 data* inside the FPVM, so a malicious sequencer can't win by lying about inputs. Your equivalent: the dispute must pin the machine's input sequence to L1. Two ways, in increasing order of reuse-of-what-you-know:
@@ -271,6 +273,61 @@ verifier gets its own.
 Checkpoints are triggered by block count and by finalization both: finalized
 blocks can never be reorged away, so a checkpoint at one never needs discarding,
 but nothing finalizes on a devnet L1 and the count is what makes progress there.
+
+## 7c. Withdrawals: executing Cartesi outputs against an OP proposal
+
+**Done, end to end.** The guest emits a voucher, `op-proposer` proposes, and the
+voucher executes on L1 — moving real ETH — with no change to `OptimismPortal`,
+`op-node`, `op-batcher` or `op-proposer`.
+
+The bridge is one contract, and it is small for a structural reason. A Cartesi
+`Application` asks exactly one question before executing an output:
+`isOutputsMerkleRootValid(appContract, outputsMerkleRoot)`. An OP proposal
+already commits to the answer, because op-node builds its root claim as
+
+    keccak256(version ‖ stateRoot ‖ messagePasserStorageRoot ‖ blockHash)
+
+and on this chain `messagePasserStorageRoot` is the header's `withdrawalsRoot`,
+which is the Cartesi outputs Merkle root. So `OPOutputsMerkleRootValidator`
+opens a game's root claim — four words and one keccak — and records the outputs
+root it commits to. That is the entire adaptation between the two settlement
+models.
+
+Nothing forks `OptimismPortal`. Its withdrawal path proves an MPT storage slot
+against the L2 state root, which cannot work when that root is a Cartesi hash
+tree; this sidesteps that path rather than replacing it, which is option 2
+above. The portal keeps its deposit path, which is what the chain already uses.
+
+Two pieces on this side of the boundary:
+
+- **Proofs.** The accumulator in `outputtree.go` carries only a frontier, so it
+  cannot prove an old leaf. `ProveOutput` builds the co-path from the stored
+  leaves, mirroring `LibMerkle32.siblings` level for level, and
+  `cartesi_getOutputProof` serves it. The proof is against the commitment of a
+  *chosen* block, not the block that emitted the output: the tree is cumulative,
+  so a withdrawal stays provable against every later proposal, and the caller
+  wants whichever block was actually proposed.
+- **Execution.** `OutputExecutor` verifies with Cartesi's own
+  `LibOutputValidityProof` over `LibMerkle32`, vendored unmodified, so a proof
+  this node produces is checked by Cartesi's real verifier rather than by a
+  reimplementation of it. It is a reduced stand-in for `Application` — no
+  ownership, upgrades, token receivers or delegate-call vouchers — and a
+  production chain should deploy the real one against the same validator.
+
+**What is still assumed.** Proposals go into the permissioned game and nothing
+can dispute them, so the validator's `requireDefenderWins` is false on the
+devnet and its `maturityDelay` is zero. Those are constructor arguments rather
+than hidden assumptions: a chain with a real proof system sets both, and the
+same contract then waits for a resolved game past the dispute window. That
+proof system is step 3, and it is now the only thing between this and a
+trust-minimised withdrawal.
+
+**And what is unbridged.** The executor pays vouchers from its own balance, the
+way a Cartesi `Application` holds the assets it can be told to move. ETH
+deposited through `OptimismPortal` sits in the portal's lockbox instead, so the
+two ends of the bridge do not yet share custody. Routing deposits to the
+application, or teaching the portal to release against an accepted outputs root,
+is a real design choice and is not made here.
 
 ## 8. The app-chain dimension: one machine, many applications
 
