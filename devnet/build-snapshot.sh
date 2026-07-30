@@ -13,7 +13,7 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 : "${IMAGES_DIR:=/usr/share/cartesi-machine/images}"
 : "${SNAPSHOT_DIR:=$DEVNET_DIR/snapshot}"
-: "${GUEST_APP:=$DEVNET_DIR/echo-app.sh}"
+: "${GUEST_APP:=$DEVNET_DIR/bank-app.sh}"
 
 for image in "$IMAGES_DIR/rootfs.ext2"; do
   if [ ! -f "$image" ]; then

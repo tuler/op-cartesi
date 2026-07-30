@@ -19,20 +19,62 @@ execution engine, and op-node sequencing on top:
 ./devnet/start-devnet.sh
 ```
 
+`build-snapshot.sh` builds the ledger guest (`bank-app.sh`) by default. Pass
+`GUEST_APP=$PWD/devnet/echo-app.sh` for one that only echoes, or `probe-app.sh`
+to see the raw request JSON a guest receives — which is how the other two were
+written.
+
 op-node then drives block production: every L2 block carries the L1-attributes
 deposit it injects, that deposit is wrapped in an `EvmAdvance` envelope and fed
 to the machine, and the machine's Merkle root becomes the block's state root.
+
+`op-batcher` posts those blocks to L1 as calldata, which advances the safe
+head, and a second node — its own machine, engine and op-node — rebuilds the
+chain from that L1 data alone. Set `WITH_BATCHER=0` or `WITH_VERIFIER=0` to
+leave either out.
 
 ```sh
 cast block-number --rpc-url http://127.0.0.1:8545
 cast rpc cartesi_getOutputsRoot latest --rpc-url http://127.0.0.1:8545
 cast rpc optimism_syncStatus --rpc-url http://127.0.0.1:9545
+
+# the verifier, which sequences nothing, must agree block for block
+cast block 10 --rpc-url http://127.0.0.1:8545 | grep -E 'hash|stateRoot'
+cast block 10 --rpc-url http://127.0.0.1:8565 | grep -E 'hash|stateRoot'
 ```
 
-No L1 contracts are deployed, so the chain has an advancing **unsafe** head and
-a safe head pinned at genesis: nothing is being posted to L1 for derivation to
-confirm. Deposits from users, a safe chain, and proposals need the OP contract
-suite deployed with `op-deployer` plus `op-batcher` and `op-proposer`.
+No L1 contracts are deployed. `op-proposer` therefore has nothing to propose
+to, and withdrawals have nothing to prove against; both need the OP contract
+suite from `op-deployer`.
+
+### Deposits
+
+`deposit.sh` sends an L1 deposit and lets op-node derive it into the L2 chain:
+
+```sh
+./devnet/deposit.sh 0x00000000000000000000000000000000000a11ce 1000000000000000000
+
+# a few L2 blocks later, on either node:
+cast rpc eth_call \
+  '{"to":"0x0000000000000000000000000000000000000000",
+    "data":"0x00000000000000000000000000000000000a11ce"}' latest \
+  --rpc-url http://127.0.0.1:8545
+# "0x...0de0b6b3a7640000"
+```
+
+`cast rpc eth_call` rather than `cast call`: the latter reads the caller's
+nonce first, and this chain serves no `eth_getTransactionCount` because its
+guest has no account model to take a nonce from.
+
+The balance is kept by the guest (`bank-app.sh`), not by the shim, so it is
+part of the state the machine's Merkle root commits to. Reading it goes through
+`eth_call`, which the shim answers by running the machine's inspect protocol on
+a fork it then discards.
+
+Since there is no `OptimismPortal` here, `deposit.sh` installs a minimal
+emitter at the rollup config's deposit contract address with `anvil_setCode`.
+Derivation reads the `TransactionDeposited` log rather than the contract that
+produced it, so as far as the chain is concerned the two are the same.
 
 Two operational notes the script encodes, both easy to trip over by hand:
 

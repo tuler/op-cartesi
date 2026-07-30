@@ -6,7 +6,7 @@ The core of this project is an **Engine API shim**: a service that sits where op
 
 ## Status
 
-Roadmap step 1, in progress. The shim implements the full sequencing loop — `engine_forkchoiceUpdatedV3` (with OP payload attributes) → `engine_getPayloadV4` → `engine_newPayloadV4` — plus verifier-side re-execution, reorg handling via machine snapshots, JWT auth, and the `eth_*` subset op-node and op-batcher read. It generates the `rollup.json` op-node consumes, and runs every fork through Isthmus from genesis (see [Fork support](#fork-support)).
+**Roadmap step 1 is done.** Its milestone was *deposits credited in-guest, and blocks derived identically by a second verifier node from L1 data alone* — both now hold on a live devnet. The shim implements the full sequencing loop — `engine_forkchoiceUpdatedV3` (with OP payload attributes) → `engine_getPayloadV4` → `engine_newPayloadV4` — plus verifier-side re-execution, reorg handling via machine snapshots, JWT auth, and the `eth_*` subset op-node and op-batcher read. It generates the `rollup.json` op-node consumes, and runs every fork through Isthmus from genesis (see [Fork support](#fork-support)).
 
 Compatibility is verified against **op-node's own types** rather than hand-written JSON: the [`integration`](integration/) suite drives the shim over authenticated HTTP using `op-service/eth`, and checks each block with op-node's `ExecutionPayloadEnvelope.CheckBlockHash`, which independently reconstructs the header. A deliberate one-field mutation to header construction is caught there, so the check has teeth.
 
@@ -14,14 +14,19 @@ The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client 
 
 ```sh
 ./devnet/build-snapshot.sh
-OP_CARTESI_TEST_SNAPSHOT=./devnet/snapshot go test ./...
+OP_CARTESI_TEST_SNAPSHOT=./devnet/snapshot \
+OP_CARTESI_TEST_BANK_SNAPSHOT=./devnet/snapshot go test ./...
 ```
+
+The second variable turns on the deposit tests, which need a guest that means something by its inputs rather than merely consuming them — the ledger app the snapshot script builds by default.
 
 **The chain round-trips through L1.** `./devnet/start-devnet.sh` brings up anvil as L1, a Cartesi Machine, op-cartesi, and op-node in sequencer mode; op-node sequences L2 blocks continuously, each carrying the L1-attributes deposit it injects, wrapped in the `EvmAdvance` envelope and executed by the machine. The block's state root is the machine's Merkle root and its `withdrawalsRoot` is the outputs commitment.
 
 `op-batcher` posts those blocks to L1 as calldata batches, which advances the safe head. A **second node** then runs alongside — its own machine, engine and op-node, sequencing nothing — and rebuilds the chain purely from what the batcher put on L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
 
-Still outstanding: the OP contract suite (via `op-deployer`), which is what lets real user deposits and `op-proposer` join the loop. See [devnet/](devnet/).
+**Deposits reach the guest.** `./devnet/deposit.sh <address> <wei>` emits the canonical `TransactionDeposited` event on L1; op-node derives it into an L2 deposit transaction, and the guest — a small ledger app in [`devnet/bank-app.sh`](devnet/bank-app.sh) — decodes it and credits the recipient. The balance is machine state, so the state root commits to it, and `eth_call` reads it back through the machine's inspect protocol. The verifier, deriving from L1 alone, arrives at the same balance.
+
+Still outstanding: the OP contract suite (via `op-deployer`), which is what `op-proposer` and the withdrawal path need. See [devnet/](devnet/).
 
 See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, covering:
 
@@ -110,7 +115,7 @@ Jovian and later are not supported: Jovian adds a minimum-base-fee field the shi
 
 ## Roadmap (from the design doc)
 
-1. **Shim MVP** *(in progress — sequencing loop, rollup config and op-node compatibility done; real emulator and live devnet next)* — local Cartesi Machine + op-node in sequencer mode on an L1 devnet, permissioned game type, no proofs. Milestone: deposits credited in-guest; a second verifier node derives identical blocks from L1 data alone.
-2. **Batcher/proposer integration** — snapshot-based reorg handling, guest-side deposit decoder.
+1. **Shim MVP** *(done)* — local Cartesi Machine + op-node in sequencer mode on an L1 devnet, permissioned game type, no proofs. Milestone: deposits credited in-guest; a second verifier node derives identical blocks from L1 data alone.
+2. **Batcher/proposer integration** *(next)* — the L1 contract suite, `op-proposer`, and persistence for blocks and outputs, which are still in memory.
 3. **Settlement track A** — Dave/PRT wrapped as an OP `IDisputeGame`, calldata batches, voucher-based withdrawals.
 4. **Settlement track B** — benchmark the freestanding emulator inside a RISC Zero guest; go/no-go on ZK settlement.

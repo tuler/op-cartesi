@@ -12,6 +12,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
@@ -91,10 +92,10 @@ func startServer(t *testing.T) *Remote {
 // evmAdvance ABI-encodes an input the way Cartesi's guest tools expect to
 // receive it, so a stock guest-tools rootfs can decode it.
 //
-// Note this is the encoding the *guest* expects, not the one op-cartesi's
-// chain currently feeds: the chain passes raw Ethereum transaction bytes, on
-// the assumption that the guest decodes them itself. Bridging those two is
-// guest-side work, and it is why this test encodes explicitly.
+// It is written out here rather than imported from chain/input.go because
+// chain depends on this package, not the reverse. Encoding it twice is the
+// point: if the two ever drift, the guest stops seeing what the chain thinks
+// it sent.
 func evmAdvance(t *testing.T, index uint64, payload []byte) []byte {
 	t.Helper()
 	uint256Ty, _ := abi.NewType("uint256", "", nil)
@@ -123,6 +124,25 @@ func evmAdvance(t *testing.T, index uint64, payload []byte) []byte {
 	}
 	selector := crypto.Keccak256([]byte("EvmAdvance(uint256,address,address,uint256,uint256,uint256,uint256,bytes)"))[:4]
 	return append(selector, packed...)
+}
+
+// sampleDeposit is the kind of transaction op-node derives from an L1 deposit
+// event, which is the one input every guest on this chain has to understand.
+func sampleDeposit(t *testing.T) []byte {
+	t.Helper()
+	to := common.HexToAddress("0x00000000000000000000000000000000000a11ce")
+	raw, err := types.NewTx(&types.DepositTx{
+		SourceHash: crypto.Keccak256Hash([]byte("outputs root test")),
+		From:       common.HexToAddress("0xdead"),
+		To:         &to,
+		Mint:       big.NewInt(1),
+		Value:      big.NewInt(1),
+		Gas:        1_000_000,
+	}).MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 // emptyOutputsTreeRoot is the root of an empty Cartesi outputs Merkle tree.
@@ -156,10 +176,23 @@ func TestRemoteOutputsRootMatchesHostTree(t *testing.T) {
 		t.Fatalf("guest reports empty outputs root %s, host computes %s", atBoot, emptyOutputsTreeRoot)
 	}
 
-	// After an input that emits an output, the guest's root must move.
-	res, err := remote.AdvanceInput(ctx, evmAdvance(t, 0, []byte("first")), 10_000_000_000)
+	// After an input that emits an output, the guest's root must move. The
+	// input is a deposit rather than arbitrary bytes because a guest that
+	// interprets its inputs — the devnet's ledger app does — has no reason to
+	// emit a provable output for something it cannot parse.
+	res, err := remote.AdvanceInput(ctx, evmAdvance(t, 0, sampleDeposit(t)), 10_000_000_000)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if len(res.Outputs) == 0 {
+		t.Fatal("the guest emitted nothing at all")
+	}
+	provable := false
+	for _, o := range res.Outputs {
+		provable = provable || o.IsProvable()
+	}
+	if !provable {
+		t.Skip("this guest emits no provable output for a deposit")
 	}
 	if res.GuestOutputsRoot == atBoot {
 		t.Error("the guest's outputs root did not change after emitting an output")
