@@ -257,6 +257,58 @@ func (r *Remote) AdvanceInput(ctx context.Context, input []byte, maxCycles uint6
 	}
 }
 
+// Inspect sends the query as an inspect-state CMIO request and collects the
+// reports the guest emits in reply. The machine is left wherever the query
+// took it, so the caller must be holding a fork it intends to discard.
+func (r *Remote) Inspect(ctx context.Context, query []byte, maxCycles uint64) (*InspectResult, error) {
+	start, err := r.readMcycle(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.sendCmioResponse(ctx, CmioRxRequestInspectState, query); err != nil {
+		return nil, err
+	}
+	res := &InspectResult{}
+	for {
+		br, err := r.run(ctx, start+maxCycles)
+		if err != nil {
+			return nil, err
+		}
+		switch br {
+		case breakYieldedAuto:
+			req, err := r.receiveCmioRequest(ctx)
+			if err != nil {
+				return nil, err
+			}
+			// Inspect answers in reports; a tx-output during inspect would be
+			// a guest bug, since nothing it emits can be proven.
+			if req.Reason == CmioYieldAutomaticReasonTxReport {
+				res.Reports = append(res.Reports, req.Data)
+			}
+		case breakYieldedSoft:
+			continue
+		case breakYieldedManual:
+			req, err := r.receiveCmioRequest(ctx)
+			if err != nil {
+				return nil, err
+			}
+			res.Accepted = req.Reason == CmioYieldManualReasonRxAccepted
+			end, err := r.readMcycle(ctx)
+			if err != nil {
+				return nil, err
+			}
+			res.Cycles = end - start
+			return res, nil
+		case breakHalted:
+			return nil, ErrHalted
+		case breakReachedTarget:
+			return nil, ErrCycleLimit
+		default:
+			return nil, fmt.Errorf("unexpected break reason %q", br)
+		}
+	}
+}
+
 func (r *Remote) RootHash(ctx context.Context) (common.Hash, error) {
 	var b binary
 	if err := r.call(ctx, "machine.get_root_hash", nil, &b); err != nil {

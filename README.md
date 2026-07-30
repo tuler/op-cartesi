@@ -27,16 +27,26 @@ The machine's emissions are recorded per transaction (`chain.TxOutputs`), split 
 
 Provable outputs accumulate into a Merkle tree that matches Cartesi's on-chain tree exactly — height 63, leaves `keccak256(output)`, parents `keccak256(left‖right)`, zero-padded — so existing voucher proofs verify against it unchanged. The tree is cumulative over the chain, and its root is published in every header's `withdrawalsRoot`, which is what op-node turns into the L2 output root. Verifiers re-derive it from re-execution, so a payload claiming outputs the machine did not produce is rejected.
 
-Receipts are not yet served. Nothing on the OP Stack's critical path reads L2 receipts — they are for wallets and explorers — so they will be synthesized from these records (notices → logs, reports → failure detail) with `receiptsRoot` left empty until the encoding is stable, rather than freezing a moving format into consensus.
+Receipts are synthesized from those records: outputs become logs, acceptance becomes `status`, mcycles become `gasUsed`. Each log carries the output's chain-wide index as a topic next to the raw bytes, which is exactly what a Cartesi output validity proof needs — so the receipt is enough to build the L1 proof later. Nothing on the OP Stack's critical path reads L2 receipts, so `receiptsRoot` and the header bloom stay empty and the encoding is not frozen into consensus while it is still moving.
+
+Reports are not logs, because a log implies provability. They are served through the `cartesi_` namespace instead, alongside the output indices and the outputs commitment.
+
+| Method | Purpose |
+|---|---|
+| `eth_getTransactionReceipt`, `eth_getBlockReceipts` | Standard receipts; outputs appear as logs. |
+| `eth_call` | Runs the machine's read-only inspect against a discarded fork, returning the concatenated reports. |
+| `cartesi_getTransactionEmissions` | Outputs with their chain-wide indices, plus the reports and cycle count. |
+| `cartesi_getOutputsRoot` | The outputs commitment and output count as of a block. |
+| `cartesi_inspect` | Inspect with the reports kept separate. |
 
 ## Layout
 
 | Package | Purpose |
 |---|---|
 | `cmd/op-cartesi` | CLI: wires the machine, chain, and the two RPC listeners together. |
-| `machine` | `Machine` interface (advance-input / root-hash / fork / close), a deterministic in-memory mock for development and tests, and a client for the emulator's `cartesi-jsonrpc-machine` remote protocol. |
+| `machine` | `Machine` interface (advance-input / inspect / root-hash / fork / close), a deterministic in-memory mock for development and tests, and a client for the emulator's `cartesi-jsonrpc-machine` remote protocol. |
 | `chain` | Block store, genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning, and the per-transaction record of machine emissions. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
-| `engineapi` | `engine_*` + `eth_*` JSON-RPC services, Engine API JWT authentication, HTTP handler assembly. |
+| `engineapi` | `engine_*`, `eth_*` and `cartesi_*` JSON-RPC services, Engine API JWT authentication, HTTP handler assembly. |
 | `mempool` | Bounded FIFO transaction ingress (the OP Stack has no public L2 mempool; the sequencer's RPC is the only entry point). |
 | `rollup` | Generates the `rollup.json` document op-node reads. |
 | `integration` | Separate Go module: compatibility tests driving the shim with op-node's wire types. Kept out of the main module so the shim itself depends only on op-geth. |

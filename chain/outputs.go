@@ -86,6 +86,53 @@ func (c *Chain) BlockOutputs(hash common.Hash) []TxOutputs {
 	return c.outputs[hash]
 }
 
+// TxEmissions locates a transaction's recorded emissions in the canonical
+// chain, together with the chain-wide index of its first output — the number
+// an on-chain output proof is built from.
+type TxEmissions struct {
+	BlockHash        common.Hash
+	BlockNumber      uint64
+	FirstOutputIndex uint64
+	Outputs          TxOutputs
+}
+
+// TxEmissions returns the emissions recorded for a transaction, or false if it
+// is unknown or was reorged out of the canonical chain.
+func (c *Chain) TxEmissions(txHash common.Hash) (TxEmissions, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	blockHash, ok := c.canonicalBlockOf(txHash)
+	if !ok {
+		return TxEmissions{}, false
+	}
+	b, ok := c.blocks[blockHash]
+	if !ok {
+		return TxEmissions{}, false
+	}
+	tree, ok := c.trees[blockHash]
+	if !ok {
+		return TxEmissions{}, false
+	}
+	all := c.outputs[blockHash]
+	// Walk the block's transactions in order, accumulating output counts, so
+	// the target transaction's first output index is its offset within the
+	// chain-wide numbering rather than within the block.
+	index := tree.Count() - uint64(countOutputs(all))
+	for _, txo := range all {
+		if txo.TxHash == txHash {
+			return TxEmissions{
+				BlockHash:        blockHash,
+				BlockNumber:      b.NumberU64(),
+				FirstOutputIndex: index,
+				Outputs:          txo,
+			}, true
+		}
+		index += uint64(len(txo.Outputs))
+	}
+	return TxEmissions{}, false
+}
+
 // OutputTreeAt returns the cumulative outputs accumulator as of a block. The
 // second result is false if the block is unknown. Its root is what the block
 // commits to in the header's withdrawals root under Isthmus, and what an

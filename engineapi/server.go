@@ -17,6 +17,12 @@ func NewHandler(c *chain.Chain, pool *mempool.Pool, withEngine bool, jwtSecret [
 	if err := server.RegisterName("eth", NewEthAPI(c, pool)); err != nil {
 		return nil, err
 	}
+	// The cartesi namespace carries what eth_* cannot say faithfully: reports,
+	// which are not provable and so must not masquerade as logs, and output
+	// indices, which on-chain proofs need and no receipt field holds.
+	if err := server.RegisterName("cartesi", NewCartesiAPI(c)); err != nil {
+		return nil, err
+	}
 	if withEngine {
 		if err := server.RegisterName("engine", NewEngineAPI(c)); err != nil {
 			return nil, err

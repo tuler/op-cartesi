@@ -26,6 +26,9 @@ type Mock struct {
 	// OutputFn, when set, produces the CMIO emissions for an input. It must be
 	// a pure function of the input for the mock to stay deterministic.
 	OutputFn func(input []byte) []Output
+	// InspectFn, when set, answers read-only queries. Defaults to echoing the
+	// query back as a single report.
+	InspectFn func(query []byte) [][]byte
 }
 
 var _ Machine = (*Mock)(nil)
@@ -60,6 +63,28 @@ func (m *Mock) AdvanceInput(_ context.Context, input []byte, maxCycles uint64) (
 	return &AdvanceResult{Accepted: true, Cycles: cycles, Outputs: outputs}, nil
 }
 
+// Inspect answers a query. The mock never advances its root, so it cannot
+// detect a caller that forgot to fork first — a real machine would run guest
+// code here and could write memory, which is why the interface puts that
+// obligation on the caller.
+func (m *Mock) Inspect(_ context.Context, query []byte, maxCycles uint64) (*InspectResult, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	cycles := uint64(500 + 5*len(query))
+	if cycles > maxCycles {
+		return nil, ErrCycleLimit
+	}
+	if m.RejectFn != nil && m.RejectFn(query) {
+		return &InspectResult{Accepted: false, Cycles: cycles}, nil
+	}
+	reports := [][]byte{query}
+	if m.InspectFn != nil {
+		reports = m.InspectFn(query)
+	}
+	return &InspectResult{Accepted: true, Cycles: cycles, Reports: reports}, nil
+}
+
 func (m *Mock) RootHash(context.Context) (common.Hash, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -69,7 +94,13 @@ func (m *Mock) RootHash(context.Context) (common.Hash, error) {
 func (m *Mock) Fork(context.Context) (Machine, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return &Mock{root: m.root, RejectFn: m.RejectFn, CycleCost: m.CycleCost, OutputFn: m.OutputFn}, nil
+	return &Mock{
+		root:      m.root,
+		RejectFn:  m.RejectFn,
+		CycleCost: m.CycleCost,
+		OutputFn:  m.OutputFn,
+		InspectFn: m.InspectFn,
+	}, nil
 }
 
 func (m *Mock) Close(context.Context) error { return nil }

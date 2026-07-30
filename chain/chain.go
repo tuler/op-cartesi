@@ -51,8 +51,12 @@ type Chain struct {
 	outputs map[common.Hash][]TxOutputs
 	// trees carries the cumulative outputs accumulator per block, so a child
 	// block can extend its parent's tree across forks and reorgs.
-	trees   map[common.Hash]OutputTree
-	pending map[engine.PayloadID]*pendingPayload
+	trees map[common.Hash]OutputTree
+	// txBlocks maps a transaction to every block that contains it. Reorgs can
+	// put the same transaction in more than one block, so canonicality is
+	// resolved when a receipt is looked up rather than maintained here.
+	txBlocks map[common.Hash][]common.Hash
+	pending  map[engine.PayloadID]*pendingPayload
 
 	genesisHash common.Hash
 	head        common.Hash
@@ -110,6 +114,7 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 		machines:    map[common.Hash]machine.Machine{genesis.Hash(): m},
 		outputs:     map[common.Hash][]TxOutputs{},
 		trees:       map[common.Hash]OutputTree{genesis.Hash(): NewOutputTree()},
+		txBlocks:    map[common.Hash][]common.Hash{},
 		pending:     map[engine.PayloadID]*pendingPayload{},
 		genesisHash: genesis.Hash(),
 		head:        genesis.Hash(),
@@ -546,6 +551,11 @@ func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs, tree Ou
 	c.machines[b.Hash()] = m
 	c.outputs[b.Hash()] = outputs
 	c.trees[b.Hash()] = tree
+	for _, txo := range outputs {
+		if txo.TxHash != (common.Hash{}) {
+			c.txBlocks[txo.TxHash] = append(c.txBlocks[txo.TxHash], b.Hash())
+		}
+	}
 	if c.pool != nil {
 		var hashes []common.Hash
 		for _, tx := range b.Txs {

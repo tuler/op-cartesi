@@ -41,21 +41,9 @@ func (e *EthAPI) GetBlockByHash(_ context.Context, hash common.Hash, fullTx bool
 }
 
 func (e *EthAPI) GetBlockByNumber(_ context.Context, number rpc.BlockNumber, fullTx bool) (map[string]any, error) {
-	var b *chain.Block
-	switch number {
-	case rpc.LatestBlockNumber, rpc.PendingBlockNumber:
-		b = e.chain.HeadBlock()
-	case rpc.SafeBlockNumber:
-		b = e.chain.SafeBlock()
-	case rpc.FinalizedBlockNumber:
-		b = e.chain.FinalizedBlock()
-	case rpc.EarliestBlockNumber:
-		b = e.chain.BlockByNumber(0)
-	default:
-		if number < 0 {
-			return nil, fmt.Errorf("unsupported block number %d", number)
-		}
-		b = e.chain.BlockByNumber(uint64(number))
+	b, err := e.blockFrom(rpc.BlockNumberOrHashWithNumber(number))
+	if err != nil {
+		return nil, err
 	}
 	return marshalBlock(b, fullTx)
 }
@@ -67,17 +55,161 @@ func (e *EthAPI) SendRawTransaction(_ context.Context, raw hexutil.Bytes) (commo
 	return e.pool.Add(raw)
 }
 
-// GetTransactionReceipt returns null for now. Nothing on the OP Stack's
-// critical path reads L2 receipts — derivation fetches L1 receipts, and the
-// batcher reads blocks — so receipts serve users rather than the protocol.
+// GetTransactionReceipt returns a receipt synthesized from what the machine
+// emitted while processing the transaction: provable outputs become logs,
+// acceptance becomes status, and consumed mcycles become gas.
 //
-// The machine's per-transaction emissions are already recorded (see
-// chain.TxOutputs); synthesizing receipts from them is the next step, with
-// notices becoming logs and reports supplying failure detail. Until the
-// encoding is settled, receipts stay uncommitted: the header keeps an empty
-// receiptsRoot and bloom, so the format is not yet frozen into consensus.
-func (e *EthAPI) GetTransactionReceipt(_ context.Context, _ common.Hash) (map[string]any, error) {
-	return nil, nil
+// Nothing on the OP Stack's critical path reads L2 receipts — derivation
+// fetches L1 receipts, and the batcher reads blocks — so these serve users
+// rather than the protocol. They are deliberately not committed to: the header
+// keeps an empty receipts root and bloom, so the encoding stays changeable.
+func (e *EthAPI) GetTransactionReceipt(_ context.Context, hash common.Hash) (map[string]any, error) {
+	receipt := e.chain.ReceiptByTxHash(hash)
+	if receipt == nil {
+		return nil, nil
+	}
+	return marshalReceipt(receipt), nil
+}
+
+// GetBlockReceipts returns every receipt in a block.
+func (e *EthAPI) GetBlockReceipts(_ context.Context, id rpc.BlockNumberOrHash) ([]map[string]any, error) {
+	b, err := e.blockFrom(id)
+	if err != nil || b == nil {
+		return nil, err
+	}
+	receipts := e.chain.BlockReceipts(b.Hash())
+	out := make([]map[string]any, 0, len(receipts))
+	for _, r := range receipts {
+		out = append(out, marshalReceipt(r))
+	}
+	return out, nil
+}
+
+// CallArgs is the subset of eth_call's argument object this chain can act on.
+// The machine has no notion of caller, value or gas, so only the payload is
+// meaningful; the other fields are accepted and ignored so that standard
+// tooling can call without special-casing.
+type CallArgs struct {
+	To    *common.Address `json:"to"`
+	Data  *hexutil.Bytes  `json:"data"`
+	Input *hexutil.Bytes  `json:"input"`
+}
+
+func (a CallArgs) payload() []byte {
+	if a.Input != nil {
+		return *a.Input
+	}
+	if a.Data != nil {
+		return *a.Data
+	}
+	return nil
+}
+
+// Call answers a read-only query by running the machine's inspect protocol
+// against the state at the requested block, on a fork that is then discarded.
+//
+// This is the natural counterpart of eth_call: it reads state without changing
+// it. The reply is the concatenation of the reports the guest emitted, since
+// eth_call has a single return value; cartesi_inspect returns them
+// individually for callers that emit more than one.
+func (e *EthAPI) Call(ctx context.Context, args CallArgs, id *rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	b, err := e.blockFromOptional(id)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, fmt.Errorf("unknown block")
+	}
+	res, err := e.chain.Inspect(ctx, b.Hash(), args.payload())
+	if err != nil {
+		return nil, err
+	}
+	if !res.Accepted {
+		return nil, fmt.Errorf("inspect rejected the query")
+	}
+	var out []byte
+	for _, report := range res.Reports {
+		out = append(out, report...)
+	}
+	return out, nil
+}
+
+func marshalReceipt(r *chain.Receipt) map[string]any {
+	logs := make([]map[string]any, 0, len(r.Logs))
+	for _, l := range r.Logs {
+		logs = append(logs, map[string]any{
+			"address":          l.Address,
+			"topics":           l.Topics,
+			"data":             hexutil.Bytes(l.Data),
+			"blockNumber":      hexutil.Uint64(l.BlockNumber),
+			"transactionHash":  l.TxHash,
+			"transactionIndex": hexutil.Uint(l.TxIndex),
+			"blockHash":        l.BlockHash,
+			"logIndex":         hexutil.Uint(l.Index),
+			"removed":          false,
+		})
+	}
+	m := map[string]any{
+		"transactionHash":   r.TxHash,
+		"transactionIndex":  hexutil.Uint(r.TxIndex),
+		"blockHash":         r.BlockHash,
+		"blockNumber":       hexutil.Uint64(r.BlockNumber),
+		"from":              r.From,
+		"to":                r.To,
+		"type":              hexutil.Uint(r.Type),
+		"status":            hexutil.Uint64(r.Status),
+		"gasUsed":           hexutil.Uint64(r.GasUsed),
+		"cumulativeGasUsed": hexutil.Uint64(r.CumulativeGasUsed),
+		"contractAddress":   nil,
+		"logs":              logs,
+		"logsBloom":         r.Bloom,
+	}
+	if r.EffectiveGasPrice != nil {
+		m["effectiveGasPrice"] = (*hexutil.Big)(r.EffectiveGasPrice)
+	}
+	return m
+}
+
+func (e *EthAPI) blockFrom(id rpc.BlockNumberOrHash) (*chain.Block, error) {
+	return blockFromChain(e.chain, id)
+}
+
+func (e *EthAPI) blockFromOptional(id *rpc.BlockNumberOrHash) (*chain.Block, error) {
+	return blockFromChainOptional(e.chain, id)
+}
+
+// blockFromChain resolves a block number-or-hash to a block.
+func blockFromChain(c *chain.Chain, id rpc.BlockNumberOrHash) (*chain.Block, error) {
+	if hash, ok := id.Hash(); ok {
+		return c.BlockByHash(hash), nil
+	}
+	number, ok := id.Number()
+	if !ok {
+		return nil, fmt.Errorf("block identifier has neither number nor hash")
+	}
+	switch number {
+	case rpc.LatestBlockNumber, rpc.PendingBlockNumber:
+		return c.HeadBlock(), nil
+	case rpc.SafeBlockNumber:
+		return c.SafeBlock(), nil
+	case rpc.FinalizedBlockNumber:
+		return c.FinalizedBlock(), nil
+	case rpc.EarliestBlockNumber:
+		return c.BlockByNumber(0), nil
+	default:
+		if number < 0 {
+			return nil, fmt.Errorf("unsupported block number %d", number)
+		}
+		return c.BlockByNumber(uint64(number)), nil
+	}
+}
+
+// blockFromChainOptional defaults to the head when no block is given.
+func blockFromChainOptional(c *chain.Chain, id *rpc.BlockNumberOrHash) (*chain.Block, error) {
+	if id == nil {
+		return c.HeadBlock(), nil
+	}
+	return blockFromChain(c, *id)
 }
 
 func marshalBlock(b *chain.Block, fullTx bool) (map[string]any, error) {

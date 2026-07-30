@@ -72,12 +72,32 @@ type AdvanceResult struct {
 	Outputs []Output
 }
 
+// InspectResult is the machine's answer to a read-only query.
+type InspectResult struct {
+	// Accepted is false when the machine rejected the query or raised an
+	// exception, which is the inspect analogue of a reverted call.
+	Accepted bool
+	Cycles   uint64
+	// Reports are the query's answer, in emission order. Inspect produces
+	// reports rather than outputs: nothing it emits is provable, because
+	// nothing it did became part of the state.
+	Reports [][]byte
+}
+
 // Machine is a single machine instance parked at an input-wait yield.
 type Machine interface {
 	// AdvanceInput feeds one input and runs the machine until it yields
 	// waiting for the next input, collecting any outputs emitted along the
 	// way. maxCycles bounds execution; exceeding it returns ErrCycleLimit.
 	AdvanceInput(ctx context.Context, input []byte, maxCycles uint64) (*AdvanceResult, error)
+
+	// Inspect feeds one read-only query and runs the machine until it yields,
+	// collecting the reports emitted in reply.
+	//
+	// Inspect is read-only in intent, not in implementation: the guest still
+	// runs and may write memory. Callers must run it on a fork they discard,
+	// which is what actually keeps the chain's state untouched.
+	Inspect(ctx context.Context, query []byte, maxCycles uint64) (*InspectResult, error)
 
 	// RootHash returns the Merkle root of the machine's entire state.
 	RootHash(ctx context.Context) (common.Hash, error)
