@@ -18,7 +18,14 @@ See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, cov
 - Why the OP Stack is the right chassis (and why Arbitrum Nitro is not)
 - The Engine API shim — the one genuinely new component
 - Two settlement plans: Cartesi-native (Dave/PRT + `machine-solidity-step`) vs. OP-native proving (Asterisc or Kailua-style ZK)
+- How Cartesi outputs, reports and inspect map onto withdrawals, logs and `eth_call` — and why the withdrawal path forces Isthmus
 - The app-chain dimension: hosting multiple applications on one machine, with cycle-based metering
+
+## Outputs and receipts
+
+The machine's emissions are recorded per transaction (`chain.TxOutputs`), split along the Cartesi provability boundary: **outputs** (vouchers and notices) are provable and destined for the block's outputs commitment; **reports** are diagnostic and must never enter a commitment. Outputs of a rejected input are dropped, since a rejection rolls the machine back; its reports are kept, because they usually explain the failure.
+
+Receipts are not yet served. Nothing on the OP Stack's critical path reads L2 receipts — they are for wallets and explorers — so they will be synthesized from these records (notices → logs, reports → failure detail) with `receiptsRoot` left empty until the encoding is stable, rather than freezing a moving format into consensus.
 
 ## Layout
 
@@ -26,7 +33,7 @@ See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, cov
 |---|---|
 | `cmd/op-cartesi` | CLI: wires the machine, chain, and the two RPC listeners together. |
 | `machine` | `Machine` interface (advance-input / root-hash / fork / close), a deterministic in-memory mock for development and tests, and a client for the emulator's `cartesi-jsonrpc-machine` remote protocol. |
-| `chain` | Block store, genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
+| `chain` | Block store, genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning, and the per-transaction record of machine emissions. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
 | `engineapi` | `engine_*` + `eth_*` JSON-RPC services, Engine API JWT authentication, HTTP handler assembly. |
 | `mempool` | Bounded FIFO transaction ingress (the OP Stack has no public L2 mempool; the sequencer's RPC is the only entry point). |
 | `rollup` | Generates the `rollup.json` document op-node reads. |
@@ -64,7 +71,7 @@ The chain flags passed to `genesis` and `run` must match: they determine the L2 
 
 The shim implements the **V3** Engine API methods, covering Ecotone through Holocene; the generated rollup config activates those forks at genesis. Holocene's EIP-1559 parameters are encoded into header `extraData` using op-geth's own encoder, so the bytes match what an op-geth engine would commit to.
 
-Isthmus and later are not supported yet: they switch op-node to `engine_newPayloadV4`/`engine_getPayloadV4` and add the `withdrawalsRoot` header field.
+Isthmus is not implemented yet, but it is **required, not optional**, and is scheduled for the next milestone. From Isthmus onward op-node reads the withdrawal commitment from the header's `withdrawalsRoot` field instead of proving it against the state trie with `eth_getProof` — and the proof path is unimplementable for a Cartesi execution layer, which has no Ethereum MPT to prove against. That header field is where the Cartesi outputs Merkle root belongs. See [DESIGN.md §7](docs/DESIGN.md).
 
 ## Roadmap (from the design doc)
 

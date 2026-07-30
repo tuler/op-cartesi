@@ -43,10 +43,23 @@ var (
 
 // Output is a CMIO emission produced while processing an input (an automatic
 // yield with a tx-output or tx-report reason).
+//
+// The two kinds are not interchangeable. An *output* (voucher or notice) is
+// part of the machine's provable result: it is committed to and can be proven
+// against the state on L1. A *report* is diagnostic only — explicitly not
+// provable — so it must never enter a commitment.
 type Output struct {
 	Reason uint16
 	Data   []byte
 }
+
+// IsProvable reports whether this emission is a voucher or notice, i.e. part
+// of the committed output set.
+func (o Output) IsProvable() bool { return o.Reason == CmioYieldAutomaticReasonTxOutput }
+
+// IsReport reports whether this emission is diagnostic output, which must be
+// kept out of every commitment.
+func (o Output) IsReport() bool { return o.Reason == CmioYieldAutomaticReasonTxReport }
 
 // AdvanceResult describes the machine's reaction to one input.
 type AdvanceResult struct {

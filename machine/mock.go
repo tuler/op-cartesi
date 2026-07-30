@@ -23,6 +23,9 @@ type Mock struct {
 	// CycleCost computes the cycle charge of an input. Defaults to
 	// 1000 + 10*len(input).
 	CycleCost func(input []byte) uint64
+	// OutputFn, when set, produces the CMIO emissions for an input. It must be
+	// a pure function of the input for the mock to stay deterministic.
+	OutputFn func(input []byte) []Output
 }
 
 var _ Machine = (*Mock)(nil)
@@ -43,11 +46,18 @@ func (m *Mock) AdvanceInput(_ context.Context, input []byte, maxCycles uint64) (
 	if cycles > maxCycles {
 		return nil, ErrCycleLimit
 	}
+	var outputs []Output
+	if m.OutputFn != nil {
+		outputs = m.OutputFn(input)
+	}
+	// A rejected input still emits whatever it produced before rejecting; it
+	// is the caller's job to discard the provable part, as a real machine's
+	// rollback would.
 	if m.RejectFn != nil && m.RejectFn(input) {
-		return &AdvanceResult{Accepted: false, Cycles: cycles}, nil
+		return &AdvanceResult{Accepted: false, Cycles: cycles, Outputs: outputs}, nil
 	}
 	m.root = crypto.Keccak256Hash(m.root.Bytes(), input)
-	return &AdvanceResult{Accepted: true, Cycles: cycles}, nil
+	return &AdvanceResult{Accepted: true, Cycles: cycles, Outputs: outputs}, nil
 }
 
 func (m *Mock) RootHash(context.Context) (common.Hash, error) {
@@ -59,7 +69,7 @@ func (m *Mock) RootHash(context.Context) (common.Hash, error) {
 func (m *Mock) Fork(context.Context) (Machine, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return &Mock{root: m.root, RejectFn: m.RejectFn, CycleCost: m.CycleCost}, nil
+	return &Mock{root: m.root, RejectFn: m.RejectFn, CycleCost: m.CycleCost, OutputFn: m.OutputFn}, nil
 }
 
 func (m *Mock) Close(context.Context) error { return nil }

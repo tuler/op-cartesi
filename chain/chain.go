@@ -32,6 +32,7 @@ type pendingPayload struct {
 	data       *engine.ExecutableData
 	beaconRoot *common.Hash
 	machine    machine.Machine
+	outputs    []TxOutputs
 }
 
 type Chain struct {
@@ -42,7 +43,12 @@ type Chain struct {
 	blocks    map[common.Hash]*Block
 	canonical map[uint64]common.Hash
 	machines  map[common.Hash]machine.Machine
-	pending   map[engine.PayloadID]*pendingPayload
+	// outputs are retained for as long as their block is, rather than for the
+	// machine-snapshot window: they are small, and serving receipts means
+	// answering for old blocks. Like blocks, they are in-memory only and will
+	// need persistence and a retention policy before this is long-lived.
+	outputs map[common.Hash][]TxOutputs
+	pending map[engine.PayloadID]*pendingPayload
 
 	genesisHash common.Hash
 	head        common.Hash
@@ -95,6 +101,7 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 		blocks:      map[common.Hash]*Block{genesis.Hash(): genesis},
 		canonical:   map[uint64]common.Hash{0: genesis.Hash()},
 		machines:    map[common.Hash]machine.Machine{genesis.Hash(): m},
+		outputs:     map[common.Hash][]TxOutputs{},
 		pending:     map[engine.PayloadID]*pendingPayload{},
 		genesisHash: genesis.Hash(),
 		head:        genesis.Hash(),
@@ -281,29 +288,38 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 	if err != nil {
 		return engine.PayloadID{}, fmt.Errorf("forking parent machine: %w", err)
 	}
-	included, gasUsed, final, err := c.applyBuild(ctx, work, attrs.Transactions, poolTxs, gasLimit)
+	exec, err := c.applyBuild(ctx, work, attrs.Transactions, poolTxs, gasLimit)
 	if err != nil {
 		return engine.PayloadID{}, err
 	}
-	root, err := final.RootHash(ctx)
+	root, err := exec.machine.RootHash(ctx)
 	if err != nil {
-		final.Close(ctx)
+		exec.machine.Close(ctx)
 		return engine.PayloadID{}, fmt.Errorf("reading root hash: %w", err)
 	}
 
 	extra, err := c.cfg.extraData(attrs.Timestamp, attrs.EIP1559Params)
 	if err != nil {
-		final.Close(ctx)
+		exec.machine.Close(ctx)
 		return engine.PayloadID{}, err
 	}
-	header := buildHeader(parent.Header, attrs, root, included, min(gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra)
+	header := buildHeader(parent.Header, attrs, root, exec.included, min(exec.gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra)
 	beaconRoot := header.ParentBeaconRoot
 	c.pending[id] = &pendingPayload{
-		data:       executableData(header, included),
+		data:       executableData(header, exec.included),
 		beaconRoot: beaconRoot,
-		machine:    final,
+		machine:    exec.machine,
+		outputs:    exec.outputs,
 	}
 	return id, nil
+}
+
+// execResult is the outcome of running a block's inputs through the machine.
+type execResult struct {
+	included [][]byte
+	gasUsed  uint64
+	outputs  []TxOutputs
+	machine  machine.Machine
 }
 
 // applyBuild is the sequencer-side execution loop. Deposits are mandatory:
@@ -311,11 +327,17 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 // that reject or fail are dropped from the pool and excluded from the block.
 // Each input runs on a fork so a failed input leaves no state behind; the
 // returned machine holds the post-block state and the caller owns it.
-func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, poolTxs [][]byte, gasLimit uint64) (included [][]byte, gasUsed uint64, final machine.Machine, err error) {
+func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, poolTxs [][]byte, gasLimit uint64) (*execResult, error) {
 	cur := work
-	fail := func(e error) ([][]byte, uint64, machine.Machine, error) {
+	out := &execResult{}
+	fail := func(e error) (*execResult, error) {
 		cur.Close(ctx)
-		return nil, 0, nil, e
+		return nil, e
+	}
+	record := func(tx []byte, res *machine.AdvanceResult) {
+		out.outputs = append(out.outputs, collectOutputs(len(out.included), tx, res))
+		out.included = append(out.included, tx)
+		out.gasUsed += res.Cycles / CyclesPerGas
 	}
 	for _, tx := range deposits {
 		cand, err := cur.Fork(ctx)
@@ -327,8 +349,7 @@ func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, 
 			cand.Close(ctx)
 			return fail(fmt.Errorf("deposit transaction failed: %w", err))
 		}
-		gasUsed += res.Cycles / CyclesPerGas
-		included = append(included, tx)
+		record(tx, res)
 		if res.Accepted {
 			cur.Close(ctx)
 			cur = cand
@@ -338,7 +359,7 @@ func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, 
 	}
 	var dropped []common.Hash
 	for _, tx := range poolTxs {
-		if gasUsed >= gasLimit {
+		if out.gasUsed >= gasLimit {
 			break
 		}
 		cand, err := cur.Fork(ctx)
@@ -353,35 +374,37 @@ func (c *Chain) applyBuild(ctx context.Context, work machine.Machine, deposits, 
 			}
 			continue
 		}
-		gasUsed += res.Cycles / CyclesPerGas
-		included = append(included, tx)
+		record(tx, res)
 		cur.Close(ctx)
 		cur = cand
 	}
 	if c.pool != nil {
 		c.pool.Forget(dropped)
 	}
-	return included, gasUsed, cur, nil
+	out.machine = cur
+	return out, nil
 }
 
 // replayImport is the verifier-side execution loop: every transaction in the
 // block is applied; one that rejects or fails contributes no state change
 // (and, on hard failure, no gas). The rules must mirror applyBuild exactly so
-// builder and verifiers agree on stateRoot and gasUsed.
-func (c *Chain) replayImport(ctx context.Context, work machine.Machine, txs [][]byte) (gasUsed uint64, final machine.Machine, err error) {
+// builder and verifiers agree on stateRoot, gasUsed and the recorded outputs.
+func (c *Chain) replayImport(ctx context.Context, work machine.Machine, txs [][]byte) (*execResult, error) {
 	cur := work
-	for _, tx := range txs {
+	out := &execResult{included: txs}
+	for i, tx := range txs {
 		cand, err := cur.Fork(ctx)
 		if err != nil {
 			cur.Close(ctx)
-			return 0, nil, err
+			return nil, err
 		}
 		res, err := cand.AdvanceInput(ctx, tx, c.cfg.MaxCyclesPerInput)
 		if err != nil {
 			cand.Close(ctx)
 			continue
 		}
-		gasUsed += res.Cycles / CyclesPerGas
+		out.outputs = append(out.outputs, collectOutputs(i, tx, res))
+		out.gasUsed += res.Cycles / CyclesPerGas
 		if res.Accepted {
 			cur.Close(ctx)
 			cur = cand
@@ -389,7 +412,8 @@ func (c *Chain) replayImport(ctx context.Context, work machine.Machine, txs [][]
 			cand.Close(ctx)
 		}
 	}
-	return gasUsed, cur, nil
+	out.machine = cur
+	return out, nil
 }
 
 // Payload returns a previously built payload by ID.
@@ -447,7 +471,7 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 	// Adopt the machine of a locally built payload instead of re-executing.
 	for id, p := range c.pending {
 		if p.data.BlockHash == hash {
-			c.commit(newBlock(header, data.Transactions), p.machine)
+			c.commit(newBlock(header, data.Transactions), p.machine, p.outputs)
 			delete(c.pending, id)
 			return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 		}
@@ -462,32 +486,34 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 	if err != nil {
 		return engine.PayloadStatusV1{}, fmt.Errorf("forking parent machine: %w", err)
 	}
-	gasUsed, final, err := c.replayImport(ctx, work, data.Transactions)
+	exec, err := c.replayImport(ctx, work, data.Transactions)
 	if err != nil {
 		return engine.PayloadStatusV1{}, err
 	}
-	root, err := final.RootHash(ctx)
+	root, err := exec.machine.RootHash(ctx)
 	if err != nil {
-		final.Close(ctx)
+		exec.machine.Close(ctx)
 		return engine.PayloadStatusV1{}, fmt.Errorf("reading root hash: %w", err)
 	}
 	if root != data.StateRoot {
-		final.Close(ctx)
+		exec.machine.Close(ctx)
 		return invalidStatus(&parentHash, fmt.Sprintf("state root mismatch: computed %s, payload claims %s", root, data.StateRoot)), nil
 	}
-	if capped := min(gasUsed, data.GasLimit); capped != data.GasUsed {
-		final.Close(ctx)
+	if capped := min(exec.gasUsed, data.GasLimit); capped != data.GasUsed {
+		exec.machine.Close(ctx)
 		return invalidStatus(&parentHash, fmt.Sprintf("gas used mismatch: computed %d, payload claims %d", capped, data.GasUsed)), nil
 	}
-	c.commit(newBlock(header, data.Transactions), final)
+	c.commit(newBlock(header, data.Transactions), exec.machine, exec.outputs)
 	return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 }
 
-// commit stores a validated block and its post-state machine. Canonicality is
-// decided separately by ForkchoiceUpdated. Callers hold c.mu.
-func (c *Chain) commit(b *Block, m machine.Machine) {
+// commit stores a validated block, its post-state machine and the machine
+// emissions recorded while executing it. Canonicality is decided separately by
+// ForkchoiceUpdated. Callers hold c.mu.
+func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs) {
 	c.blocks[b.Hash()] = b
 	c.machines[b.Hash()] = m
+	c.outputs[b.Hash()] = outputs
 	if c.pool != nil {
 		var hashes []common.Hash
 		for _, tx := range b.Txs {

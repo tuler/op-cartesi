@@ -70,6 +70,8 @@ One design decision to make early: **input granularity**. Either (a) one CMIO in
 - You write a `CartesiDisputeGame` contract implementing OP's `IDisputeGame` interface, which internally *is* a Dave/PRT tournament (or delegates to one). The one-step leaf is either `machine-solidity-step` uarch replay (pure Solidity, exists today) or a `cm_log_step` → RISC Zero receipt → Groth16 verification against the on-chain image ID (also exists today, in `risc0/solidity/`). The second option makes the on-chain leaf a single ~300k-gas verification instead of a uarch replay, and shrinks the tournament depth because one proof can cover a large `mcycle_count`.
 - `OptimismPortal` is configured with your game type as the respected game; withdrawals then flow through the standard `proveWithdrawalTransaction` path — except withdrawal proofs are Merkle proofs **into the machine's hash tree** (via `cm_get_proof`) rather than MPT storage proofs. This needs a small portal/`CartesiOutputVerifier` adaptation: either fork `OptimismPortal`'s proof-verification library to verify Cartesi hash-tree proofs against a designated "outputs" memory range, or — lower-effort and closer to what you run today — keep OP's portal for ETH/token deposits only and route withdrawals through Cartesi Rollups' existing voucher/`executeVoucher` flow anchored to the accepted game outcome. For applications already built on the voucher path, the second option is nearly free.
 
+  **Superseded by §7:** a third route is cheaper than both. From Isthmus onward, op-node reads the withdrawal commitment straight out of the header's `withdrawalsRoot` field instead of proving it against the state trie, so the Cartesi outputs Merkle root can go there directly — keeping the stock portal, the stock output-root computation and the stock proposer, with no proof-library fork. See §7 for why the pre-Isthmus path cannot be implemented at all.
+
 **The subtle hard part: disputes must cover derivation, not just execution.** In stock OP, the fault-proof program (op-program/Kona) re-derives the disputed block *from L1 data* inside the FPVM, so a malicious sequencer can't win by lying about inputs. Your equivalent: the dispute must pin the machine's input sequence to L1. Two ways, in increasing order of reuse-of-what-you-know:
 
 1. **Calldata-anchored inputs (v1):** run the batcher in calldata mode (or mirror inputs through an InputBox-style contract). The input Merkle root per epoch is then computable on-chain/on-challenge, and Dave's existing input handling applies essentially unchanged. This is exactly the Cartesi Rollups trust model today — lowest new code, modestly higher DA cost.
@@ -108,11 +110,69 @@ One design decision to make early: **input granularity**. Either (a) one CMIO in
 
 **Suggested sequence:**
 1. Shim MVP against a local machine + op-node in sequencer mode on an L1 devnet (no proofs; permissioned/`FAST` game type). Milestone: deposits credited in-guest, blocks derived identically by a second verifier node from L1 data alone.
-2. Batcher/proposer integration; snapshot-based reorg handling; guest-side deposit decoder.
+2. Batcher/proposer integration; snapshot-based reorg handling; guest-side deposit decoder. Includes Isthmus support and committing the outputs Merkle root in `withdrawalsRoot`, which is what makes `op-proposer` produce a meaningful output root at all — see §7.
 3. Settlement track A: wrap Dave in `IDisputeGame`, calldata batches, voucher-based withdrawals anchored to resolved games.
 4. Settlement track B (parallel, measurement-only): compile the freestanding emulator into a RISC Zero guest, measure cycles/input and cycles/epoch for the target application workload; go/no-go on B2.
 
-## 7. The app-chain dimension: one machine, many applications
+## 7. Outputs, reports, inspect — and what becomes a receipt
+
+The Cartesi Machine's I/O model has three concepts that look receipt-shaped but are not interchangeable. They map to **three different places** in the OP Stack, and getting the split right is what determines the withdrawal path.
+
+| Cartesi concept | Nature | OP Stack / Ethereum counterpart |
+|---|---|---|
+| **Output — voucher** (`tx-output`; an executable call on L1) | provable, committed | **Withdrawal** (an L2ToL1MessagePasser message). Belongs in the *output root*, not in a receipt. |
+| **Output — notice** (a provable statement) | provable, committed | Ethereum **log / event**. Belongs in the receipt *and* in the outputs commitment. |
+| **Report** (`tx-report`) | explicitly **not** provable | Receipt **status, revert reason, debug payload**. Must never enter a commitment. |
+| **Inspect** (`CmioRxRequestInspectState`) | read-only, no state change | **`eth_call`**. Not a receipt concern at all. |
+
+In Cartesi Rollups, outputs accumulate into an **outputs Merkle root** — that root is what gets claimed on L1 and what `executeVoucher`/output validation proves against. In the OP Stack the structural analogue is the `messagePasserStorageRoot` inside
+
+```
+OutputRootV0 = keccak(version, stateRoot, messagePasserStorageRoot, blockHash)
+```
+
+which is exactly what `op-proposer` posts and what `OptimismPortal` checks withdrawals against.
+
+### Why this forces Isthmus
+
+op-node builds that output root in `L2Client.outputV0`, and it has two paths:
+
+- **Pre-Isthmus:** `eth_getProof(L2ToL1MessagePasser, [], blockHash)`, then `proof.Verify(block.Root())` — an MPT proof of a specific account against the block's state root.
+- **Isthmus:** reads `block.WithdrawalsRoot()` directly from the header.
+
+**The pre-Isthmus path is unimplementable for a Cartesi execution layer.** It requires a genuine Ethereum MPT state trie containing an account at a fixed address, provable against the state root. Our state root is a Cartesi hash-tree root over the machine's address space; there is no MPT and no such account. Producing a proof that verifies is impossible, and faking one would be worse than not having it.
+
+The Isthmus path, by contrast, is a plain 32-byte header field — which is precisely the right home for the Cartesi outputs Merkle root.
+
+So **Isthmus is not merely "the next fork we haven't implemented"; it is the fork that makes `op-proposer` work for a non-EVM execution layer.** That reorders the roadmap: Isthmus support moves from "deferred" into the batcher/proposer milestone. Its cost is bounded and known:
+
+- `engine_newPayloadV4` / `engine_getPayloadV4` (Isthmus is the fork that switches op-node to V4).
+- Setting `RequestsHash = EmptyRequestsHash` in the header, because op-node's `CheckBlockHash` sets it whenever `WithdrawalsRoot != nil`; omitting it makes every block hash diverge.
+- Keeping op-node's `fetchWithdrawalRootFromState` off, so it uses the header field rather than falling back to the proof path.
+
+This also settles the open question from §4. That section offered two withdrawal routes: fork `OptimismPortal`'s proof verification to understand Cartesi hash-tree proofs, or bypass it and use Cartesi's existing voucher flow. The Isthmus finding makes a third, cheaper option the default: **keep the stock portal and stock output-root plumbing, and put the Cartesi outputs root in the header field op-node already reads.** No portal fork, no bespoke proposer.
+
+### Receipts are for users, not for the protocol
+
+Nothing on the OP Stack's critical path reads L2 receipts: derivation fetches *L1* receipts (for deposits and system-config events), and `op-batcher` reads blocks and transactions. Receipts exist for wallets, explorers, indexers, and SDKs.
+
+That grants freedom in how they are synthesized, subject to two hard constraints:
+
+1. `receiptsRoot` and `logsBloom` are header fields. Committing them makes the receipt encoding **consensus-critical** — re-derived by every verifier and adjudicated in disputes. An encoding change then becomes a hard fork.
+2. Nothing derived from **reports** may ever be committed. Reports are non-provable by construction and may reflect host-side state.
+
+The consequence is a deliberate ordering: serve receipts *before* committing them. Keep `receiptsRoot` and the bloom empty while the receipt format is still moving, and only commit once it is stable — at a fork, on purpose.
+
+### Staged plan
+
+1. **Thread outputs through the chain.** *(done)* Per-transaction emissions are split into provable outputs and diagnostic reports, attributed by transaction index and hash, and recorded on the block. Outputs of a rejected input are dropped, because a rejection rolls the machine back; its reports are kept, since they are usually the only explanation of the failure. Builder and verifier are tested to record identical outputs — the agreement everything downstream depends on.
+2. **Commit the outputs Merkle root** in the header's `withdrawalsRoot` under Isthmus, making `optimism_outputAtBlock` meaningful and enabling the standard withdrawal path. Requires the V4 engine methods above. The tree shape should match Cartesi's existing output tree so `machine-solidity-step`/Dave tooling and existing voucher proofs carry over unchanged.
+3. **Synthesize receipts** from the recorded outputs: notices → logs, accepted/rejected → status, mcycles → `gasUsed`, reports → failure detail. Served from `eth_getTransactionReceipt` with `receiptsRoot` still empty.
+4. **Map `inspect` to `eth_call`**: a read-only CMIO inspect run against a fork of the head machine, never mutating state, never entering a block.
+
+Storage is the loose end: outputs are currently in memory and retained for as long as their block, which — like the block store itself — needs persistence and a retention policy before this runs for any length of time.
+
+## 8. The app-chain dimension: one machine, many applications
 
 A Cartesi-machine L2 is natively an **app-chain**: the chain's state transition function is whatever the guest program does, which puts it closer to a Cosmos appchain (Monomer's world) than to a general smart-contract L2. That's the point — full Linux, any language, no gas-VM straitjacket. But "one machine = one application" is a configuration choice, not an architectural constraint. Because the guest is a Linux system and the block boundary is just a sequence of CMIO inputs, there is a clean spectrum of ways to host multiple applications on one chain and to add new ones over time — with the crucial property that **none of them change the proving story**. Dave, Asterisc, or RISC Zero prove *the machine*, not any particular application; whatever the guest does, including loading new code, is automatically covered by the same root-hash commitments. Extending the chain is a guest-software problem, not a protocol problem.
 

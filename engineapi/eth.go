@@ -67,9 +67,15 @@ func (e *EthAPI) SendRawTransaction(_ context.Context, raw hexutil.Bytes) (commo
 	return e.pool.Add(raw)
 }
 
-// GetTransactionReceipt returns null for now: the machine does not produce
-// EVM receipts, and none of the OP services on the critical path require
-// them. Synthetic receipts are future work.
+// GetTransactionReceipt returns null for now. Nothing on the OP Stack's
+// critical path reads L2 receipts — derivation fetches L1 receipts, and the
+// batcher reads blocks — so receipts serve users rather than the protocol.
+//
+// The machine's per-transaction emissions are already recorded (see
+// chain.TxOutputs); synthesizing receipts from them is the next step, with
+// notices becoming logs and reports supplying failure detail. Until the
+// encoding is settled, receipts stay uncommitted: the header keeps an empty
+// receiptsRoot and bloom, so the format is not yet frozen into consensus.
 func (e *EthAPI) GetTransactionReceipt(_ context.Context, _ common.Hash) (map[string]any, error) {
 	return nil, nil
 }
