@@ -9,6 +9,39 @@ Running op-cartesi as a real OP Stack L2 needs four pieces:
 
 Steps 1 and 2 are ordinary OP Stack chain-bringup and are not automated here: `op-deployer` needs a funded L1 deployer key and produces the addresses that go into `rollup.json`. What *is* automated is step 3 and the configuration that ties it to step 4, which is where op-cartesi differs from an op-geth chain.
 
+## Quick start: the whole stack on anvil
+
+`start-devnet.sh` brings up anvil as L1, a Cartesi Machine, op-cartesi as the
+execution engine, and op-node sequencing on top:
+
+```sh
+./devnet/build-snapshot.sh     # once, needs the guest images (see that script)
+./devnet/start-devnet.sh
+```
+
+op-node then drives block production: every L2 block carries the L1-attributes
+deposit it injects, that deposit is wrapped in an `EvmAdvance` envelope and fed
+to the machine, and the machine's Merkle root becomes the block's state root.
+
+```sh
+cast block-number --rpc-url http://127.0.0.1:8545
+cast rpc cartesi_getOutputsRoot latest --rpc-url http://127.0.0.1:8545
+cast rpc optimism_syncStatus --rpc-url http://127.0.0.1:9545
+```
+
+No L1 contracts are deployed, so the chain has an advancing **unsafe** head and
+a safe head pinned at genesis: nothing is being posted to L1 for derivation to
+confirm. Deposits from users, a safe chain, and proposals need the OP contract
+suite deployed with `op-deployer` plus `op-batcher` and `op-proposer`.
+
+Two operational notes the script encodes, both easy to trip over by hand:
+
+- A machine server holds exactly one machine, and `machine.load` refuses to
+  replace it. Config generation and the node each need their own server.
+- Linux boots inside the machine before the engine answers, which takes tens of
+  seconds. op-node must not be started before the engine logs
+  `chain initialized`.
+
 ## Quick start (no L1, no contracts)
 
 `start-shim.sh` runs op-cartesi alone against the in-memory mock machine. Nothing derives from L1, but the Engine API is live and can be driven by hand, which is enough to explore the RPC surface:

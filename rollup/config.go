@@ -64,6 +64,20 @@ type Config struct {
 	BatchInboxAddress      common.Address `json:"batch_inbox_address"`
 	DepositContractAddress common.Address `json:"deposit_contract_address"`
 	L1SystemConfigAddress  common.Address `json:"l1_system_config_address"`
+
+	// ChainOpConfig mirrors the execution layer's OptimismConfig. op-node
+	// refuses to start without it on a chain it cannot look up in the bundled
+	// superchain registry, which is every chain this generator produces.
+	ChainOpConfig *ChainOpConfig `json:"chain_op_config,omitempty"`
+}
+
+// ChainOpConfig is the fee-parameter half of the execution layer's chain
+// config that op-node needs in order to translate zeroed SystemConfig
+// EIP-1559 parameters into protocol values.
+type ChainOpConfig struct {
+	EIP1559Elasticity        uint64  `json:"eip1559Elasticity"`
+	EIP1559Denominator       uint64  `json:"eip1559Denominator"`
+	EIP1559DenominatorCanyon *uint64 `json:"eip1559DenominatorCanyon,omitempty"`
 }
 
 // Params are the operator-supplied inputs to config generation: everything
@@ -90,6 +104,10 @@ type Params struct {
 	// Holocene parameters.
 	EIP1559Denominator uint32
 	EIP1559Elasticity  uint32
+	// BaseFeeScalar and BlobBaseFeeScalar are the L1 fee scalars encoded into
+	// the Ecotone-format scalar. They default to the values OP chains use.
+	BaseFeeScalar     uint32
+	BlobBaseFeeScalar uint32
 }
 
 // L2Genesis describes the shim's genesis block, as reported by the chain.
@@ -121,8 +139,15 @@ func Build(l2 L2Genesis, p Params) (*Config, error) {
 	if p.ChannelTimeout == 0 {
 		p.ChannelTimeout = 300
 	}
+	if p.BaseFeeScalar == 0 {
+		p.BaseFeeScalar = DefaultBaseFeeScalar
+	}
+	if p.BlobBaseFeeScalar == 0 {
+		p.BlobBaseFeeScalar = DefaultBlobBaseFeeScalar
+	}
 
 	atGenesis := new(uint64)
+	canyonDenominator := uint64(p.EIP1559Denominator)
 	cfg := &Config{
 		Genesis: Genesis{
 			L1:     p.L1Genesis,
@@ -154,10 +179,36 @@ func Build(l2 L2Genesis, p Params) (*Config, error) {
 		BatchInboxAddress:      p.BatchInboxAddress,
 		DepositContractAddress: p.DepositContractAddress,
 		L1SystemConfigAddress:  p.L1SystemConfigAddress,
+		ChainOpConfig: &ChainOpConfig{
+			EIP1559Elasticity:        uint64(p.EIP1559Elasticity),
+			EIP1559Denominator:       uint64(p.EIP1559Denominator),
+			EIP1559DenominatorCanyon: &canyonDenominator,
+		},
 	}
 	putUint32(cfg.Genesis.SystemConfig.EIP1559Params[0:4], p.EIP1559Denominator)
 	putUint32(cfg.Genesis.SystemConfig.EIP1559Params[4:8], p.EIP1559Elasticity)
+	encodeEcotoneScalar(cfg.Genesis.SystemConfig.Scalar, p.BlobBaseFeeScalar, p.BaseFeeScalar)
 	return cfg, nil
+}
+
+// Scalar encoding constants. op-node rejects a rollup config whose genesis
+// system-config scalar is zero, so a chain that never sets one cannot start.
+const (
+	// EcotoneScalarVersion is the version byte at the front of the scalar.
+	EcotoneScalarVersion = 1
+	// DefaultBaseFeeScalar and DefaultBlobBaseFeeScalar are the values OP
+	// chains use; they only affect L1 fee accounting, which this chain does
+	// not charge for yet.
+	DefaultBaseFeeScalar     = 1368
+	DefaultBlobBaseFeeScalar = 810949
+)
+
+// encodeEcotoneScalar writes the Ecotone scalar layout: a version byte, then
+// the two fee scalars in the final eight bytes.
+func encodeEcotoneScalar(dst []byte, blobBaseFeeScalar, baseFeeScalar uint32) {
+	dst[0] = EcotoneScalarVersion
+	putUint32(dst[24:28], blobBaseFeeScalar)
+	putUint32(dst[28:32], baseFeeScalar)
 }
 
 func putUint32(dst []byte, v uint32) {

@@ -3,3 +3,5 @@
 *.test
 jwt.hex
 devnet/rollup.json
+devnet/snapshot/
+devnet/logs/

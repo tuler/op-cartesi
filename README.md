@@ -17,7 +17,9 @@ The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client 
 OP_CARTESI_TEST_SNAPSHOT=./devnet/snapshot go test ./...
 ```
 
-Still outstanding for the milestone: a live op-node on an L1 devnet with deployed contracts. See [devnet/](devnet/).
+**op-node drives the chain live.** `./devnet/start-devnet.sh` brings up anvil as L1, a Cartesi Machine, op-cartesi, and op-node in sequencer mode; op-node then sequences L2 blocks continuously, each carrying the L1-attributes deposit it injects, wrapped in the `EvmAdvance` envelope and executed by the machine. The block's state root is the machine's Merkle root and its `withdrawalsRoot` is the outputs commitment.
+
+Still outstanding: the OP contract suite (via `op-deployer`) with `op-batcher` and `op-proposer`, which is what turns the advancing unsafe head into a safe, proposed chain. See [devnet/](devnet/).
 
 See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, covering:
 

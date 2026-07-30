@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	opcrollup "github.com/tuler/op-cartesi/rollup"
@@ -124,6 +125,65 @@ func TestGeneratedRollupConfigMatchesOpNodeSchema(t *testing.T) {
 	// it must be absent rather than set to some future time.
 	if _, ok := doc["jovian_time"]; ok {
 		t.Error("jovian_time is set, but the shim does not implement its minimum-base-fee field")
+	}
+}
+
+// op-node refuses to start without chain_op_config on any chain it cannot find
+// in its bundled superchain registry, which is every chain this generates.
+func TestRollupConfigHasChainOpConfig(t *testing.T) {
+	h := newHarness(t)
+	doc := generateRollupJSON(t, h)
+
+	raw, ok := doc["chain_op_config"]
+	if !ok {
+		t.Fatal("chain_op_config is absent; op-node would refuse to start")
+	}
+	var opCfg struct {
+		Elasticity        uint64  `json:"eip1559Elasticity"`
+		Denominator       uint64  `json:"eip1559Denominator"`
+		DenominatorCanyon *uint64 `json:"eip1559DenominatorCanyon"`
+	}
+	if err := json.Unmarshal(raw, &opCfg); err != nil {
+		t.Fatal(err)
+	}
+	if opCfg.Elasticity == 0 || opCfg.Denominator == 0 {
+		t.Errorf("chain_op_config has zero fee parameters: %s", raw)
+	}
+	if opCfg.DenominatorCanyon == nil || *opCfg.DenominatorCanyon == 0 {
+		t.Error("eip1559DenominatorCanyon is unset; Canyon is active from genesis")
+	}
+}
+
+// op-node refuses to start on a config whose genesis scalar is zero, so the
+// generator must always emit one — a chain that cannot start is worse than one
+// with imperfect fee parameters.
+func TestRollupConfigHasNonZeroScalar(t *testing.T) {
+	h := newHarness(t)
+	doc := generateRollupJSON(t, h)
+
+	var genesis struct {
+		SystemConfig struct {
+			Scalar      string `json:"scalar"`
+			BatcherAddr string `json:"batcherAddr"`
+			GasLimit    uint64 `json:"gasLimit"`
+		} `json:"system_config"`
+	}
+	if err := json.Unmarshal(doc["genesis"], &genesis); err != nil {
+		t.Fatal(err)
+	}
+	zero := "0x" + strings.Repeat("00", 32)
+	if genesis.SystemConfig.Scalar == zero {
+		t.Error("genesis scalar is zero; op-node would refuse to start")
+	}
+	// The Ecotone layout: version byte 1, then the fee scalars at the end.
+	if !strings.HasPrefix(genesis.SystemConfig.Scalar, "0x01") {
+		t.Errorf("scalar %s does not carry the Ecotone version byte", genesis.SystemConfig.Scalar)
+	}
+	if genesis.SystemConfig.BatcherAddr == "0x"+strings.Repeat("00", 20) {
+		t.Error("batcher address is zero; op-node would refuse to start")
+	}
+	if genesis.SystemConfig.GasLimit == 0 {
+		t.Error("gas limit is zero; op-node would refuse to start")
 	}
 }
 
