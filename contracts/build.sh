@@ -10,5 +10,5 @@ docker run --rm -v "$DIR:/c" -w /c "$SOLC_IMAGE" \
   --base-path /c \
   "@openzeppelin-contracts-5.2.0/=oz/" \
   --optimize --combined-json abi,bin \
-  src/OPOutputsMerkleRootValidator.sol src/OutputExecutor.sol > "$OUT/contracts.json"
+  src/OPOutputsMerkleRootValidator.sol src/OutputExecutor.sol test/TestERC20.sol > "$OUT/contracts.json"
 echo "wrote $OUT/contracts.json" >&2

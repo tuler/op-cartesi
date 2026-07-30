@@ -329,6 +329,61 @@ two ends of the bridge do not yet share custody. Routing deposits to the
 application, or teaching the portal to release against an accepted outputs root,
 is a real design choice and is not made here.
 
+## 7d. ERC-20, and where the standard bridge stops working
+
+The two directions come apart, and it is worth being precise about where.
+
+**Deposits arrive intact.** `L1StandardBridge.depositERC20` escrows the tokens
+on L1 and sends a cross-domain message, which reaches `OptimismPortal` as an
+ordinary `TransactionDeposited` — so op-node derives it and hands it to the
+machine like any other deposit. Observed on the devnet, deposit of 5 TST:
+
+    to     0x4200…0007          (L2CrossDomainMessenger)
+    from   0x199ed609…56393     (aliased L1CrossDomainMessenger)
+    data   relayMessage(nonce, sender=L1StandardBridge, target=0x4200…0010,
+                        value, minGasLimit,
+             message = finalizeBridgeERC20(l2Token, l1Token, from, to, 5e18, ""))
+
+Everything needed is there. What is missing is the two EVM predeploys that
+would normally unwrap it — `L2CrossDomainMessenger` and `L2StandardBridge` —
+so the guest decodes the two ABI layers itself instead of a predeploy doing it.
+That is not a protocol change; it is guest code, and the same code an
+application would write to accept any deposit.
+
+The risk this creates is worth naming: the L1 escrow happens whether or not the
+guest understands the message. A guest that ignores `finalizeBridgeERC20`
+leaves real tokens locked in `L1StandardBridge` with nothing on L2 to show for
+it. Deposits are unconditional; crediting them is not.
+
+**Withdrawals cannot use the standard bridge at all.** The escrowed tokens sit
+in `L1StandardBridge`, and only `L1CrossDomainMessenger` can make it call
+`finalizeBridgeERC20` — after `OptimismPortal.proveWithdrawalTransaction`, which
+is exactly the MPT-proof path this chain cannot satisfy (§7c). A Cartesi voucher
+executes from the application's own context, so it cannot release that escrow.
+There is no arrangement of guest code that fixes this: the custody is on the
+wrong side of a proof the chain cannot produce.
+
+So the honest options are two, and they are the same choice §4 posed, now
+sharpened by ERC-20:
+
+1. **Cartesi-style portals, and the application holds the assets.** An
+   `ERC20Portal` pulls tokens into the application contract and tells the guest;
+   withdrawal is a voucher calling `token.transfer(user, amount)` from that
+   contract, which is what already works for ETH in §7c. This composes with
+   everything built and forks nothing — but it means not using
+   `L1StandardBridge`, and tokens bridged through the standard bridge stay
+   stuck. Recommended.
+
+2. **A messenger-shaped shim on L1** that relays `finalizeBridgeERC20` on proof
+   of an accepted outputs root, so the standard bridge's escrow becomes
+   releasable. This keeps the OP bridge's L1 surface and its token
+   registry — worth something for tooling — at the cost of reimplementing the
+   messenger's proof path, which is the thing §7c deliberately avoided doing to
+   the portal.
+
+Either way the L2 side is guest code, because there are no predeploys. The
+choice is only about which L1 contract holds the assets.
+
 ## 8. The app-chain dimension: one machine, many applications
 
 A Cartesi-machine L2 is natively an **app-chain**: the chain's state transition function is whatever the guest program does, which puts it closer to a Cosmos appchain (Monomer's world) than to a general smart-contract L2. That's the point — full Linux, any language, no gas-VM straitjacket. But "one machine = one application" is a configuration choice, not an architectural constraint. Because the guest is a Linux system and the block boundary is just a sequence of CMIO inputs, there is a clean spectrum of ways to host multiple applications on one chain and to add new ones over time — with the crucial property that **none of them change the proving story**. Dave, Asterisc, or RISC Zero prove *the machine*, not any particular application; whatever the guest does, including loading new code, is automatically covered by the same root-hash commitments. Extending the chain is a guest-software problem, not a protocol problem.
