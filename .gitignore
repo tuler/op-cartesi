@@ -5,3 +5,5 @@ jwt.hex
 devnet/rollup.json
 devnet/snapshot/
 devnet/logs/
+devnet/deployment/
+devnet/l1-addresses.env

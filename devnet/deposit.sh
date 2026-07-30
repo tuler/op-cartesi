@@ -40,10 +40,22 @@ AMOUNT="${2:-1000000000000000000}"
 TOPIC0=b3813568d9991fc951961fcb4c784893574240a28925604d09fc577c55bb7c32
 EMITTER_CODE="0x366020900360206000376000600035337f${TOPIC0}36602090036000a400"
 
-if [ "$(cast code "$DEPOSIT_CONTRACT_ADDRESS" --rpc-url "$L1_RPC")" = "0x" ]; then
-  echo "installing the deposit emitter at $DEPOSIT_CONTRACT_ADDRESS" >&2
-  cast rpc anvil_setCode "$DEPOSIT_CONTRACT_ADDRESS" "$EMITTER_CODE" --rpc-url "$L1_RPC" > /dev/null
+# With the contract suite deployed, the deposit goes through the real
+# OptimismPortal, which is the path a user would take. The emitter below is
+# only for the contract-less devnet (WITH_CONTRACTS=0), where there is no
+# portal to call.
+if [ "$(cast code "$DEPOSIT_CONTRACT_ADDRESS" --rpc-url "$L1_RPC")" != "0x" ]; then
+  echo "depositing $AMOUNT wei to $TO via OptimismPortal at $DEPOSIT_CONTRACT_ADDRESS" >&2
+  cast send "$DEPOSIT_CONTRACT_ADDRESS" \
+    "depositTransaction(address,uint256,uint64,bool,bytes)" \
+    "$TO" "$AMOUNT" "$DEPOSIT_GAS_LIMIT" false 0x \
+    --value "$AMOUNT" --private-key "$DEPOSITOR_KEY" --rpc-url "$L1_RPC" --json \
+    | python3 -c 'import sys,json;r=json.load(sys.stdin);print("L1 tx",r["transactionHash"],"in block",int(r["blockNumber"],16),"status",r["status"])'
+  exit 0
 fi
+
+echo "no contract at $DEPOSIT_CONTRACT_ADDRESS; installing the minimal emitter" >&2
+cast rpc anvil_setCode "$DEPOSIT_CONTRACT_ADDRESS" "$EMITTER_CODE" --rpc-url "$L1_RPC" > /dev/null
 
 # opaqueData for version 0, as OptimismPortal packs it:
 #   mint (uint256) ++ value (uint256) ++ gasLimit (uint64) ++ isCreation (bool)

@@ -80,9 +80,42 @@ cast block 10 --rpc-url http://127.0.0.1:8545 | grep -E 'hash|stateRoot'
 cast block 10 --rpc-url http://127.0.0.1:8565 | grep -E 'hash|stateRoot'
 ```
 
-No L1 contracts are deployed. `op-proposer` therefore has nothing to propose
-to, and withdrawals have nothing to prove against; both need the OP contract
-suite from `op-deployer`.
+### L1 contracts, and proposals
+
+`start-devnet.sh` deploys the full OP Stack L1 suite with `op-deployer` before
+starting anything else, then runs `op-proposer` against it. Set
+`WITH_CONTRACTS=0` for the older, faster bring-up on placeholder addresses, or
+`WITH_PROPOSER=0` to deploy but not propose.
+
+Two things about a devnet L1 that the standard path does not handle:
+
+- Its chain id is not one `op-deployer` knows, and the standard intent resolves
+  OPCM from a per-chain table. `deploy-l1.sh` uses `--intent-type custom`,
+  which deploys the superchain contracts and implementations along the way —
+  so the separate `op-deployer bootstrap` step turns out not to be needed.
+- Only the L1 half of the output is used. `inspect genesis` and `inspect
+  rollup` describe an op-geth L2 with predeploys and an allocs file, none of
+  which exists here; this chain's genesis is the machine's root hash. So
+  `inspect l1` supplies the addresses, the fee scalars are read back off the
+  deployed SystemConfig, and the L2 side is generated as before.
+
+The rollup is anchored at the L1 block the contracts landed in, not at L1
+genesis — before that block there is no SystemConfig for op-node to read.
+
+```sh
+FACTORY=$(grep DISPUTE_GAME_FACTORY devnet/l1-addresses.env | cut -d= -f2)
+cast call "$FACTORY" 'gameCount()(uint256)' --rpc-url http://127.0.0.1:8600
+```
+
+Proposals are made into the **permissioned** game (type 1), by the proposer
+address the deployment authorised, and are never disputed — there is no fault
+proof VM that can execute a Cartesi Machine. That is how OP chains launch;
+real disputes are the settlement track.
+
+Withdrawals still do not work, and deploying `OptimismPortal` does not change
+that: `proveWithdrawalTransaction` verifies an MPT storage proof of the
+L2ToL1MessagePasser account against the L2 state root, and ours is a Cartesi
+hash tree. See [DESIGN.md §4 and §7](../docs/DESIGN.md).
 
 ### Deposits
 
@@ -108,10 +141,12 @@ part of the state the machine's Merkle root commits to. Reading it goes through
 `eth_call`, which the shim answers by running the machine's inspect protocol on
 a fork it then discards.
 
-Since there is no `OptimismPortal` here, `deposit.sh` installs a minimal
-emitter at the rollup config's deposit contract address with `anvil_setCode`.
-Derivation reads the `TransactionDeposited` log rather than the contract that
-produced it, so as far as the chain is concerned the two are the same.
+With the contracts deployed, this calls `OptimismPortal.depositTransaction` —
+the path a real user takes. With `WITH_CONTRACTS=0` there is no portal, so
+`deposit.sh` installs a minimal `TransactionDeposited` emitter at the
+configured address with `anvil_setCode` instead. Derivation reads the log
+rather than the contract that produced it, so as far as the chain is concerned
+the two are the same, and the guest is credited either way.
 
 Two operational notes the script encodes, both easy to trip over by hand:
 

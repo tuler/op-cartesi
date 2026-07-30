@@ -28,7 +28,11 @@ The stack has been run against the **official released images** — op-node v1.1
 
 **Deposits reach the guest.** `./devnet/deposit.sh <address> <wei>` emits the canonical `TransactionDeposited` event on L1; op-node derives it into an L2 deposit transaction, and the guest — a small ledger app in [`devnet/bank-app.sh`](devnet/bank-app.sh) — decodes it and credits the recipient. The balance is machine state, so the state root commits to it, and `eth_call` reads it back through the machine's inspect protocol. The verifier, deriving from L1 alone, arrives at the same balance.
 
-Still outstanding: the OP contract suite (via `op-deployer`), which is what `op-proposer` and the withdrawal path need. See [devnet/](devnet/).
+**Proposals land on L1.** The devnet deploys the full OP Stack L1 suite with `op-deployer` and runs `op-proposer` against the `DisputeGameFactory`. The claim it submits is `keccak(0³² ‖ stateRoot ‖ withdrawalsRoot ‖ blockHash)` — recomputed independently and matched against the on-chain game — so the root claim on L1 commits to the machine's Merkle root *and* the Cartesi outputs tree. Deposits go through the real `OptimismPortal.depositTransaction`.
+
+Proposals use the permissioned game type and are never disputed: no fault proof VM can execute a Cartesi Machine. Withdrawals still do not work either, because `proveWithdrawalTransaction` wants an MPT proof against a state root that is a Cartesi hash tree. Both are the settlement track — see [DESIGN.md](docs/DESIGN.md) §4.
+
+Still outstanding for step 2: persistence. Blocks, outputs, receipts and machine snapshots are all in memory, so a restart loses the chain.
 
 See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, covering:
 

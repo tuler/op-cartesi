@@ -26,9 +26,13 @@ REPO_DIR="$(dirname "$DEVNET_DIR")"
 : "${MAX_CYCLES_PER_INPUT:=1000000000}"
 
 # --- L1 anchor and contract addresses --------------------------------------
-# These come from the L1 chain and the op-deployer output. The placeholder
-# addresses below let the scripts run end-to-end without a deployment; replace
-# them before connecting a real op-node.
+# devnet/deploy-l1.sh writes these after running op-deployer. Sourcing the file
+# first lets everything below act as a fallback, so the scripts still run
+# end-to-end with placeholders when no contracts have been deployed.
+if [ -f "$DEVNET_DIR/l1-addresses.env" ]; then
+  # shellcheck disable=SC1091
+  source "$DEVNET_DIR/l1-addresses.env"
+fi
 : "${L1_GENESIS_HASH:=0x0000000000000000000000000000000000000000000000000000000000000000}"
 : "${L1_GENESIS_NUMBER:=0}"
 # The batcher's address must match the one in the rollup config's genesis
@@ -38,6 +42,23 @@ REPO_DIR="$(dirname "$DEVNET_DIR")"
 : "${BATCH_INBOX_ADDRESS:=0xff00000000000000000000000000000000000901}"
 : "${DEPOSIT_CONTRACT_ADDRESS:=0x6900000000000000000000000000000000000001}"
 : "${L1_SYSTEM_CONFIG_ADDRESS:=0x6900000000000000000000000000000000000002}"
+: "${DISPUTE_GAME_FACTORY_ADDRESS:=}"
+# op-deployer registers only the permissioned game (type 1), which is the
+# right one here: there is no fault proof VM that can execute a Cartesi
+# Machine, so proposals are made by a trusted proposer and never disputed.
+# That is how OP chains launch; real disputes are the settlement track.
+: "${DISPUTE_GAME_TYPE:=1}"
+# Anvil account 2, matching the proposer role in the op-deployer intent — the
+# permissioned game rejects proposals from anyone else.
+: "${PROPOSER_ADDRESS:=0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC}"
+: "${PROPOSER_KEY:=0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a}"
+# The L1 fee scalars in the genesis system config. Defaults match op-node's,
+# but with contracts deployed these are read off the real SystemConfig.
+: "${BASE_FEE_SCALAR:=1368}"
+: "${BLOB_BASE_FEE_SCALAR:=810949}"
+# Consensus-relevant on the L1 side: op-node reads these back from SystemConfig.
+: "${EIP1559_DENOMINATOR:=50}"
+: "${EIP1559_ELASTICITY:=6}"
 
 # --- op-node / op-batcher --------------------------------------------------
 # The OP monorepo ships no binaries: its releases carry source archives only,
@@ -50,6 +71,8 @@ REPO_DIR="$(dirname "$DEVNET_DIR")"
 : "${OP_RUNTIME:=auto}"
 : "${OP_NODE_IMAGE:=us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.3}"
 : "${OP_BATCHER_IMAGE:=us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.16.11}"
+: "${OP_PROPOSER_IMAGE:=us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:v1.16.3}"
+: "${OP_DEPLOYER_IMAGE:=us-docker.pkg.dev/oplabs-tools-artifacts/images/op-deployer:v0.7.1}"
 
 # --- endpoints -------------------------------------------------------------
 : "${ENGINE_ADDR:=127.0.0.1:8551}"

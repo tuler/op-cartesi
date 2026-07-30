@@ -16,6 +16,8 @@ go run ./cmd/op-cartesi genesis \
   -batcher-address "$BATCHER_ADDRESS" \
   -batch-inbox-address "$BATCH_INBOX_ADDRESS" \
   -deposit-contract-address "$DEPOSIT_CONTRACT_ADDRESS" \
-  -l1-system-config-address "$L1_SYSTEM_CONFIG_ADDRESS"
+  -l1-system-config-address "$L1_SYSTEM_CONFIG_ADDRESS" \
+  -base-fee-scalar "$BASE_FEE_SCALAR" \
+  -blob-base-fee-scalar "$BLOB_BASE_FEE_SCALAR"
 
 echo "wrote $ROLLUP_CONFIG_FILE" >&2

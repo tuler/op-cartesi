@@ -33,6 +33,12 @@ func genesisCommand(args []string) error {
 		batchInbox     = fs.String("batch-inbox-address", "", "L1 batch inbox address (required)")
 		portal         = fs.String("deposit-contract-address", "", "L1 OptimismPortal address (required)")
 		sysConfig      = fs.String("l1-system-config-address", "", "L1 SystemConfig address (required)")
+		// These belong to the deployed SystemConfig, not to this chain. op-node
+		// starts from the genesis system config in rollup.json and then applies
+		// SystemConfig updates observed on L1, so a rollup.json that disagrees
+		// with the contract begins on values L1 later contradicts.
+		baseFeeScalar     = fs.Uint64("base-fee-scalar", rollup.DefaultBaseFeeScalar, "L1 base fee scalar from the deployed SystemConfig")
+		blobBaseFeeScalar = fs.Uint64("blob-base-fee-scalar", rollup.DefaultBlobBaseFeeScalar, "L1 blob base fee scalar from the deployed SystemConfig")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -82,6 +88,8 @@ func genesisCommand(args []string) error {
 		L1SystemConfigAddress:  common.HexToAddress(*sysConfig),
 		EIP1559Denominator:     uint32(cf.denominator),
 		EIP1559Elasticity:      uint32(cf.elasticity),
+		BaseFeeScalar:          uint32(*baseFeeScalar),
+		BlobBaseFeeScalar:      uint32(*blobBaseFeeScalar),
 	}
 	rollupCfg, err := rollup.Build(rollup.L2Genesis{
 		Hash:      genesis.Hash(),

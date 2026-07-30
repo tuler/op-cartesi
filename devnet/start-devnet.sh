@@ -29,6 +29,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 : "${BATCHER_RPC_PORT:=8548}"
 : "${WITH_BATCHER:=1}"
 : "${WITH_VERIFIER:=1}"
+# Deploy the OP L1 contract suite with op-deployer. Set to 0 for the older,
+# faster bring-up with placeholder addresses and no contracts.
+: "${WITH_CONTRACTS:=1}"
+: "${WITH_PROPOSER:=1}"
+: "${PROPOSER_RPC_PORT:=8560}"
 : "${SNAPSHOT_DIR:=$DEVNET_DIR/snapshot}"
 : "${LOG_DIR:=$DEVNET_DIR/logs}"
 : "${L1_CHAIN_CONFIG:=$DEVNET_DIR/l1-chain-config.json}"
@@ -106,17 +111,44 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# op-node and op-batcher run either as binaries on PATH or as the images the OP
-# monorepo publishes, since it publishes no binaries at all.
+# The OP tools run either as binaries on PATH or as the images the monorepo
+# publishes, since it publishes no binaries at all.
+#
+# The choice is all-or-nothing rather than per-tool, because it also decides
+# how everything addresses everything else: a container reaches the host over
+# the gateway, a binary over loopback. Mixing the two would mean two addressing
+# schemes in one stack. So `auto` only picks native when every tool this run
+# will actually start is present — having op-node and op-batcher but not
+# op-proposer used to select native and then fail on `op-proposer: command not
+# found`, several minutes in.
+OP_TOOLS=(op-node)
+[ "$WITH_BATCHER" = "1" ] && OP_TOOLS+=(op-batcher)
+[ "$WITH_PROPOSER" = "1" ] && [ "$WITH_CONTRACTS" = "1" ] && OP_TOOLS+=(op-proposer)
 if [ "$OP_RUNTIME" = "auto" ]; then
-  if command -v op-node > /dev/null 2>&1 && command -v op-batcher > /dev/null 2>&1; then
-    OP_RUNTIME=native
-  elif command -v docker > /dev/null 2>&1; then
-    OP_RUNTIME=docker
-  else
-    echo "neither op-node/op-batcher binaries nor docker were found" >&2
+  OP_RUNTIME=native
+  for tool in "${OP_TOOLS[@]}"; do
+    command -v "$tool" > /dev/null 2>&1 || OP_RUNTIME=docker
+  done
+  if [ "$OP_RUNTIME" = "docker" ] && ! command -v docker > /dev/null 2>&1; then
+    echo "need docker, or all of: ${OP_TOOLS[*]} on PATH" >&2
     exit 1
   fi
+elif [ "$OP_RUNTIME" = "native" ]; then
+  for tool in "${OP_TOOLS[@]}"; do
+    command -v "$tool" > /dev/null 2>&1 || { echo "OP_RUNTIME=native but $tool is not on PATH" >&2; exit 1; }
+  done
+fi
+
+# op-deployer has no binaries at all, so deploying contracts means docker even
+# when op-node does not — and that alone forces anvil off loopback.
+DEPLOYER_IN_DOCKER=0
+if [ "$WITH_CONTRACTS" = "1" ] && ! command -v op-deployer > /dev/null 2>&1; then
+  DEPLOYER_IN_DOCKER=1
+fi
+if [ "$OP_RUNTIME" = "docker" ] || [ "$DEPLOYER_IN_DOCKER" = "1" ]; then
+  L1_BIND_ADDR="0.0.0.0"
+else
+  L1_BIND_ADDR="127.0.0.1"
 fi
 
 if [ "$OP_RUNTIME" = "docker" ]; then
@@ -162,6 +194,7 @@ run_op() {
   if [ "$OP_RUNTIME" = "docker" ]; then
     local image=$OP_NODE_IMAGE
     [ "$kind" = "op-batcher" ] && image=$OP_BATCHER_IMAGE
+    [ "$kind" = "op-proposer" ] && image=$OP_PROPOSER_IMAGE
     docker rm -f "$CONTAINER_PREFIX-$name" > /dev/null 2>&1 || true
     docker run --rm --name "$CONTAINER_PREFIX-$name" \
       --network "$DOCKER_NETWORK" \
@@ -214,20 +247,40 @@ wait_for_port() {
 
 REQUIRED_PORTS=("$L1_PORT" "$MACHINE_PORT" "$GENESIS_MACHINE_PORT" "$OPNODE_RPC_PORT" "${ENGINE_ADDR##*:}" "${HTTP_ADDR##*:}")
 [ "$WITH_BATCHER" = "1" ] && REQUIRED_PORTS+=("$BATCHER_RPC_PORT")
+[ "$WITH_PROPOSER" = "1" ] && REQUIRED_PORTS+=("$PROPOSER_RPC_PORT")
 [ "$WITH_VERIFIER" = "1" ] && REQUIRED_PORTS+=("$VERIFIER_MACHINE_PORT" "$VERIFIER_OPNODE_RPC_PORT" "${VERIFIER_ENGINE_ADDR##*:}" "${VERIFIER_HTTP_ADDR##*:}")
 require_free_ports "${REQUIRED_PORTS[@]}"
 
 echo "starting anvil (L1, chain $L1_CHAIN_ID) on :$L1_PORT" >&2
-anvil --host "$BIND_ADDR" --port "$L1_PORT" --chain-id "$L1_CHAIN_ID" --block-time 2 --silent \
+anvil --host "$L1_BIND_ADDR" --port "$L1_PORT" --chain-id "$L1_CHAIN_ID" --block-time 2 --silent \
   > "$LOG_DIR/anvil.log" 2>&1 &
 track $!
 wait_for_port "$L1_PORT"
 
-L1_GENESIS_HASH=$(cast block 0 --rpc-url "http://127.0.0.1:$L1_PORT" --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["hash"])')
+if [ "$WITH_CONTRACTS" = "1" ]; then
+  # Deploying first, because the rollup has to be anchored at a block where
+  # the SystemConfig already exists — op-node reads it there to start
+  # derivation, and before the deployment there is nothing to read.
+  rm -f "$DEVNET_DIR/l1-addresses.env"
+  "$DEVNET_DIR/deploy-l1.sh" > "$LOG_DIR/deploy-l1.log" 2>&1 || {
+    echo "deploying the L1 contracts failed; last lines of $LOG_DIR/deploy-l1.log:" >&2
+    tail -20 "$LOG_DIR/deploy-l1.log" >&2
+    exit 1
+  }
+  # shellcheck disable=SC1091
+  source "$DEVNET_DIR/l1-addresses.env"
+  echo "L1 contracts deployed; rollup anchored at L1 block $L1_GENESIS_NUMBER" >&2
+else
+  L1_GENESIS_NUMBER=0
+  L1_GENESIS_HASH=$(cast block 0 --rpc-url "http://127.0.0.1:$L1_PORT" --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["hash"])')
+fi
+
 # The L2 genesis timestamp is anchored to the L1 block the rollup starts after,
 # so op-node's derivation clock and the engine's genesis agree.
-GENESIS_TIMESTAMP=$(cast block 0 --rpc-url "http://127.0.0.1:$L1_PORT" --json | python3 -c 'import sys,json;print(int(json.load(sys.stdin)["timestamp"],16))')
-export L1_GENESIS_HASH GENESIS_TIMESTAMP
+GENESIS_TIMESTAMP=$(cast block "$L1_GENESIS_NUMBER" --rpc-url "http://127.0.0.1:$L1_PORT" --json | python3 -c 'import sys,json;print(int(json.load(sys.stdin)["timestamp"],16))')
+export L1_GENESIS_HASH L1_GENESIS_NUMBER GENESIS_TIMESTAMP
+export BATCH_INBOX_ADDRESS DEPOSIT_CONTRACT_ADDRESS L1_SYSTEM_CONFIG_ADDRESS
+export BASE_FEE_SCALAR BLOB_BASE_FEE_SCALAR
 export MACHINE_SNAPSHOT="$SNAPSHOT_DIR"
 
 # Sets MACHINE_SERVER_PID so a caller that only needs the server briefly can
@@ -240,7 +293,7 @@ start_machine_server() {
   wait_for_port "$port" || { echo "--- $log ---" >&2; tail -5 "$log" >&2; exit 1; }
 }
 
-echo "generating rollup.json anchored to L1 block 0 ($L1_GENESIS_HASH)" >&2
+echo "generating rollup.json anchored to L1 block $L1_GENESIS_NUMBER ($L1_GENESIS_HASH)" >&2
 start_machine_server "$GENESIS_MACHINE_PORT" "$LOG_DIR/machine-genesis.log"
 MACHINE_REMOTE="http://127.0.0.1:$GENESIS_MACHINE_PORT" "$DEVNET_DIR/generate-config.sh"
 # The generator is done with it, and a booted machine is not cheap to leave
@@ -287,6 +340,26 @@ if [ "$WITH_BATCHER" = "1" ]; then
     --sub-safety-margin=4 --poll-interval=2s --num-confirmations=1 \
     --max-channel-duration=2 \
     --rpc.addr="$BIND_ADDR" --rpc.port="$BATCHER_RPC_PORT"
+fi
+
+if [ "$WITH_PROPOSER" = "1" ] && [ -n "$DISPUTE_GAME_FACTORY_ADDRESS" ]; then
+  # op-proposer reads optimism_outputAtBlock from op-node and creates a game
+  # per proposal. Nothing about it is op-cartesi-specific: the output root it
+  # submits already commits to the Cartesi outputs tree, because op-node builds
+  # it from the header's withdrawalsRoot.
+  #
+  # --allow-non-finalized because anvil has no beacon chain to finalize
+  # anything, so a proposer that waited for finality would never propose.
+  echo "starting op-proposer (game type $DISPUTE_GAME_TYPE)" >&2
+  run_op op-proposer proposer "$PROPOSER_RPC_PORT" "$LOG_DIR/op-proposer.log" \
+    --l1-eth-rpc="http://$HOST_ADDR:$L1_PORT" \
+    --rollup-rpc="$SEQUENCER_RPC" \
+    --game-factory-address="$DISPUTE_GAME_FACTORY_ADDRESS" \
+    --game-type="$DISPUTE_GAME_TYPE" \
+    --private-key="$PROPOSER_KEY" \
+    --proposal-interval=20s --poll-interval=4s \
+    --allow-non-finalized --wait-node-sync \
+    --rpc.addr="$BIND_ADDR" --rpc.port="$PROPOSER_RPC_PORT"
 fi
 
 if [ "$WITH_VERIFIER" = "1" ]; then
