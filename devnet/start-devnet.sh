@@ -13,6 +13,11 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 : "${L1_PORT:=8600}"
 : "${MACHINE_PORT:=6300}"
+# Generating the rollup config loads the snapshot too, and a machine server
+# holds exactly one machine, so the generator gets its own server rather than
+# recycling the node's. Recycling meant killing a server mid-run and racing the
+# port back open, which is a race the script kept losing.
+: "${GENESIS_MACHINE_PORT:=6301}"
 : "${OPNODE_RPC_PORT:=9545}"
 # Second node: its own engine, machine server and op-node, deriving purely
 # from L1 rather than sequencing.
@@ -34,55 +39,119 @@ if [ ! -d "$SNAPSHOT_DIR" ]; then
   exit 1
 fi
 
-# The process name is truncated to 15 characters, which is shorter than
-# "cartesi-jsonrpc-machine", so an exact-match kill has to use the truncation.
-# pkill exits non-zero when nothing matched, which under `set -e` would abort
-# the script before it starts anything.
+# Teardown works from the pids this script started, not from process names.
+# Matching by name was both too narrow and too wide: `pkill -x cartesi-jsonrpc`
+# only matches on Linux, where the process name is truncated to 15 characters,
+# so on macOS the machine servers survived and the next run inherited a server
+# that already held a machine — while on Linux it happily killed emulators and
+# anvils belonging to whatever else the developer was running.
+PIDS=()
+track() { PIDS+=("$1"); }
+
+# Killing a machine server does not kill the servers it forked — op-cartesi
+# forks one per block for snapshots — so teardown walks the whole tree.
+kill_tree() {
+  local pid=$1 kids
+  kids=$(pgrep -P "$pid" 2>/dev/null || true)
+  kill "$pid" 2>/dev/null || true
+  local kid
+  for kid in $kids; do kill_tree "$kid"; done
+}
+
 cleanup() {
-  pkill -x op-node 2>/dev/null || true
-  pkill -x op-batcher 2>/dev/null || true
-  pkill -x op-cartesi 2>/dev/null || true
-  pkill -x cartesi-jsonrpc 2>/dev/null || true
-  pkill -x anvil 2>/dev/null || true
+  local pid
+  for pid in "${PIDS[@]:-}"; do
+    [ -n "$pid" ] && kill_tree "$pid"
+  done
 }
 trap cleanup EXIT
-cleanup; sleep 1
+
+port_free() {
+  ! (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+}
+
+# A port still held from a previous run is reported rather than cleared: the
+# process holding it may not be ours. This is also the failure this check
+# exists to make legible — a machine server left behind answers just well
+# enough for op-cartesi to connect and then fail with "machine exists".
+require_free_ports() {
+  local port busy=()
+  for port in "$@"; do
+    port_free "$port" || busy+=("$port")
+  done
+  if [ ${#busy[@]} -gt 0 ]; then
+    echo "ports already in use: ${busy[*]}" >&2
+    for port in "${busy[@]}"; do
+      if command -v lsof > /dev/null 2>&1; then
+        echo "  :$port held by pid(s) $(lsof -ti "tcp:$port" | tr '\n' ' ')" >&2
+      fi
+    done
+    echo "stop them (or set the matching *_PORT variables) and try again" >&2
+    exit 1
+  fi
+}
+
+wait_for_port() {
+  local port=$1
+  for _ in $(seq 1 40); do
+    port_free "$port" || return 0
+    sleep 0.5
+  done
+  echo "nothing came up on port $port" >&2
+  return 1
+}
+
+REQUIRED_PORTS=("$L1_PORT" "$MACHINE_PORT" "$GENESIS_MACHINE_PORT" "$OPNODE_RPC_PORT" "${ENGINE_ADDR##*:}" "${HTTP_ADDR##*:}")
+[ "$WITH_BATCHER" = "1" ] && REQUIRED_PORTS+=("$BATCHER_RPC_PORT")
+[ "$WITH_VERIFIER" = "1" ] && REQUIRED_PORTS+=("$VERIFIER_MACHINE_PORT" "$VERIFIER_OPNODE_RPC_PORT" "${VERIFIER_ENGINE_ADDR##*:}" "${VERIFIER_HTTP_ADDR##*:}")
+require_free_ports "${REQUIRED_PORTS[@]}"
 
 echo "starting anvil (L1, chain $L1_CHAIN_ID) on :$L1_PORT" >&2
 anvil --host 127.0.0.1 --port "$L1_PORT" --chain-id "$L1_CHAIN_ID" --block-time 2 --silent \
   > "$LOG_DIR/anvil.log" 2>&1 &
-sleep 4
+track $!
+wait_for_port "$L1_PORT"
 
 L1_GENESIS_HASH=$(cast block 0 --rpc-url "http://127.0.0.1:$L1_PORT" --json | python3 -c 'import sys,json;print(json.load(sys.stdin)["hash"])')
 # The L2 genesis timestamp is anchored to the L1 block the rollup starts after,
 # so op-node's derivation clock and the engine's genesis agree.
 GENESIS_TIMESTAMP=$(cast block 0 --rpc-url "http://127.0.0.1:$L1_PORT" --json | python3 -c 'import sys,json;print(int(json.load(sys.stdin)["timestamp"],16))')
 export L1_GENESIS_HASH GENESIS_TIMESTAMP
-export MACHINE_REMOTE="http://127.0.0.1:$MACHINE_PORT" MACHINE_SNAPSHOT="$SNAPSHOT_DIR"
+export MACHINE_SNAPSHOT="$SNAPSHOT_DIR"
 
-# The generator and the node each load the snapshot into a server, and a server
-# holds one machine, so each gets a fresh one.
+# Sets MACHINE_SERVER_PID so a caller that only needs the server briefly can
+# stop it again.
 start_machine_server() {
-  pkill -x cartesi-jsonrpc 2>/dev/null || true
-  sleep 1
-  cartesi-jsonrpc-machine --server-address="127.0.0.1:$MACHINE_PORT" > "$LOG_DIR/machine.log" 2>&1 &
-  sleep 2
+  local port=$1 log=$2
+  cartesi-jsonrpc-machine --server-address="127.0.0.1:$port" > "$log" 2>&1 &
+  MACHINE_SERVER_PID=$!
+  track "$MACHINE_SERVER_PID"
+  wait_for_port "$port" || { echo "--- $log ---" >&2; tail -5 "$log" >&2; exit 1; }
 }
 
 echo "generating rollup.json anchored to L1 block 0 ($L1_GENESIS_HASH)" >&2
-start_machine_server
-"$DEVNET_DIR/generate-config.sh"
+start_machine_server "$GENESIS_MACHINE_PORT" "$LOG_DIR/machine-genesis.log"
+MACHINE_REMOTE="http://127.0.0.1:$GENESIS_MACHINE_PORT" "$DEVNET_DIR/generate-config.sh"
+# The generator is done with it, and a booted machine is not cheap to leave
+# sitting around.
+kill_tree "$MACHINE_SERVER_PID"
 
-echo "starting op-cartesi on a fresh machine server" >&2
-start_machine_server
+echo "starting op-cartesi" >&2
+export MACHINE_REMOTE="http://127.0.0.1:$MACHINE_PORT"
+start_machine_server "$MACHINE_PORT" "$LOG_DIR/machine.log"
 "$DEVNET_DIR/start-shim.sh" > "$LOG_DIR/op-cartesi.log" 2>&1 &
+track $!
 
 # Booting Linux inside the machine takes a while before the engine answers.
 for _ in $(seq 1 60); do
   if grep -q "chain initialized" "$LOG_DIR/op-cartesi.log" 2>/dev/null; then break; fi
   sleep 2
 done
-grep "chain initialized" "$LOG_DIR/op-cartesi.log" >&2 || { echo "engine never initialized" >&2; exit 1; }
+grep "chain initialized" "$LOG_DIR/op-cartesi.log" >&2 || {
+  echo "engine never initialized; last lines of $LOG_DIR/op-cartesi.log:" >&2
+  tail -10 "$LOG_DIR/op-cartesi.log" >&2
+  exit 1
+}
 
 echo "starting op-node in sequencer mode" >&2
 op-node \
@@ -93,6 +162,7 @@ op-node \
   --sequencer.enabled --sequencer.l1-confs=0 --verifier.l1-confs=0 \
   --p2p.disable --l1.beacon.ignore \
   --rpc.addr=127.0.0.1 --rpc.port="$OPNODE_RPC_PORT" > "$LOG_DIR/op-node.log" 2>&1 &
+track $!
 
 if [ "$WITH_BATCHER" = "1" ]; then
   # Batches go to L1 as calldata: blobs would need a beacon endpoint, and this
@@ -108,6 +178,7 @@ if [ "$WITH_BATCHER" = "1" ]; then
     --max-channel-duration=2 \
     --rpc.addr=127.0.0.1 --rpc.port="$BATCHER_RPC_PORT" \
     > "$LOG_DIR/op-batcher.log" 2>&1 &
+  track $!
 fi
 
 if [ "$WITH_VERIFIER" = "1" ]; then
@@ -115,16 +186,20 @@ if [ "$WITH_VERIFIER" = "1" ]; then
   # batcher posted to L1, which is the property that makes the chain a rollup
   # rather than a database with an RPC.
   echo "starting verifier: second machine server, engine and op-node" >&2
-  cartesi-jsonrpc-machine --server-address="127.0.0.1:$VERIFIER_MACHINE_PORT" \
-    > "$LOG_DIR/machine-verifier.log" 2>&1 &
-  sleep 2
+  start_machine_server "$VERIFIER_MACHINE_PORT" "$LOG_DIR/machine-verifier.log"
   MACHINE_REMOTE="http://127.0.0.1:$VERIFIER_MACHINE_PORT" \
   ENGINE_ADDR="$VERIFIER_ENGINE_ADDR" HTTP_ADDR="$VERIFIER_HTTP_ADDR" \
     "$DEVNET_DIR/start-shim.sh" > "$LOG_DIR/op-cartesi-verifier.log" 2>&1 &
+  track $!
   for _ in $(seq 1 60); do
     if grep -q "chain initialized" "$LOG_DIR/op-cartesi-verifier.log" 2>/dev/null; then break; fi
     sleep 2
   done
+  grep -q "chain initialized" "$LOG_DIR/op-cartesi-verifier.log" || {
+    echo "the verifier engine never initialized; last lines of $LOG_DIR/op-cartesi-verifier.log:" >&2
+    tail -10 "$LOG_DIR/op-cartesi-verifier.log" >&2
+    exit 1
+  }
   op-node \
     --l1="http://127.0.0.1:$L1_PORT" --l1.rpckind=basic --l1.trustrpc \
     --rollup.l1-chain-config="$L1_CHAIN_CONFIG" \
@@ -133,6 +208,7 @@ if [ "$WITH_VERIFIER" = "1" ]; then
     --verifier.l1-confs=0 --p2p.disable --l1.beacon.ignore \
     --rpc.addr=127.0.0.1 --rpc.port="$VERIFIER_OPNODE_RPC_PORT" \
     > "$LOG_DIR/op-node-verifier.log" 2>&1 &
+  track $!
 fi
 
 echo >&2

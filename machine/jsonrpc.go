@@ -64,7 +64,15 @@ func DialRemote(ctx context.Context, endpoint string) (*Remote, error) {
 // snapshot produced by `cartesi-machine --store=<dir>` becomes the chain's
 // genesis state.
 func (r *Remote) Load(ctx context.Context, directory string) error {
-	return r.call(ctx, "machine.load", map[string]any{"directory": directory}, nil)
+	err := r.call(ctx, "machine.load", map[string]any{"directory": directory}, nil)
+	// A server holds exactly one machine and will not replace it, so this is
+	// what a stale server from a previous run looks like. Saying so beats
+	// leaving the operator to work out what "machine exists" means about a
+	// server they thought was theirs.
+	if err != nil && strings.Contains(err.Error(), "machine exists") {
+		return fmt.Errorf("the machine server at %s already holds a machine, and a server holds only one: it is left over from an earlier run, so stop it and start a fresh one", r.endpoint)
+	}
+	return err
 }
 
 // Loaded reports whether the server currently holds a machine.
