@@ -73,17 +73,13 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 		return nil, fmt.Errorf("reading genesis root hash: %w", err)
 	}
 	genesisExtra := cfg.genesisExtraData()
-	withdrawalsHash := types.EmptyWithdrawalsHash
-	var requestsHash *common.Hash
-	if cfg.IsIsthmus(cfg.GenesisTimestamp) {
-		// Genesis has produced no outputs, so it commits to the empty tree.
-		withdrawalsHash = NewOutputTree().Root()
-		requestsHash = &types.EmptyRequestsHash
-	}
+	// Genesis has produced no outputs, so it commits to the empty tree.
+	withdrawalsHash := NewOutputTree().Root()
+	requestsHash := types.EmptyRequestsHash
 	blobGasUsed := uint64(0)
 	excessBlobGas := uint64(0)
 	header := &types.Header{
-		RequestsHash:     requestsHash,
+		RequestsHash:     &requestsHash,
 		ParentHash:       common.Hash{},
 		UncleHash:        types.EmptyUncleHash,
 		Coinbase:         common.Address{},
@@ -322,7 +318,7 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 	}
 	tree = tree.Append(outputLeaves(exec.outputs)...)
 
-	header := buildHeader(c.cfg, parent.Header, attrs, root, exec.included, min(exec.gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra, tree.Root())
+	header := buildHeader(parent.Header, attrs, root, exec.included, min(exec.gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra, tree.Root())
 	beaconRoot := header.ParentBeaconRoot
 	c.pending[id] = &pendingPayload{
 		data:       executableData(header, exec.included),
@@ -457,7 +453,7 @@ func (c *Chain) Payload(id engine.PayloadID) (*engine.ExecutionPayloadEnvelope, 
 	}, true
 }
 
-// ImportPayload implements engine_newPayloadV3: validate the payload's block
+// ImportPayload implements engine_newPayloadV4: validate the payload's block
 // hash, then either adopt the locally built block or re-execute the payload's
 // transactions and check the resulting state root.
 func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, beaconRoot *common.Hash) (engine.PayloadStatusV1, error) {
@@ -534,7 +530,7 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 		return engine.PayloadStatusV1{Status: engine.SYNCING}, nil
 	}
 	tree = tree.Append(outputLeaves(exec.outputs)...)
-	if data.WithdrawalsRoot != nil && tree.Root() != *data.WithdrawalsRoot {
+	if tree.Root() != *data.WithdrawalsRoot {
 		exec.machine.Close(ctx)
 		return invalidStatus(&parentHash, fmt.Sprintf("outputs root mismatch: computed %s, payload claims %s", tree.Root(), *data.WithdrawalsRoot)), nil
 	}

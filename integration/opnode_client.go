@@ -21,12 +21,11 @@ import (
 // being exercised is the real thing. Swap this for sources.EngineAPIClient if
 // the upstream module becomes consumable.
 type engineClient struct {
-	rpc     *rpc.Client
-	isthmus bool
+	rpc *rpc.Client
 }
 
-func newEngineClient(c *rpc.Client, isthmus bool) *engineClient {
-	return &engineClient{rpc: c, isthmus: isthmus}
+func newEngineClient(c *rpc.Client) *engineClient {
+	return &engineClient{rpc: c}
 }
 
 func (e *engineClient) ForkchoiceUpdate(ctx context.Context, fc *eth.ForkchoiceState, attrs *eth.PayloadAttributes) (*eth.ForkchoiceUpdatedResult, error) {
@@ -37,15 +36,13 @@ func (e *engineClient) ForkchoiceUpdate(ctx context.Context, fc *eth.ForkchoiceS
 	return &result, nil
 }
 
-// isthmus selects the V4 methods, mirroring op-node's own version selection:
-// Config.NewPayloadVersion and GetPayloadVersion switch on IsIsthmus.
+// The payload methods are V4 only, mirroring op-node's own version selection:
+// Config.NewPayloadVersion and GetPayloadVersion switch to V4 at Isthmus, and
+// this chain is Isthmus from genesis. Forkchoice stays V3, which is what
+// op-node calls for every fork from Ecotone on.
 func (e *engineClient) GetPayload(ctx context.Context, info eth.PayloadInfo) (*eth.ExecutionPayloadEnvelope, error) {
-	method := "engine_getPayloadV3"
-	if e.isthmus {
-		method = "engine_getPayloadV4"
-	}
 	var result eth.ExecutionPayloadEnvelope
-	if err := e.rpc.CallContext(ctx, &result, method, info.ID); err != nil {
+	if err := e.rpc.CallContext(ctx, &result, "engine_getPayloadV4", info.ID); err != nil {
 		return nil, err
 	}
 	return &result, nil
@@ -53,12 +50,7 @@ func (e *engineClient) GetPayload(ctx context.Context, info eth.PayloadInfo) (*e
 
 func (e *engineClient) NewPayload(ctx context.Context, payload *eth.ExecutionPayload, parentBeaconBlockRoot *common.Hash) (*eth.PayloadStatusV1, error) {
 	var result eth.PayloadStatusV1
-	var err error
-	if e.isthmus {
-		err = e.rpc.CallContext(ctx, &result, "engine_newPayloadV4", payload, []common.Hash{}, parentBeaconBlockRoot, []hexutil.Bytes{})
-	} else {
-		err = e.rpc.CallContext(ctx, &result, "engine_newPayloadV3", payload, []common.Hash{}, parentBeaconBlockRoot)
-	}
+	err := e.rpc.CallContext(ctx, &result, "engine_newPayloadV4", payload, []common.Hash{}, parentBeaconBlockRoot, []hexutil.Bytes{})
 	if err != nil {
 		return nil, err
 	}

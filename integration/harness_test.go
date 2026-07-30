@@ -37,21 +37,19 @@ type harness struct {
 	chain      *chain.Chain
 	pool       *mempool.Pool
 	engine     *engineClient
-	holocene   bool
-	isthmus    bool
 	genesisRef eth.L2BlockRef
 }
 
-func newHarness(t *testing.T, holocene bool) *harness {
+func newHarness(t *testing.T) *harness {
 	t.Helper()
-	return newHarnessWithForks(t, holocene, false, nil)
+	return newHarnessWithOutputs(t, nil)
 }
 
-// newIsthmusHarness builds a chain with Isthmus active, where the machine emits
-// one provable output per input so the outputs commitment is exercised.
-func newIsthmusHarness(t *testing.T) *harness {
+// newEmittingHarness builds a chain whose machine emits one provable output
+// per input, so the outputs commitment is exercised.
+func newEmittingHarness(t *testing.T) *harness {
 	t.Helper()
-	return newHarnessWithForks(t, true, true, func(input []byte) []machine.Output {
+	return newHarnessWithOutputs(t, func(input []byte) []machine.Output {
 		return []machine.Output{
 			{Reason: machine.CmioYieldAutomaticReasonTxOutput, Data: append([]byte("voucher:"), input[:8]...)},
 			{Reason: machine.CmioYieldAutomaticReasonTxReport, Data: []byte("diagnostic")},
@@ -59,7 +57,7 @@ func newIsthmusHarness(t *testing.T) *harness {
 	})
 }
 
-func newHarnessWithForks(t *testing.T, holocene, isthmus bool, outputFn func([]byte) []machine.Output) *harness {
+func newHarnessWithOutputs(t *testing.T, outputFn func([]byte) []machine.Output) *harness {
 	t.Helper()
 	ctx := context.Background()
 
@@ -67,14 +65,6 @@ func newHarnessWithForks(t *testing.T, holocene, isthmus bool, outputFn func([]b
 		ChainID:          l2ChainID,
 		GenesisTimestamp: genesisTS,
 		GasLimit:         30_000_000,
-	}
-	if holocene {
-		at := uint64(0)
-		cfg.HoloceneTime = &at
-	}
-	if isthmus {
-		at := uint64(0)
-		cfg.IsthmusTime = &at
 	}
 
 	m := machine.NewMock([]byte("op-cartesi-integration"))
@@ -103,12 +93,10 @@ func newHarnessWithForks(t *testing.T, holocene, isthmus bool, outputFn func([]b
 
 	genesis := c.HeadBlock()
 	return &harness{
-		t:        t,
-		chain:    c,
-		pool:     pool,
-		engine:   newEngineClient(rpcClient, isthmus),
-		holocene: holocene,
-		isthmus:  isthmus,
+		t:      t,
+		chain:  c,
+		pool:   pool,
+		engine: newEngineClient(rpcClient),
 		genesisRef: eth.L2BlockRef{
 			Hash:   genesis.Hash(),
 			Number: 0,
@@ -134,14 +122,6 @@ func (h *harness) rollupParams() opcrollup.Params {
 		L1SystemConfigAddress:  common.HexToAddress("0x6900000000000000000000000000000000000002"),
 		EIP1559Denominator:     chain.DefaultEIP1559Denominator,
 		EIP1559Elasticity:      chain.DefaultEIP1559Elasticity,
-	}
-	if h.holocene {
-		at := uint64(0)
-		p.HoloceneTime = &at
-	}
-	if h.isthmus {
-		at := uint64(0)
-		p.IsthmusTime = &at
 	}
 	return p
 }

@@ -21,11 +21,6 @@ REPO_DIR="$(dirname "$DEVNET_DIR")"
 : "${GENESIS_TIMESTAMP:=0}"
 : "${GAS_LIMIT:=30000000}"
 : "${MAX_CYCLES_PER_INPUT:=1000000000}"
-: "${HOLOCENE:=true}"
-# Isthmus publishes the outputs Merkle root in the header. op-proposer cannot
-# compute an output root without it, so leave this on for any chain you intend
-# to propose.
-: "${ISTHMUS:=true}"
 
 # --- L1 anchor and contract addresses --------------------------------------
 # These come from the L1 chain and the op-deployer output. The placeholder
@@ -51,8 +46,6 @@ CHAIN_FLAGS=(
   -genesis.timestamp "$GENESIS_TIMESTAMP"
   -gas-limit "$GAS_LIMIT"
   -max-cycles-per-input "$MAX_CYCLES_PER_INPUT"
-  -holocene="$HOLOCENE"
-  -isthmus="$ISTHMUS"
 )
 if [ -n "$MACHINE_REMOTE" ]; then
   CHAIN_FLAGS+=(-machine.remote "$MACHINE_REMOTE")

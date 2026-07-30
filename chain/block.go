@@ -48,17 +48,11 @@ func txsRoot(txs [][]byte) common.Hash {
 }
 
 // extraData computes the header extraData for a block built from payload
-// attributes. Before Holocene it must be empty; from Holocene onward op-node
-// is required to supply the EIP-1559 parameters, and zeroed parameters mean
-// "use the chain defaults". op-geth's own encoder produces the bytes, so they
-// match what an op-geth engine would have committed to.
+// attributes. Holocene is always active, so op-node is required to supply the
+// EIP-1559 parameters, and zeroed parameters mean "use the chain defaults".
+// op-geth's own encoder produces the bytes, so they match what an op-geth
+// engine would have committed to.
 func (c Config) extraData(timestamp uint64, params []byte) ([]byte, error) {
-	if !c.IsHolocene(timestamp) {
-		if len(params) != 0 {
-			return nil, fmt.Errorf("eip1559Params supplied for pre-Holocene block")
-		}
-		return []byte{}, nil
-	}
 	if err := eip1559.ValidateHolocene1559Params(params); err != nil {
 		return nil, err
 	}
@@ -76,29 +70,20 @@ func (c Config) genesisExtraData() []byte {
 }
 
 func (c Config) encodeExtraData(timestamp, denominator, elasticity uint64) []byte {
-	extra := eip1559.EncodeOptimismExtraData(c, timestamp, denominator, elasticity, nil)
-	if extra == nil {
-		return []byte{}
-	}
-	return extra
+	return eip1559.EncodeOptimismExtraData(c, timestamp, denominator, elasticity, nil)
 }
 
 // buildHeader assembles the header for a new block. Field choices follow the
-// OP Stack post-Ecotone shape: no uncles, empty withdrawals list, zero blob
-// gas, parentBeaconRoot from the payload attributes. They must match op-node's
+// OP Stack Isthmus shape: no uncles, empty withdrawals list, zero blob gas,
+// parentBeaconRoot from the payload attributes, and the withdrawals root set
+// directly to this chain's outputs Merkle root rather than derived from a
+// withdrawals list. They must match op-node's
 // ExecutionPayloadEnvelope.CheckBlockHash exactly, since op-node recomputes
-// the block hash from the payload it receives.
-func buildHeader(cfg Config, parent *types.Header, attrs *engine.PayloadAttributes, stateRoot common.Hash, txs [][]byte, gasUsed, gasLimit uint64, baseFee *big.Int, extra []byte, outputsRoot common.Hash) *types.Header {
-	withdrawalsHash := types.EmptyWithdrawalsHash
-	var requestsHash *common.Hash
-	if cfg.IsIsthmus(attrs.Timestamp) {
-		// From Isthmus the withdrawals root is set directly rather than
-		// derived from a withdrawals list, which is where this chain publishes
-		// its outputs Merkle root. op-node pairs that with an empty requests
-		// hash when it reconstructs the header, so this must match.
-		withdrawalsHash = outputsRoot
-		requestsHash = &types.EmptyRequestsHash
-	}
+// the block hash from the payload it receives — including the empty requests
+// hash it pairs with a directly-set withdrawals root.
+func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoot common.Hash, txs [][]byte, gasUsed, gasLimit uint64, baseFee *big.Int, extra []byte, outputsRoot common.Hash) *types.Header {
+	withdrawalsHash := outputsRoot
+	requestsHash := types.EmptyRequestsHash
 	blobGasUsed := uint64(0)
 	excessBlobGas := uint64(0)
 	beaconRoot := attrs.BeaconRoot
@@ -106,7 +91,7 @@ func buildHeader(cfg Config, parent *types.Header, attrs *engine.PayloadAttribut
 		beaconRoot = &common.Hash{}
 	}
 	return &types.Header{
-		RequestsHash:     requestsHash,
+		RequestsHash:     &requestsHash,
 		ParentHash:       parent.Hash(),
 		UncleHash:        types.EmptyUncleHash,
 		Coinbase:         attrs.SuggestedFeeRecipient,
@@ -131,14 +116,10 @@ func buildHeader(cfg Config, parent *types.Header, attrs *engine.PayloadAttribut
 }
 
 func executableData(h *types.Header, txs [][]byte) *engine.ExecutableData {
-	// Under Isthmus the withdrawals root travels as its own payload field
-	// instead of being derived from the (empty) withdrawals list.
-	var withdrawalsRoot *common.Hash
-	if h.RequestsHash != nil {
-		withdrawalsRoot = h.WithdrawalsHash
-	}
+	// The withdrawals root travels as its own payload field instead of being
+	// derived from the (empty) withdrawals list.
 	return &engine.ExecutableData{
-		WithdrawalsRoot: withdrawalsRoot,
+		WithdrawalsRoot: h.WithdrawalsHash,
 		ParentHash:      h.ParentHash,
 		FeeRecipient:    h.Coinbase,
 		StateRoot:       h.Root,
@@ -176,22 +157,16 @@ func (c Config) headerFromPayload(data *engine.ExecutableData, beaconRoot *commo
 	if err := eip1559.ValidateOptimismExtraData(c, data.Timestamp, data.ExtraData); err != nil {
 		return nil, fmt.Errorf("invalid extraData: %w", err)
 	}
-	withdrawalsHash := types.EmptyWithdrawalsHash
-	var requestsHash *common.Hash
-	if isthmus := c.IsIsthmus(data.Timestamp); isthmus != (data.WithdrawalsRoot != nil) {
-		if isthmus {
-			return nil, fmt.Errorf("missing withdrawalsRoot in post-Isthmus payload")
-		}
-		return nil, fmt.Errorf("withdrawalsRoot set in pre-Isthmus payload")
-	} else if isthmus {
-		withdrawalsHash = *data.WithdrawalsRoot
-		requestsHash = &types.EmptyRequestsHash
+	if data.WithdrawalsRoot == nil {
+		return nil, fmt.Errorf("missing withdrawalsRoot")
 	}
+	withdrawalsHash := *data.WithdrawalsRoot
+	requestsHash := types.EmptyRequestsHash
 	if beaconRoot == nil {
 		beaconRoot = &common.Hash{}
 	}
 	return &types.Header{
-		RequestsHash:     requestsHash,
+		RequestsHash:     &requestsHash,
 		ParentHash:       data.ParentHash,
 		UncleHash:        types.EmptyUncleHash,
 		Coinbase:         data.FeeRecipient,

@@ -33,10 +33,9 @@ func (h *harness) buildAttributes(parent eth.L2BlockRef, extraTxs ...[]byte) *et
 		NoTxPool:              false,
 		GasLimit:              &gasLimit,
 	}
-	if h.holocene {
-		params := eth.Bytes8{}
-		attrs.EIP1559Params = &params
-	}
+	// Holocene is always active, so op-node always supplies these.
+	params := eth.Bytes8{}
+	attrs.EIP1559Params = &params
 	return attrs
 }
 
@@ -139,50 +138,38 @@ func depositTx(t *testing.T, seq uint64) []byte {
 // blocks produced end-to-end through op-node's engine client, each one's hash
 // independently verified by op-node's own header reconstruction.
 func TestSequenceBlocksWithOpNodeClient(t *testing.T) {
-	for _, holocene := range []bool{false, true} {
-		name := "pre-holocene"
-		if holocene {
-			name = "holocene"
+	ctx := context.Background()
+	h := newHarness(t)
+
+	parent := h.genesisRef
+	for i := range 3 {
+		env := h.sequenceBlock(ctx, parent)
+		payload := env.ExecutionPayload
+
+		if uint64(payload.BlockNumber) != parent.Number+1 {
+			t.Fatalf("block %d: number %d, want %d", i, payload.BlockNumber, parent.Number+1)
 		}
-		t.Run(name, func(t *testing.T) {
-			ctx := context.Background()
-			h := newHarness(t, holocene)
+		if payload.ParentHash != parent.Hash {
+			t.Fatalf("block %d: parent %s, want %s", i, payload.ParentHash, parent.Hash)
+		}
+		if uint64(payload.Timestamp) != parent.Time+blockTime {
+			t.Fatalf("block %d: timestamp %d, want %d", i, payload.Timestamp, parent.Time+blockTime)
+		}
+		if len(payload.Transactions) != 1 {
+			t.Fatalf("block %d: %d transactions, want the forced deposit only", i, len(payload.Transactions))
+		}
+		if payload.StateRoot == (eth.Bytes32{}) {
+			t.Fatalf("block %d: empty state root", i)
+		}
+		// The EIP-1559 parameters are recorded in extraData.
+		if len(payload.ExtraData) != 9 {
+			t.Fatalf("block %d: extraData %x, want 9 bytes", i, payload.ExtraData)
+		}
+		parent = payloadRef(env)
+	}
 
-			parent := h.genesisRef
-			for i := range 3 {
-				env := h.sequenceBlock(ctx, parent)
-				payload := env.ExecutionPayload
-
-				if uint64(payload.BlockNumber) != parent.Number+1 {
-					t.Fatalf("block %d: number %d, want %d", i, payload.BlockNumber, parent.Number+1)
-				}
-				if payload.ParentHash != parent.Hash {
-					t.Fatalf("block %d: parent %s, want %s", i, payload.ParentHash, parent.Hash)
-				}
-				if uint64(payload.Timestamp) != parent.Time+blockTime {
-					t.Fatalf("block %d: timestamp %d, want %d", i, payload.Timestamp, parent.Time+blockTime)
-				}
-				if len(payload.Transactions) != 1 {
-					t.Fatalf("block %d: %d transactions, want the forced deposit only", i, len(payload.Transactions))
-				}
-				if payload.StateRoot == (eth.Bytes32{}) {
-					t.Fatalf("block %d: empty state root", i)
-				}
-				// Holocene records the EIP-1559 parameters in extraData;
-				// before it, extraData must be empty.
-				if holocene && len(payload.ExtraData) != 9 {
-					t.Fatalf("block %d: extraData %x, want 9 bytes under Holocene", i, payload.ExtraData)
-				}
-				if !holocene && len(payload.ExtraData) != 0 {
-					t.Fatalf("block %d: extraData %x, want empty pre-Holocene", i, payload.ExtraData)
-				}
-				parent = payloadRef(env)
-			}
-
-			if head := h.chain.HeadBlock(); head.NumberU64() != 3 {
-				t.Fatalf("head at %d, want 3", head.NumberU64())
-			}
-		})
+	if head := h.chain.HeadBlock(); head.NumberU64() != 3 {
+		t.Fatalf("head at %d, want 3", head.NumberU64())
 	}
 }
 
@@ -193,7 +180,7 @@ func TestStateRootAdvancesDeterministically(t *testing.T) {
 	ctx := context.Background()
 
 	run := func() []eth.Bytes32 {
-		h := newHarness(t, true)
+		h := newHarness(t)
 		parent := h.genesisRef
 		var roots []eth.Bytes32
 		for range 3 {
@@ -219,7 +206,7 @@ func TestStateRootAdvancesDeterministically(t *testing.T) {
 // the next block, and dropped from the pool once included.
 func TestMempoolTransactionIsSequenced(t *testing.T) {
 	ctx := context.Background()
-	h := newHarness(t, true)
+	h := newHarness(t)
 
 	key, err := crypto.ToECDSA(crypto.Keccak256([]byte("integration user key")))
 	if err != nil {
@@ -275,7 +262,7 @@ func TestMempoolTransactionIsSequenced(t *testing.T) {
 // than erroring, so the shim must answer SYNCING (not an RPC error).
 func TestUnknownHeadReportsSyncing(t *testing.T) {
 	ctx := context.Background()
-	h := newHarness(t, true)
+	h := newHarness(t)
 
 	result, err := h.engine.ForkchoiceUpdate(ctx, &eth.ForkchoiceState{
 		HeadBlockHash:      common.HexToHash("0xdeadbeef"),
@@ -295,8 +282,8 @@ func TestUnknownHeadReportsSyncing(t *testing.T) {
 // derivation-from-L1 path, exercised through op-node's client.
 func TestVerifierRebuildsBlockFromPayload(t *testing.T) {
 	ctx := context.Background()
-	sequencer := newHarness(t, true)
-	verifier := newHarness(t, true)
+	sequencer := newHarness(t)
+	verifier := newHarness(t)
 
 	if sequencer.genesisRef.Hash != verifier.genesisRef.Hash {
 		t.Fatal("independent nodes disagree on genesis")

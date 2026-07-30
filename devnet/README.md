@@ -56,15 +56,16 @@ op-node \
 
 ## Fork support
 
-op-cartesi implements the **V3 and V4** Engine API methods, covering every fork
-from Ecotone through Isthmus. `generate-config.sh` activates them all at genesis.
+The fork schedule is fixed: every fork through **Isthmus** is active from
+genesis, and none of them is configurable. A new chain has no pre-fork history
+to preserve, and Isthmus is not optional — op-node computes the L2 output root
+pre-Isthmus by proving the L2ToL1MessagePasser account against the block's
+state root, which cannot work here because that state root is a Cartesi hash
+tree, not an Ethereum MPT. A pre-Isthmus chain could never be proposed, so the
+shim does not offer one.
 
-Isthmus is required for a chain you intend to propose: from Isthmus onward
-op-node reads the withdrawal commitment from the header instead of proving it
-against the state trie, and the proof path cannot work here — there is no
-Ethereum MPT to prove against. `op-proposer` therefore only functions on an
-Isthmus chain. It can be disabled with `HOLOCENE`/`ISTHMUS` overrides for
-experiments, but such a chain cannot be proposed.
+Accordingly op-cartesi serves `engine_forkchoiceUpdatedV3` plus the **V4**
+payload methods, which is exactly what op-node calls for an Isthmus chain.
 
 Jovian and later are not supported: Jovian adds a minimum-base-fee field the
 shim does not implement.

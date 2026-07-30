@@ -96,6 +96,9 @@ func attrsOn(parent *Block, deposits [][]byte, noTxPool bool) *engine.PayloadAtt
 		Transactions:          deposits,
 		NoTxPool:              noTxPool,
 		GasLimit:              &gasLimit,
+		// Holocene is always active, so op-node always sends these. Zeroed
+		// means "use the chain defaults".
+		EIP1559Params: make([]byte, 8),
 	}
 }
 
@@ -282,14 +285,11 @@ func TestRejectedPoolTxExcluded(t *testing.T) {
 	}
 }
 
-// Holocene moves the EIP-1559 parameters into each header's extraData. The
-// bytes must match what an op-geth engine would produce, since op-node
-// recomputes the block hash over them.
-func TestHoloceneExtraData(t *testing.T) {
-	holocene := uint64(0)
-	cfg := testConfig()
-	cfg.HoloceneTime = &holocene
-	c, _, _ := newTestChainWithConfig(t, "seed", cfg)
+// The EIP-1559 parameters live in each header's extraData. The bytes must
+// match what an op-geth engine would produce, since op-node recomputes the
+// block hash over them.
+func TestEIP1559ParamsInExtraData(t *testing.T) {
+	c, _, _ := newTestChainWithConfig(t, "seed", testConfig())
 
 	genesisExtra := c.HeadBlock().Header.Extra
 	if len(genesisExtra) != 9 || genesisExtra[0] != 0x00 {
@@ -297,9 +297,7 @@ func TestHoloceneExtraData(t *testing.T) {
 	}
 
 	// Zeroed parameters from op-node mean "use the chain defaults".
-	attrs := attrsOn(c.HeadBlock(), [][]byte{depositTx(t, "l1-info")}, true)
-	attrs.EIP1559Params = make([]byte, 8)
-	env := buildBlock(c, t, attrs)
+	env := buildBlock(c, t, attrsOn(c.HeadBlock(), [][]byte{depositTx(t, "l1-info")}, true))
 	extra := env.ExecutionPayload.ExtraData
 	if len(extra) != 9 {
 		t.Fatalf("extraData = %x, want 9 bytes", extra)
@@ -317,26 +315,6 @@ func TestHoloceneExtraData(t *testing.T) {
 	env2 := buildBlock(c, t, attrs2)
 	if got := env2.ExecutionPayload.ExtraData; !bytes.Equal(got, []byte{0x00, 0, 0, 0, 100, 0, 0, 0, 4}) {
 		t.Fatalf("extraData = %x, want explicit params echoed", got)
-	}
-}
-
-// Before Holocene, extraData must be empty; a payload carrying any is invalid.
-func TestPreHoloceneRejectsExtraData(t *testing.T) {
-	sequencer, _, _ := newTestChain(t, "seed")
-	env := buildBlock(sequencer, t, attrsOn(sequencer.HeadBlock(), [][]byte{depositTx(t, "l1-info")}, true))
-	if len(env.ExecutionPayload.ExtraData) != 0 {
-		t.Fatalf("pre-Holocene extraData = %x, want empty", env.ExecutionPayload.ExtraData)
-	}
-
-	tampered := *env.ExecutionPayload
-	tampered.ExtraData = []byte{0x00, 0, 0, 0, 250, 0, 0, 0, 6}
-	verifier, _, _ := newTestChain(t, "seed")
-	st, err := verifier.ImportPayload(context.Background(), &tampered, env.ParentBeaconBlockRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if st.Status != engine.INVALID {
-		t.Fatalf("expected INVALID for pre-Holocene extraData, got %s", st.Status)
 	}
 }
 

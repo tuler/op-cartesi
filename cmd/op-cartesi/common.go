@@ -14,6 +14,9 @@ import (
 // every node of the chain: they determine the genesis block hash and how
 // blocks are built and validated. Both `run` and `genesis` register them so
 // the generated rollup.json describes the chain the node actually serves.
+//
+// The fork schedule is not among them: every fork through Isthmus is active
+// from genesis and none of them is optional. See chain.Config.
 type chainFlags struct {
 	machineRemote string
 	bootCycles    uint64
@@ -22,8 +25,6 @@ type chainFlags struct {
 	gasLimit      uint64
 	maxCycles     uint64
 	snapshots     int
-	holocene      bool
-	isthmus       bool
 	denominator   uint64
 	elasticity    uint64
 }
@@ -36,8 +37,6 @@ func (f *chainFlags) register(fs *flag.FlagSet) {
 	fs.Uint64Var(&f.gasLimit, "gas-limit", 30_000_000, "fallback block gas limit")
 	fs.Uint64Var(&f.maxCycles, "max-cycles-per-input", 1_000_000_000, "mcycle budget per input")
 	fs.IntVar(&f.snapshots, "snapshots", 32, "number of recent blocks to keep machine snapshots for")
-	fs.BoolVar(&f.holocene, "holocene", true, "activate Holocene at genesis (EIP-1559 parameters recorded in header extraData)")
-	fs.BoolVar(&f.isthmus, "isthmus", true, "activate Isthmus at genesis (outputs Merkle root published in the header's withdrawalsRoot; required for op-proposer)")
 	fs.Uint64Var(&f.denominator, "eip1559.denominator", chain.DefaultEIP1559Denominator, "Holocene EIP-1559 base fee change denominator")
 	fs.Uint64Var(&f.elasticity, "eip1559.elasticity", chain.DefaultEIP1559Elasticity, "Holocene EIP-1559 elasticity multiplier")
 }
@@ -51,14 +50,6 @@ func (f *chainFlags) chainConfig() chain.Config {
 		MaxSnapshots:       f.snapshots,
 		EIP1559Denominator: f.denominator,
 		EIP1559Elasticity:  f.elasticity,
-	}
-	if f.holocene {
-		genesis := uint64(0)
-		cfg.HoloceneTime = &genesis
-	}
-	if f.isthmus {
-		genesis := uint64(0)
-		cfg.IsthmusTime = &genesis
 	}
 	return cfg
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 
@@ -149,6 +150,7 @@ func TestEngineRPCSequencingRoundtrip(t *testing.T) {
 		Transactions:          [][]byte{testDeposit(t)},
 		NoTxPool:              false,
 		GasLimit:              &gasLimit,
+		EIP1559Params:         make([]byte, 8),
 	}
 	fc := engine.ForkchoiceStateV1{HeadBlockHash: genesis, SafeBlockHash: genesis, FinalizedBlockHash: genesis}
 
@@ -163,7 +165,7 @@ func TestEngineRPCSequencingRoundtrip(t *testing.T) {
 		BlockValue            string                `json:"blockValue"`
 		ParentBeaconBlockRoot *common.Hash          `json:"parentBeaconBlockRoot"`
 	}
-	client.call("engine_getPayloadV3", &envelope, *fcuResp.PayloadID)
+	client.call("engine_getPayloadV4", &envelope, *fcuResp.PayloadID)
 	payload := envelope.ExecutionPayload
 	if payload.Number != 1 || len(payload.Transactions) != 1 {
 		t.Fatalf("unexpected payload: number=%d txs=%d", payload.Number, len(payload.Transactions))
@@ -173,7 +175,7 @@ func TestEngineRPCSequencingRoundtrip(t *testing.T) {
 	}
 
 	var status engine.PayloadStatusV1
-	client.call("engine_newPayloadV3", &status, payload, []common.Hash{}, beaconRoot)
+	client.call("engine_newPayloadV4", &status, payload, []common.Hash{}, beaconRoot, []hexutil.Bytes{})
 	if status.Status != engine.VALID {
 		t.Fatalf("newPayload: %+v", status)
 	}

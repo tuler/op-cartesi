@@ -23,7 +23,7 @@ import (
 // hashing, over payloads the shim produced.
 func TestIsthmusOutputRootThroughOpNode(t *testing.T) {
 	ctx := context.Background()
-	h := newIsthmusHarness(t)
+	h := newEmittingHarness(t)
 
 	parent := h.genesisRef
 	var previous eth.Bytes32
@@ -72,7 +72,7 @@ func TestIsthmusOutputRootThroughOpNode(t *testing.T) {
 // matches; this test pins the Isthmus-specific fields explicitly.
 func TestIsthmusHeaderShape(t *testing.T) {
 	ctx := context.Background()
-	h := newIsthmusHarness(t)
+	h := newEmittingHarness(t)
 
 	env := h.sequenceBlock(ctx, h.genesisRef)
 	payload := env.ExecutionPayload
@@ -85,17 +85,5 @@ func TestIsthmusHeaderShape(t *testing.T) {
 	}
 	if actual, ok := env.CheckBlockHash(); !ok {
 		t.Fatalf("op-node recomputed %s, payload claims %s", actual, payload.BlockHash)
-	}
-}
-
-// A pre-Isthmus chain must not emit a withdrawals root, since op-node would
-// then reconstruct a different header than the one the shim hashed.
-func TestPreIsthmusHasNoWithdrawalsRoot(t *testing.T) {
-	ctx := context.Background()
-	h := newHarness(t, true)
-
-	env := h.sequenceBlock(ctx, h.genesisRef)
-	if env.ExecutionPayload.WithdrawalsRoot != nil {
-		t.Fatalf("pre-Isthmus payload carries withdrawalsRoot %s", env.ExecutionPayload.WithdrawalsRoot)
 	}
 }

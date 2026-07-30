@@ -59,7 +59,7 @@ func generateRollupJSON(t *testing.T, h *harness) map[string]json.RawMessage {
 // `genesis` subcommand writes against op-node's rollup.Config schema, and
 // against the chain the shim actually serves.
 func TestGeneratedRollupConfigMatchesOpNodeSchema(t *testing.T) {
-	h := newIsthmusHarness(t)
+	h := newEmittingHarness(t)
 	doc := generateRollupJSON(t, h)
 
 	for _, key := range requiredRollupKeys {
@@ -127,31 +127,23 @@ func TestGeneratedRollupConfigMatchesOpNodeSchema(t *testing.T) {
 	}
 }
 
-// Holocene changes the header encoding, so the rollup config and the chain the
-// shim serves must agree on whether it is active.
-func TestRollupConfigTracksHoloceneSetting(t *testing.T) {
-	for _, holocene := range []bool{false, true} {
-		h := newHarness(t, holocene)
-		doc := generateRollupJSON(t, h)
-		_, present := doc["holocene_time"]
-		if present != holocene {
-			t.Errorf("holocene=%v: holocene_time present=%v, want %v", holocene, present, holocene)
-		}
+// The SystemConfig must seed the Holocene EIP-1559 parameters that the shim
+// writes into its genesis header, or op-node and the engine would disagree
+// about the chain's fee parameters from block 1 onward.
+func TestRollupConfigSeedsEIP1559Params(t *testing.T) {
+	h := newHarness(t)
+	doc := generateRollupJSON(t, h)
 
-		var sysCfg struct {
-			SystemConfig struct {
-				EIP1559Params string `json:"eip1559Params"`
-			} `json:"system_config"`
-		}
-		if err := json.Unmarshal(doc["genesis"], &sysCfg); err != nil {
-			t.Fatal(err)
-		}
-		want := "0x0000000000000000"
-		if holocene {
-			want = "0x000000fa00000006" // denominator 250, elasticity 6
-		}
-		if sysCfg.SystemConfig.EIP1559Params != want {
-			t.Errorf("holocene=%v: eip1559Params %s, want %s", holocene, sysCfg.SystemConfig.EIP1559Params, want)
-		}
+	var sysCfg struct {
+		SystemConfig struct {
+			EIP1559Params string `json:"eip1559Params"`
+		} `json:"system_config"`
+	}
+	if err := json.Unmarshal(doc["genesis"], &sysCfg); err != nil {
+		t.Fatal(err)
+	}
+	const want = "0x000000fa00000006" // denominator 250, elasticity 6
+	if sysCfg.SystemConfig.EIP1559Params != want {
+		t.Errorf("eip1559Params %s, want %s", sysCfg.SystemConfig.EIP1559Params, want)
 	}
 }

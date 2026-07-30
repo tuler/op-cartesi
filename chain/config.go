@@ -36,56 +36,34 @@ type Config struct {
 	// Blocks older than this cannot be built on or re-verified locally.
 	MaxSnapshots int
 
-	// HoloceneTime activates Holocene at the given L2 timestamp. From
-	// Holocene onward the EIP-1559 parameters are encoded in each header's
-	// extraData; before it, extraData must be empty. Nil means never.
-	HoloceneTime *uint64
-	// IsthmusTime activates Isthmus at the given L2 timestamp. From Isthmus
-	// onward the withdrawal commitment is a header field rather than something
-	// op-node proves out of the state trie, which is what lets this chain
-	// publish an outputs Merkle root that op-node can read. Nil means never.
-	//
-	// Before Isthmus, op-node computes the output root by asking for an
-	// eth_getProof of the L2ToL1MessagePasser account and verifying it against
-	// the block's state root. That is unimplementable here: the state root is
-	// a Cartesi hash tree, not an Ethereum MPT. So op-proposer only works on
-	// an Isthmus chain.
-	IsthmusTime *uint64
 	// EIP1559Denominator and EIP1559Elasticity are the chain defaults written
 	// into headers when op-node sends zeroed Holocene parameters.
 	EIP1559Denominator uint64
 	EIP1559Elasticity  uint64
 }
 
-// IsHolocene reports whether Holocene is active at the given L2 timestamp. It
-// is half of op-geth's eip1559.ForkChecker, which this config implements so
-// op-geth's own extraData encoders can be reused.
-func (c Config) IsHolocene(time uint64) bool {
-	return c.HoloceneTime != nil && time >= *c.HoloceneTime
-}
+// The chain runs every fork through Isthmus from genesis; there is no pre-fork
+// history to preserve, and Isthmus is not optional. op-node computes the L2
+// output root pre-Isthmus by asking for an eth_getProof of the
+// L2ToL1MessagePasser account and verifying it against the block's state root,
+// which cannot work here: the state root is a Cartesi hash tree, not an
+// Ethereum MPT. A pre-Isthmus chain could therefore never be proposed, so the
+// fork schedule is fixed rather than configurable.
+//
+// IsHolocene and IsJovian implement op-geth's eip1559.ForkChecker, which lets
+// op-geth's own extraData encoders be reused directly.
 
-// IsJovian always reports false: Jovian requires a minimum-base-fee field this
-// shim does not implement yet. Configuring it is rejected at startup.
+// IsHolocene always reports true: Holocene is active from genesis.
+func (c Config) IsHolocene(uint64) bool { return true }
+
+// IsJovian always reports false: Jovian adds a minimum-base-fee field this
+// shim does not implement.
 func (c Config) IsJovian(uint64) bool { return false }
-
-// IsIsthmus reports whether Isthmus is active at the given L2 timestamp.
-func (c Config) IsIsthmus(time uint64) bool {
-	return c.IsthmusTime != nil && time >= *c.IsthmusTime
-}
 
 // Validate rejects configurations this shim cannot serve correctly.
 func (c Config) Validate() error {
 	if c.ChainID == 0 {
 		return fmt.Errorf("chain id must be set")
-	}
-	// Isthmus builds on Holocene's header shape; op-node also selects the V4
-	// engine methods by Isthmus alone, so an Isthmus-without-Holocene chain
-	// would produce headers no op-geth engine would agree with.
-	if c.IsthmusTime != nil && c.HoloceneTime == nil {
-		return fmt.Errorf("isthmus requires holocene to be activated as well")
-	}
-	if c.IsthmusTime != nil && c.HoloceneTime != nil && *c.IsthmusTime < *c.HoloceneTime {
-		return fmt.Errorf("isthmus activation %d precedes holocene activation %d", *c.IsthmusTime, *c.HoloceneTime)
 	}
 	return nil
 }

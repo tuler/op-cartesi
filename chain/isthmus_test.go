@@ -13,20 +13,8 @@ import (
 	"github.com/tuler/op-cartesi/mempool"
 )
 
-func isthmusConfig() Config {
-	at := uint64(0)
-	cfg := testConfig()
-	cfg.HoloceneTime = &at
-	cfg.IsthmusTime = &at
-	return cfg
-}
-
-// isthmusAttrs are payload attributes for an Isthmus chain: Holocene is
-// necessarily active too, so op-node would always supply EIP-1559 parameters.
 func isthmusAttrs(parent *Block, deposits [][]byte) *engine.PayloadAttributes {
-	attrs := attrsOn(parent, deposits, true)
-	attrs.EIP1559Params = make([]byte, 8)
-	return attrs
+	return attrsOn(parent, deposits, true)
 }
 
 func newIsthmusChain(t *testing.T, seed string) (*Chain, *mempool.Pool) {
@@ -34,7 +22,7 @@ func newIsthmusChain(t *testing.T, seed string) (*Chain, *mempool.Pool) {
 	m := machine.NewMock([]byte(seed))
 	m.OutputFn = emitOn
 	pool := mempool.New(64)
-	c, err := New(context.Background(), isthmusConfig(), m, pool)
+	c, err := New(context.Background(), testConfig(), m, pool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +156,7 @@ func TestReportsDoNotAffectOutputsRoot(t *testing.T) {
 	build := func(fn func([]byte) []machine.Output) common.Hash {
 		m := machine.NewMock([]byte("seed"))
 		m.OutputFn = fn
-		c, err := New(context.Background(), isthmusConfig(), m, mempool.New(8))
+		c, err := New(context.Background(), testConfig(), m, mempool.New(8))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -188,32 +176,15 @@ func TestReportsDoNotAffectOutputsRoot(t *testing.T) {
 	}
 }
 
-// Pre-Isthmus chains must not carry a withdrawals root, and post-Isthmus ones
-// must; a payload that disagrees with the chain's fork schedule is invalid.
-func TestWithdrawalsRootMustMatchForkSchedule(t *testing.T) {
+// Every block must carry a withdrawals root; a payload without one commits to
+// no outputs at all and cannot be hashed the way op-node hashes it.
+func TestWithdrawalsRootIsRequired(t *testing.T) {
 	isthmus, _ := newIsthmusChain(t, "seed")
 	env := buildBlock(isthmus, t, isthmusAttrs(isthmus.HeadBlock(), [][]byte{depositTx(t, "l1-info")}))
-
-	preIsthmus := testConfig()
-	at := uint64(0)
-	preIsthmus.HoloceneTime = &at
-	if _, err := preIsthmus.headerFromPayload(env.ExecutionPayload, env.ParentBeaconBlockRoot); err == nil {
-		t.Fatal("a pre-Isthmus chain accepted a payload carrying a withdrawalsRoot")
-	}
 
 	stripped := *env.ExecutionPayload
 	stripped.WithdrawalsRoot = nil
 	if _, err := isthmus.Config().headerFromPayload(&stripped, env.ParentBeaconBlockRoot); err == nil {
-		t.Fatal("an Isthmus chain accepted a payload with no withdrawalsRoot")
-	}
-}
-
-// Isthmus reshapes the header, so it cannot be enabled without Holocene.
-func TestIsthmusRequiresHolocene(t *testing.T) {
-	at := uint64(0)
-	cfg := testConfig()
-	cfg.IsthmusTime = &at
-	if _, err := New(context.Background(), cfg, machine.NewMock([]byte("seed")), nil); err == nil {
-		t.Fatal("accepted an Isthmus chain without Holocene")
+		t.Fatal("accepted a payload with no withdrawalsRoot")
 	}
 }
