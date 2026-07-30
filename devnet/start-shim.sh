@@ -7,8 +7,13 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 ensure_jwt
 cd "$REPO_DIR"
 
+RUN_FLAGS=()
+if [ -n "$DATA_DIR" ]; then
+  RUN_FLAGS+=(-datadir "$DATA_DIR")
+fi
+
 exec go run ./cmd/op-cartesi run \
-  "${CHAIN_FLAGS[@]}" \
+  "${CHAIN_FLAGS[@]}" "${RUN_FLAGS[@]}" \
   -engine.addr "$ENGINE_ADDR" \
   -http.addr "$HTTP_ADDR" \
   -engine.jwt-secret "$JWT_SECRET_FILE"

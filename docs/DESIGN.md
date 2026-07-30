@@ -116,7 +116,7 @@ One design decision to make early: **input granularity**. Either (a) one CMIO in
 
    Proposals go into the **permissioned** game and are never disputed: there is no fault proof VM that can execute a Cartesi Machine, which is exactly what step 3 is for. Deploying `OptimismPortal` likewise does not make withdrawals work, since `proveWithdrawalTransaction` verifies an MPT storage proof against a state root that is a Cartesi hash tree — see §7.
 
-   What remains in this step is persistence: blocks, outputs, receipts and machine snapshots are all still in memory, so a restart loses the chain. It is recoverable in principle — a second node already rebuilds the chain from L1 alone — but only by re-executing every input from genesis, which does not scale.
+   Persistence is done too — see §7b. A node restarts from a store rather than losing the chain, and the whole of step 2 is now complete.
 
 3. Settlement track A: wrap Dave in `IDisputeGame`, calldata batches, voucher-based withdrawals anchored to resolved games.
 4. Settlement track B (parallel, measurement-only): compile the freestanding emulator into a RISC Zero guest, measure cycles/input and cycles/epoch for the target application workload; go/no-go on B2.
@@ -197,21 +197,19 @@ Storage is the loose end: outputs are currently in memory and retained for as lo
 
 ## 7b. Persistence: what to keep, and what already exists to keep it with
 
-Everything is in memory today — blocks, outputs, receipts, and the forked
-machine servers that serve as snapshots — so a restart loses the chain. It is
-recoverable in principle, since a second node already rebuilds it from L1
-alone, but only by re-executing every input from genesis. That does not scale,
-so this is the remaining work in step 2.
+**Done.** A node restarts from its store instead of losing the chain: on a
+devnet run of 39 blocks it came back from the checkpoint at block 30, replayed
+nine, and was serving in about a second — against a real Cartesi Machine.
 
 The state splits into three kinds, and they want three different answers.
 
 **Blocks, the canonical chain, and head pointers — reuse.** An op-cartesi block
 *is* a `types.Header` plus a transaction list, which is exactly what
-go-ethereum's `core/rawdb` stores. Round-tripping a real block through
-`WriteHeader`/`WriteBody`/`WriteCanonicalHash` and back preserves the hash, so
-this is glue rather than design: `ethdb/pebble` underneath, `rawdb` on top,
-both already in the dependency tree. Canonical-hash rewriting also gives the
-unsafe-head reorgs op-node performs, for free.
+go-ethereum's `core/rawdb` stores, so this is glue rather than design:
+`ethdb/pebble` underneath, `rawdb` on top, both already in the dependency tree.
+Canonical-hash rewriting also gives the unsafe-head reorgs op-node performs,
+for free. The one thing rawdb has no key for is the safe head, which is an OP
+notion rather than an Ethereum one.
 
 **Outputs, the tree frontier, and per-transaction emissions — ours, but small.**
 No OP component models these. The frontier is 63 hashes per block; outputs are
@@ -256,6 +254,19 @@ tables. Note there is no OP analogue for the controller and there could not be:
 op-geth's state *is* its database, so the OP Stack has never needed a notion of
 "snapshot the execution engine and replay forward". Cartesi's `cm_store` does
 the hard half.
+
+Replay is not a fast path around verification — it re-executes, and checks each
+block reaches the state root and outputs commitment it was stored with. A
+checkpoint that has drifted from the blocks beside it therefore fails the
+restart rather than quietly serving a wrong chain.
+
+Two consequences of restoring at a checkpoint rather than at genesis, both of
+which showed up as bugs before they showed up as design. A restored node holds
+no block below its checkpoint, so a forkchoice naming an older safe or
+finalized block — which op-node does while its own view lags — has to be
+answered from the store rather than rejected. And the store is held by one
+process: pointing a second node at the same directory fails, so the devnet's
+verifier gets its own.
 
 Checkpoints are triggered by block count and by finalization both: finalized
 blocks can never be reorged away, so a checkpoint at one never needs discarding,

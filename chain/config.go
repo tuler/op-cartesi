@@ -43,6 +43,18 @@ type Config struct {
 	// Blocks older than this cannot be built on or re-verified locally.
 	MaxSnapshots int
 
+	// CheckpointInterval is how many blocks pass between machine checkpoints.
+	// Zero disables checkpointing, which leaves the chain restartable only by
+	// replaying from genesis.
+	//
+	// A checkpoint is a whole stored machine — hundreds of megabytes, with no
+	// deduplication between them — so this trades disk against restart time:
+	// a restart re-executes the blocks after the newest checkpoint, one
+	// machine run each.
+	CheckpointInterval uint64
+	// CheckpointRetention is how many checkpoints to keep on disk.
+	CheckpointRetention int
+
 	// EIP1559Denominator and EIP1559Elasticity are the chain defaults written
 	// into headers when op-node sends zeroed Holocene parameters.
 	EIP1559Denominator uint64
@@ -87,6 +99,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxSnapshots <= 0 {
 		c.MaxSnapshots = 32
+	}
+	if c.CheckpointInterval == 0 {
+		c.CheckpointInterval = 100
+	}
+	if c.CheckpointRetention <= 0 {
+		c.CheckpointRetention = 3
 	}
 	if c.EIP1559Denominator == 0 {
 		c.EIP1559Denominator = DefaultEIP1559Denominator

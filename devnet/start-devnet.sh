@@ -368,8 +368,12 @@ if [ "$WITH_VERIFIER" = "1" ]; then
   # rather than a database with an RPC.
   echo "starting verifier: second machine server, engine and op-node" >&2
   start_machine_server "$VERIFIER_MACHINE_PORT" "$LOG_DIR/machine-verifier.log"
+  # Its own store: a pebble database is held by one process, and pointing two
+  # nodes at one directory fails with a message about resources rather than
+  # about sharing.
   MACHINE_REMOTE="http://127.0.0.1:$VERIFIER_MACHINE_PORT" \
   ENGINE_ADDR="$VERIFIER_ENGINE_ADDR" HTTP_ADDR="$VERIFIER_HTTP_ADDR" \
+  DATA_DIR="${DATA_DIR:+$DATA_DIR-verifier}" \
     "$DEVNET_DIR/start-shim.sh" > "$LOG_DIR/op-cartesi-verifier.log" 2>&1 &
   track $!
   for _ in $(seq 1 60); do

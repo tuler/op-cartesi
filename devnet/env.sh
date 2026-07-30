@@ -74,6 +74,12 @@ fi
 : "${OP_PROPOSER_IMAGE:=us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:v1.16.3}"
 : "${OP_DEPLOYER_IMAGE:=us-docker.pkg.dev/oplabs-tools-artifacts/images/op-deployer:v0.7.1}"
 
+# --- persistence ------------------------------------------------------------
+# Directory for the chain store. Empty keeps the chain in memory, which is how
+# it worked before and still fine for a throwaway run.
+: "${DATA_DIR:=}"
+: "${CHECKPOINT_INTERVAL:=25}"
+
 # --- endpoints -------------------------------------------------------------
 : "${ENGINE_ADDR:=127.0.0.1:8551}"
 : "${HTTP_ADDR:=127.0.0.1:8545}"
@@ -84,6 +90,7 @@ fi
 
 CHAIN_FLAGS=(
   -chain-id "$L2_CHAIN_ID"
+  -checkpoint-interval "$CHECKPOINT_INTERVAL"
   -genesis.timestamp "$GENESIS_TIMESTAMP"
   -gas-limit "$GAS_LIMIT"
   -max-cycles-per-input "$MAX_CYCLES_PER_INPUT"

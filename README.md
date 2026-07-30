@@ -32,7 +32,7 @@ The stack has been run against the **official released images** — op-node v1.1
 
 Proposals use the permissioned game type and are never disputed: no fault proof VM can execute a Cartesi Machine. Withdrawals still do not work either, because `proveWithdrawalTransaction` wants an MPT proof against a state root that is a Cartesi hash tree. Both are the settlement track — see [DESIGN.md](docs/DESIGN.md) §4.
 
-Still outstanding for step 2: persistence. Blocks, outputs, receipts and machine snapshots are all in memory, so a restart loses the chain.
+**The chain survives a restart.** `-datadir` gives the node a store: blocks and the machine's per-transaction emissions go into a pebble database through go-ethereum's own `rawdb`, and the machine itself is checkpointed whole at intervals with Cartesi's `cm_store`. Restarting loads the newest checkpoint and re-executes the blocks after it — on a 39-block devnet run, back and serving in about a second. Replay is not a shortcut around verification: each replayed block is checked against the state root and outputs commitment it was stored with, so a checkpoint that has drifted fails the restart rather than serving a wrong chain.
 
 See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, covering:
 
@@ -67,7 +67,7 @@ Reports are not logs, because a log implies provability. They are served through
 |---|---|
 | `cmd/op-cartesi` | CLI: wires the machine, chain, and the two RPC listeners together. |
 | `machine` | `Machine` interface (advance-input / inspect / root-hash / fork / close), a deterministic in-memory mock for development and tests, and a client for the emulator's `cartesi-jsonrpc-machine` remote protocol. The node never boots a machine: a snapshot arrives already parked at its first input yield, so genesis is the snapshot's own root hash. |
-| `chain` | Block store, genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning, and the per-transaction record of machine emissions. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
+| `chain` | Block store and its durable half (`rawdb` over pebble, plus machine checkpoints), genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning, and the per-transaction record of machine emissions. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
 | `engineapi` | `engine_*`, `eth_*` and `cartesi_*` JSON-RPC services, Engine API JWT authentication, HTTP handler assembly. |
 | `mempool` | Bounded FIFO transaction ingress (the OP Stack has no public L2 mempool; the sequencer's RPC is the only entry point). |
 | `rollup` | Generates the `rollup.json` document op-node reads. |

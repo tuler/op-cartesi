@@ -12,7 +12,6 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/tuler/op-cartesi/chain"
 	"github.com/tuler/op-cartesi/engineapi"
 	"github.com/tuler/op-cartesi/mempool"
 )
@@ -26,6 +25,7 @@ func runCommand(args []string) error {
 		httpAddr      = fs.String("http.addr", "127.0.0.1:8545", "listen address for the public eth_* RPC")
 		jwtSecretPath = fs.String("engine.jwt-secret", "", "path to a 32-byte hex JWT secret; empty disables auth (dev only)")
 		poolSize      = fs.Int("mempool.size", 4096, "maximum transactions queued in the mempool")
+		dataDir       = fs.String("datadir", "", "directory for the persistent chain store; empty keeps the chain in memory only")
 	)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -39,22 +39,19 @@ func runCommand(args []string) error {
 		return err
 	}
 
-	m, err := cf.openMachine(ctx)
-	if err != nil {
-		return err
-	}
-
 	pool := mempool.New(*poolSize)
-	c, err := chain.New(ctx, cf.chainConfig(), m, pool)
+	c, err := cf.openChain(ctx, *dataDir, pool)
 	if err != nil {
 		return err
 	}
-	genesis := c.HeadBlock()
+	defer c.Close(ctx)
+	head := c.HeadBlock()
 	slog.Info("chain initialized",
 		"chainId", cf.chainID,
-		"genesisHash", genesis.Hash(),
-		"genesisStateRoot", genesis.Header.Root,
-		"genesisTimestamp", genesis.Time(),
+		"genesisHash", c.GenesisHash(),
+		"head", head.NumberU64(),
+		"headStateRoot", head.Header.Root,
+		"headTimestamp", head.Time(),
 	)
 
 	engineHandler, err := engineapi.NewHandler(c, pool, true, jwtSecret)

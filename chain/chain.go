@@ -62,6 +62,8 @@ type Chain struct {
 	// resolved when a receipt is looked up rather than maintained here.
 	txBlocks map[common.Hash][]common.Hash
 	pending  map[engine.PayloadID]*pendingPayload
+	// store is the durable half, nil when the node runs in memory only.
+	store *Store
 	// da carries op-batcher's backpressure. It is read while building blocks
 	// and written from the RPC, so it is atomic rather than guarded by mu.
 	da daLimits
@@ -192,14 +194,24 @@ func (c *Chain) ForkchoiceUpdated(ctx context.Context, fc engine.ForkchoiceState
 		if ref.hash == (common.Hash{}) {
 			continue
 		}
-		b, ok := c.blocks[ref.hash]
-		if !ok || c.canonical[b.NumberU64()] != ref.hash {
+		if !c.isCanonical(ref.hash) {
 			return nil, engine.InvalidForkChoiceState
 		}
 		*ref.target = ref.hash
 	}
 	c.head = head.Hash()
 	c.prune(ctx)
+	if c.store != nil {
+		// The canonical mapping is written before the head pointer, so a crash
+		// between them leaves a head whose ancestry is already correct rather
+		// than a head that points into a chain the store has not recorded.
+		if err := c.store.SetCanonical(head, func(h common.Hash) *Block { return c.blocks[h] }); err != nil {
+			slog.Error("recording the canonical chain", "head", head.Hash(), "err", err)
+		} else if err := c.store.SetHeads(c.head, c.safe, c.finalized); err != nil {
+			slog.Error("recording forkchoice", "err", err)
+		}
+		c.checkpointIfFinalized(ctx)
+	}
 
 	valid := engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &head.hash}
 	if attrs == nil {
@@ -533,7 +545,7 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 	// Adopt the machine of a locally built payload instead of re-executing.
 	for id, p := range c.pending {
 		if p.data.BlockHash == hash {
-			c.commit(newBlock(header, data.Transactions), p.machine, p.outputs, p.tree, p.firstInput)
+			c.commitAndPersist(ctx, newBlock(header, data.Transactions), p.machine, p.outputs, p.tree, p.firstInput)
 			delete(c.pending, id)
 			return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 		}
@@ -586,7 +598,7 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 		exec.machine.Close(ctx)
 		return invalidStatus(&parentHash, fmt.Sprintf("outputs root mismatch: computed %s, payload claims %s", tree.Root(), *data.WithdrawalsRoot)), nil
 	}
-	c.commit(newBlock(header, data.Transactions), exec.machine, exec.outputs, tree, firstInput)
+	c.commitAndPersist(ctx, newBlock(header, data.Transactions), exec.machine, exec.outputs, tree, firstInput)
 	return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 }
 
@@ -613,6 +625,14 @@ func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs, tree Ou
 		}
 		c.pool.Forget(hashes)
 	}
+}
+
+// commitAndPersist is commit plus the write-through to the store. Replaying a
+// stored block uses commit alone: it is already in the store, and writing it
+// back would take a fresh checkpoint of a machine that just came from one.
+func (c *Chain) commitAndPersist(ctx context.Context, b *Block, m machine.Machine, outputs []TxOutputs, tree OutputTree, firstInputIndex uint64) {
+	c.commit(b, m, outputs, tree, firstInputIndex)
+	c.persist(ctx, b, outputs, tree, firstInputIndex)
 }
 
 func txHash(raw []byte) (common.Hash, error) {

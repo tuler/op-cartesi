@@ -154,6 +154,28 @@ Two operational notes the script encodes, both easy to trip over by hand:
   replace it. Config generation and the node each need their own server.
 - op-node must not be started before the engine logs `chain initialized`.
 
+## Persistence
+
+`DATA_DIR` gives each node a store, and the chain survives a restart:
+
+```sh
+DATA_DIR=/tmp/op-cartesi-data CHECKPOINT_INTERVAL=25 ./devnet/start-devnet.sh
+ls /tmp/op-cartesi-data/checkpoints
+```
+
+Blocks and the machine's emissions go into a pebble database; the machine
+itself is checkpointed whole every `CHECKPOINT_INTERVAL` blocks and at every
+finalized block. A checkpoint is around 400 MB with nothing deduplicating
+between them, so `-checkpoint-retention` (default 3) is the disk budget.
+
+The write comes off a fork of the machine the chain already keeps, so it does
+not stall block production — measured at exactly 2.00 s per block across a
+checkpoint. Restarting loads the newest checkpoint and re-executes the blocks
+after it, checking each against the state root it was stored with.
+
+Each node needs its own directory: a pebble database is held by one process,
+so the verifier gets `$DATA_DIR-verifier` automatically.
+
 ## The snapshot is stored already booted
 
 `build-snapshot.sh` stores the machine where `cartesi-machine --store` leaves
