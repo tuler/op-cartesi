@@ -69,14 +69,14 @@ One design decision to make early: **input granularity**. Either (a) one CMIO in
 **How it fits together:**
 
 - `op-proposer` posts output roots by creating games via `DisputeGameFactory.create(CARTESI_GAME_TYPE, claim, extraData)`. The claim is (a commitment to) the machine root hash at the epoch boundary.
-- You write a `CartesiDisputeGame` contract implementing OP's `IDisputeGame` interface, which internally *is* a Dave/PRT tournament (or delegates to one). The one-step leaf is either `machine-solidity-step` uarch replay (pure Solidity, exists today) or a `cm_log_step` → RISC Zero receipt → Groth16 verification against the on-chain image ID (also exists today, in `risc0/solidity/`). The second option makes the on-chain leaf a single ~300k-gas verification instead of a uarch replay, and shrinks the tournament depth because one proof can cover a large `mcycle_count`.
+- You write a `CartesiDisputeGame` contract implementing OP's `IDisputeGame` interface, which internally *is* a Dave/PRT tournament (or delegates to one). **Corrected by §7e:** this sentence is true and badly understates the work — the adapter is the small part, and `DaveConsensus` already implements the validator interface this repo calls, which makes wrapping a game the *more* expensive of two shapes. The one-step leaf is either `machine-solidity-step` uarch replay (pure Solidity, exists today) or a `cm_log_step` → RISC Zero receipt → Groth16 verification against the on-chain image ID (also exists today, in `risc0/solidity/`). The second option makes the on-chain leaf a single ~300k-gas verification instead of a uarch replay, and shrinks the tournament depth because one proof can cover a large `mcycle_count`.
 - `OptimismPortal` is configured with your game type as the respected game; withdrawals then flow through the standard `proveWithdrawalTransaction` path — except withdrawal proofs are Merkle proofs **into the machine's hash tree** (via `cm_get_proof`) rather than MPT storage proofs. This needs a small portal/`CartesiOutputVerifier` adaptation: either fork `OptimismPortal`'s proof-verification library to verify Cartesi hash-tree proofs against a designated "outputs" memory range, or — lower-effort and closer to what you run today — keep OP's portal for ETH/token deposits only and route withdrawals through Cartesi Rollups' existing voucher/`executeVoucher` flow anchored to the accepted game outcome. For applications already built on the voucher path, the second option is nearly free.
 
   **Settled by implementation:** option 2 is built and works — see §7c. The bridge turned out to be one small contract, because an OP proposal already commits to the Cartesi outputs root and Cartesi's `Application` asks exactly one question before executing an output.
 
   **Refined by §7:** both options stay on the table, but they now verify against a commitment the stock OP plumbing already publishes. From Isthmus onward, op-node reads the withdrawal commitment straight out of the header's `withdrawalsRoot` field instead of proving it against the state trie, so the Cartesi outputs Merkle root goes there directly and `op-proposer` needs no changes. What Isthmus does *not* do is teach `OptimismPortal` to verify Cartesi proofs — that still requires option 1 or option 2. See §7 for both, and for why the pre-Isthmus path cannot be implemented at all.
 
-**The subtle hard part: disputes must cover derivation, not just execution.** In stock OP, the fault-proof program (op-program/Kona) re-derives the disputed block *from L1 data* inside the FPVM, so a malicious sequencer can't win by lying about inputs. Your equivalent: the dispute must pin the machine's input sequence to L1. Two ways, in increasing order of reuse-of-what-you-know:
+**The subtle hard part: disputes must cover derivation, not just execution.** *(§7e sharpens this into the decision it actually is, having read Dave's `IDataProvider`.)* In stock OP, the fault-proof program (op-program/Kona) re-derives the disputed block *from L1 data* inside the FPVM, so a malicious sequencer can't win by lying about inputs. Your equivalent: the dispute must pin the machine's input sequence to L1. Two ways, in increasing order of reuse-of-what-you-know:
 
 1. **Calldata-anchored inputs (v1):** run the batcher in calldata mode (or mirror inputs through an InputBox-style contract). The input Merkle root per epoch is then computable on-chain/on-challenge, and Dave's existing input handling applies essentially unchanged. This is exactly the Cartesi Rollups trust model today — lowest new code, modestly higher DA cost.
 2. **Blob-anchored inputs (v2):** batches in EIP-4844 blobs; the dispute game needs a preimage/`kzg` step tying blob commitments to the input hashes the machine consumed (the same problem Cannon's `PreimageOracle` solves — its 4844 preimage support is reusable as a contract dependency). Do this only after v1 works.
@@ -441,6 +441,139 @@ the ledger: ether deposited through `OptimismPortal` and ether deposited through
 voucher can reach. The first sits in OP's lockbox. The devnet papers over this
 by funding the application contract directly; a real chain would either use the
 Cartesi portal for both directions or accept that OP-path ether is one-way.
+
+## 7e. Settlement: what reading Dave actually costs
+
+§4 sketched Plan A from the outside — "write a `CartesiDisputeGame` implementing
+`IDisputeGame`, which internally is a Dave/PRT tournament". Having now read
+`cartesi/dave` rather than reasoned about it, that sentence is true and badly
+misleading about the size.
+
+The one thing §4 got right is the warning it buried at the end: *disputes must
+cover derivation, not just execution*. That turns out to be the largest item of
+all, and the rest of this section is mostly about why. Below: what the claim
+actually is, three requirements this chain does not meet, two integration shapes,
+and the decision that gates all of them.
+
+### The claim is a machine-state commitment, not an output root
+
+`prt/contracts/src/arbitration-config/ArbitrationConstants.sol` defines a
+three-level tournament: `log2step` `[44, 27, 0]`, `height` `[48, 17, 27]`. Each
+level's commitment is a Merkle tree over `cm_get_root_hash()` sampled every
+`2^log2step` cycles, and a level refines its parent's stride until the leaf is a
+single micro-instruction replayed on chain by `machine-solidity-step`.
+
+Producing those commitments is the off-chain "dance". `MachineCommitmentBuilder`
+(`prt/client-rs/core/src/machine/commitment_builder.rs`) takes a base cycle, a
+level and a stride, reconstructs the machine at that cycle
+(`MachineInstance::new_rollups_advanced_until`), steps it, and hashes at every
+stride boundary; the leaves are cached in SQLite because recomputing them per
+move is not affordable. `strategy/player.rs` then has to respond to opponents
+inside per-match clocks (`react_match`, `win_timeout_match`).
+
+That is a validator daemon with its own state, not a library op-cartesi links.
+Dave ships one for Cartesi Rollups —
+`cartesi-rollups/node/{blockchain-reader,epoch-manager,machine-runner,state-manager}`
+— and an OP-shaped chain would need the equivalent, wired to a different source
+of inputs and a different notion of epoch.
+
+### Three requirements this chain does not currently meet
+
+**1. A referee has to be able to check an input, on chain.** `IDataProvider`
+exposes exactly one method, `provideMerkleRootOfInput(index, input)`, and
+`DaveConsensus` implements it by hashing the input and comparing against
+`InputBox.getInputHash(app, index)`. Our inputs exist in no such contract: they
+are op-node's derivation output — compressed channel frames in the BatchInbox,
+plus deposits from L1 logs — wrapped in an `EvmAdvance` envelope built by our Go
+code. No Solidity contract can re-derive that. This is §4's "subtle hard part",
+and it is the largest single item.
+
+**2. The outputs Merkle root has to live inside the machine.**
+`DaveConsensus._validateOutputTree` proves that
+`keccak256(abi.encode(outputsMerkleRoot))` sits at
+`PMA_CMIO_TX_BUFFER_START` in the machine's memory tree, against the final
+machine state hash the tournament resolved; the node reads it back with
+`read_memory(TX_START, 32)`. Our outputs tree is maintained by the shim, in Go,
+and published in the header's `withdrawalsRoot`. A referee cannot dispute a
+value that is not in the state, so under Dave the *guest* has to maintain the
+tree and leave its root in the tx buffer. The header field can keep carrying it;
+what changes is who computes it and what commits to it.
+
+**3. Dave already defines the computation, and our definition contradicts it.**
+`prt/client-rs/core/src/machine/constants.rs`: `LOG2_UARCH_SPAN_TO_BARCH = 20`,
+`LOG2_BARCH_SPAN_TO_INPUT = 48`, `LOG2_INPUT_SPAN_TO_EPOCH = 24`. Every input
+occupies a fixed `2^68` meta-cycle span indexed as
+`(input index, big-arch cycle, uarch cycle)`, and once the machine yields the
+state is a fixpoint — which is why `provideMerkleRootOfInput` returns zero past
+the end of the epoch rather than reverting. This chain's rule is
+`MaxCyclesPerInput` (default `10^9`, about `2^30`), with *exceeding the budget
+counted as a rejection*. Those are different state transition functions, and the
+divergence is not cosmetic: a bounded budget with a rejection branch is a
+different function from an unbounded span with a fixpoint.
+
+So the roadmap item is not "write down the rule we already implement". It is
+"decide whether to adopt Dave's meta-cycle model", and if so, change ours.
+
+### Two integration shapes, and the cheaper one is not the obvious one
+
+`DaveConsensus` already implements `IOutputsMerkleRootValidator` — the exact
+interface `OutputExecutor` calls today (§7c). That opens a shape §4 did not
+consider:
+
+- **Dave as the validator.** Point `OutputExecutor` at a `DaveConsensus` instead
+  of at `OPOutputsMerkleRootValidator`. OP's `DisputeGameFactory` stays
+  permissioned and governs only OP's own (unused) withdrawal path, while Cartesi
+  outputs settle under Dave. On the L1 side this is nearly a no-op — the
+  interface is already the one we call.
+- **Dave as an `IDisputeGame`.** Everything above, plus an adapter reconciling
+  tournament semantics with OP's game semantics (clock, bonds, `resolve`, airgap)
+  and Dave's L1-block-range epochs with OP's per-block `l2BlockNumber`, plus
+  binding the resolved machine-state hash to the `stateRoot` inside op-node's
+  output-root preimage.
+
+Neither escapes requirements 1–3. The difference between them is a contract
+adapter; the difference between *having* and *not having* a fault proof is
+requirements 1–3.
+
+### The real decision: input availability
+
+§4 posed this as v1 calldata-anchored / v2 blob-anchored. Reading the code
+sharpens it into three options with different things being given up:
+
+1. **Mirror inputs into an InputBox-shaped contract.** Every input is hashed on
+   L1, so `provideMerkleRootOfInput` works unchanged and Dave applies almost
+   as-is. Costs a second copy of the data on L1 — the batcher's compressed
+   channel stops being the disputable artifact and becomes an optimisation for
+   fast sync only. Simplest, most expensive.
+2. **Prove derivation too.** Put the derivation pipeline inside the machine, the
+   way OP puts op-program inside Cannon, so the disputed computation starts from
+   L1 data rather than from an input list. Keeps DA compressed and is the only
+   option that makes the sequencer unable to lie about inputs at all. Much the
+   largest, and it makes brotli and the OP batch format part of the guest.
+3. **Commit to the input sequence and trust the committer.** Cheapest, and it
+   gives back exactly the property the fault proof was for. Worth naming only so
+   it is rejected explicitly rather than by accident.
+
+There is no fourth option where compressed batches stay the sole DA and a
+Solidity referee still checks inputs: checking would mean decompressing on
+chain, which reduces to (1) with extra steps.
+
+### What this means for sequencing
+
+Requirements 1–3 are shared by **both** settlement tracks. A RISC Zero proof of
+the same computation still needs a computation whose inputs are pinned to L1 and
+whose outputs root is inside the proven state; it removes the tournament, the
+clocks, the bonds and the commitment builder, not the definition problem.
+
+So the next step is not PRT. It is to settle the definition — meta-cycle model
+in or out, input availability option 1 or 2 — and to get the RISC Zero
+cost-per-block number, which is information needed either way and commits to
+nothing.
+
+*Checked against `cartesi/dave` at HEAD: `prt/contracts/src/`,
+`prt/client-rs/core/src/`, `cartesi-rollups/contracts/src/DaveConsensus.sol`,
+`cartesi-rollups/node/`. Note that Dave pins `cartesi-rollups-contracts` 2.2.0
+while this repo is on 3.0.0-alpha.6; an integration has to reconcile them.*
 
 ## 8. The app-chain dimension: one machine, many applications
 
