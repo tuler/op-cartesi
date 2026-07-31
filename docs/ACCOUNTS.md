@@ -214,7 +214,8 @@ scattered reads per lookup and an order of magnitude more code.
 ### 5.1 The drive
 
 - **Label `accounts`**, declared in the machine config with an **explicit
-  start address** and a power-of-two length. The recommended start is
+  start address**, a power-of-two length, and a non-shared backing store
+  (`shared = false`, the default; §6.1 is why that is not a free choice). The recommended start is
   `0x80000000000000` (2^55) — the classic `PMA_DRIVE_START`, which 0.21's
   new auto-placement (drives packed just after RAM) leaves entirely free,
   and which is naturally aligned for any power-of-two size up to 2^55,
@@ -332,6 +333,69 @@ ships, the same format moves onto it and §5.4 shrinks to one sentence.
   rereading tables. Nothing in v1 needs it.
 
 ## 6. What the host does with it
+
+### 6.1 Three read paths, and the one that looks free but is not
+
+An obvious question deserves a direct answer first: if the drive is
+backed by a host file, why involve a machine at all — why not read the
+backing file? The emulator does have the mechanism: a drive declared with
+`backing_store.shared = true` is mapped `MAP_SHARED` from its image file,
+so the emulator's stores land in the file and are visible to any process
+immediately (same page cache; no emulator-side sync involved). The
+guest-side `msync` discipline of §5.4 is unchanged either way — it is
+what moves bytes into the drive at all — and NVRAM removes it for both.
+
+For **this** chain, the shared backing file is disqualified, for one
+fatal reason and two structural ones:
+
+- **Forks alias the file.** The emulator's `fork` is an OS fork, and a
+  `MAP_SHARED` mapping survives fork *still shared*. This chain runs a
+  swarm of forks off one lineage: a retained snapshot per recent block, a
+  work fork per block being built, a candidate fork per input — discarded
+  when the input rejects, which is the rollback mechanism — and a fork
+  per inspect, whose guest can flush dirty pages mid-query. With a shared
+  drive every one of them writes the same file, including forks that are
+  then thrown away. Rollback discards a process; it cannot unwrite the
+  file. The file ends up corresponding to *no* machine state, and nothing
+  errors. This is the same family of silent sharing trap as
+  `machine.store`'s sharing mode (DESIGN §7b), which this repo already
+  pins a test against.
+- **No serialization.** `read_memory` is safe by construction: the server
+  handles requests sequentially, so a read cannot interleave with
+  `machine.run`. A file read can land mid-input and see a torn record or
+  a half-shifted probe chain. Only the shim knows when a machine is
+  parked; a file reader does not.
+- **No block identity, no proofs.** The file is whatever the writer last
+  flushed, not the state at a named block, and a Merkle proof still
+  requires asking a machine.
+
+So the drive stays `shared = false`, writes never escape a machine's
+transactional boundary, and reading happens one of three ways:
+
+1. **Live, from a parked machine** — `machine.read_memory`, block-tagged
+   and proof-capable, one local round trip. The authoritative path, and
+   the sync primitive for the next one.
+2. **From a mirror, with no machine on the query path.** The shim is the
+   one process that knows when each block's machine is parked, so it can
+   maintain a local mirror of the drive: read it whole once at startup,
+   then per sealed block re-read only the touched ranges — the §5.5
+   journal, or the touch set the host can largely compute from the
+   block's own transactions. Queries then `mmap` the mirror with zero
+   emulator involvement, and the mirror can be handed to any number of
+   external consumers. The emulator remains the single writer of truth;
+   the file is a projection of a named block, not a side channel.
+3. **From stored images, with no server at all.** A `cm_store` directory
+   contains the drive's image as a plain file, quiescent by
+   construction. This is exactly how the Rollups v3 prover works — it
+   locates the accounts drive via the snapshot's `config.json`, reads
+   the backing file directly, and cross-checks against
+   `--initial-proof`. Right for indexers and exit provers; stale by up
+   to the checkpoint interval, so wrong for nonce gating.
+
+v0 needs only path 1. The mirror is the answer if RPC read volume ever
+makes even a local HTTP round trip per lookup matter.
+
+### 6.2 The RPC surface
 
 - **`eth_getTransactionCount`, `eth_getBalance`.** Resolve the block tag
   to a parked machine — head for `latest`/`pending`, the retained
