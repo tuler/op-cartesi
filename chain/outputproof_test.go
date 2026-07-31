@@ -66,3 +66,46 @@ func TestProveOutputOutOfRange(t *testing.T) {
 		t.Fatal("proved an output that does not exist")
 	}
 }
+
+// TestOutputTreeMatchesSolidity pins this package's tree to Cartesi's on-chain
+// verifier.
+//
+// The two implementations share no code: the tree is built here in Go and
+// checked on L1 by LibOutputValidityProof over LibBinaryMerkleTree, and a
+// disagreement would not show up as a failing test on either side — it would
+// show up as a withdrawal that cannot be executed. So both sides pin the same
+// number over the same outputs. The Solidity half is
+// contracts/test/OutputTree.t.sol; change either builder and one of the two
+// fails.
+func TestOutputTreeMatchesSolidity(t *testing.T) {
+	outputs := [][]byte{
+		[]byte("output zero"),
+		[]byte("output one"),
+		[]byte("output two"),
+		[]byte("output three"),
+		[]byte("output four"),
+	}
+	const want = "0x49afe364b0c4fe906304bbfc9d6273a94df905335403d8e65eeda219ea7fb717"
+
+	var leaves []common.Hash
+	tree := NewOutputTree()
+	for _, output := range outputs {
+		leaf := OutputLeaf(output)
+		leaves = append(leaves, leaf)
+		tree = tree.Append(leaf)
+	}
+	if got := tree.Root().Hex(); got != want {
+		t.Fatalf("outputs root is %s, but the Solidity side pins %s", got, want)
+	}
+	// Every proof against that root has to reproduce it, which is what the
+	// contract checks before executing an output.
+	for i := range leaves {
+		proof, err := ProveOutput(leaves, uint64(i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := RootAfterReplacement(proof.Siblings, uint64(i), leaves[i]); got != tree.Root() {
+			t.Fatalf("proof for output %d reproduces %s, not %s", i, got, tree.Root())
+		}
+	}
+}

@@ -11,7 +11,7 @@ import {IOutputsMerkleRootValidator} from "cartesi-rollups-contracts/src/consens
 ///
 /// This is a reduced stand-in for Cartesi's `Application`, and the reduction is
 /// deliberate about what it keeps. Validation is Cartesi's own code, unmodified
-/// — `LibOutputValidityProof` over `LibMerkle32` — and the validator it asks is
+/// — `LibOutputValidityProof` over `LibBinaryMerkleTree` — and the validator it asks is
 /// the `IOutputsMerkleRootValidator` interface a real `Application` asks. What
 /// is left out is ownership, upgrades, ERC-721/1155 receivers and the
 /// `DelegateCallVoucher` variant, none of which bear on whether an output the

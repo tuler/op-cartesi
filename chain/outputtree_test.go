@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 )
 
-// naiveRoot is a direct transcription of LibMerkle32.merkleRoot: build each
+// naiveRoot is the slow, level-by-level way to build the root: build each
 // parent level in turn, substituting defaultNode for missing positions, and
 // lift defaultNode with parent(defaultNode, defaultNode) at every level. It is
 // deliberately the slow, obvious implementation, so that agreement with

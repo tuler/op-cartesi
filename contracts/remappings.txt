@@ -1,3 +1,4 @@
 forge-std/=dependencies/forge-std-1.9.6/src/
-cartesi-rollups-contracts/=dependencies/cartesi-rollups-contracts-2.2.0/
+cartesi-rollups-contracts/=dependencies/cartesi-rollups-contracts-3.0.0-alpha.6/
 @openzeppelin-contracts-5.2.0/=dependencies/@openzeppelin-contracts-5.2.0/
+cartesi-machine-solidity-step-0.13.0/=dependencies/cartesi-machine-solidity-step-0.13.0/

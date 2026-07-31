@@ -11,8 +11,8 @@ import (
 // OutputTreeHeight is the height of the outputs Merkle tree. It mirrors
 // CanonicalMachine.LOG2_MAX_OUTPUTS in cartesi/rollups-contracts, so the roots
 // this package computes are the ones Cartesi's on-chain output validation
-// (Application.validateOutput and LibMerkle32) already knows how to verify —
-// existing voucher proofs and tooling carry over unchanged.
+// (Application.validateOutput and LibOutputValidityProof) already knows how to
+// verify — existing voucher proofs and tooling carry over unchanged.
 const OutputTreeHeight = 63
 
 // OutputLeaf hashes an output blob into its tree leaf. Cartesi's
@@ -22,14 +22,14 @@ func OutputLeaf(output []byte) common.Hash {
 	return crypto.Keccak256Hash(output)
 }
 
-// hashPair is LibMerkle32's parent(): keccak256(left || right).
+// hashPair is LibKeccak256.hashPair: keccak256(left || right).
 func hashPair(left, right common.Hash) common.Hash {
 	return crypto.Keccak256Hash(left.Bytes(), right.Bytes())
 }
 
-// zeroHashes[h] is the root of an all-zero subtree of height h. It is
-// LibMerkle32's defaultNode as it is lifted level by level: the level-0 default
-// is the zero hash, and each level up is parent(default, default).
+// zeroHashes[h] is the root of an all-zero subtree of height h — the default
+// node of level h, lifted level by level: the level-0 default is the zero hash,
+// and each level up is hashPair(default, default).
 var zeroHashes = func() [OutputTreeHeight + 1]common.Hash {
 	var z [OutputTreeHeight + 1]common.Hash
 	for h := 1; h <= OutputTreeHeight; h++ {
@@ -100,7 +100,8 @@ func (t *OutputTree) insert(leaf common.Hash) {
 }
 
 // Root returns the root of the fixed-height tree, padding the unfilled right
-// side with zero subtrees exactly as LibMerkle32 does.
+// side with zero subtrees. TestOutputTreeMatchesSolidity pins the result
+// against Cartesi's on-chain verifier.
 func (t OutputTree) Root() common.Hash {
 	node := common.Hash{}
 	size := t.count

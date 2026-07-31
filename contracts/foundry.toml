@@ -19,11 +19,12 @@ evm_version = "cancun"
 # install` reads this section.
 [dependencies]
 "@openzeppelin-contracts" = "5.2.0"
-# The latest stable line. 3.0.0-alpha replaces LibMerkle32 with
-# LibBinaryMerkleTree and adds a method to IOutputsMerkleRootValidator; the
-# OutputValidityProof struct and the tree itself are unchanged between them, so
-# proofs this node produces verify under either.
-cartesi-rollups-contracts = "2.2.0"
+cartesi-rollups-contracts = "3.0.0-alpha.6"
+# A transitive dependency of the above, and the only one that is not a registry
+# package: CanonicalMachine takes its constants from the emulator's own Solidity
+# port. Declared here because soldeer does not resolve a dependency's
+# dependencies.
+cartesi-machine-solidity-step = { version = "0.13.0", git = "https://github.com/cartesi/machine-solidity-step.git", tag = "v0.13.0" }
 forge-std = "1.9.6"
 
 [soldeer]

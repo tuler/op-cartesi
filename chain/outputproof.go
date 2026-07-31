@@ -24,11 +24,15 @@ type OutputProof struct {
 
 // ProveOutput builds the proof for one leaf against the tree holding leaves.
 //
-// This mirrors LibMerkle32.siblings: at each level take the node at index^1,
-// defaulting to that level's zero node when the level is short, then lift the
-// level and halve the index. The default node is what makes a 63-level proof
-// cheap for a tree holding a handful of outputs — every level above the real
-// leaves contributes a precomputed zero.
+// At each level take the node at index^1, defaulting to that level's zero node
+// when the level is short, then lift the level and halve the index. The default
+// node is what makes a 63-level proof cheap for a tree holding a handful of
+// outputs — every level above the real leaves contributes a precomputed zero.
+//
+// Building the tree is the off-chain half of the protocol: Cartesi 2.x shipped
+// a builder on chain in LibMerkle32, and 3.0 dropped it, keeping only the
+// verifier. So there is nothing left on chain to defer to, and the agreement
+// between this and Cartesi's verifier is pinned by a test on each side.
 func ProveOutput(leaves []common.Hash, index uint64) (*OutputProof, error) {
 	if index >= uint64(len(leaves)) {
 		return nil, fmt.Errorf("output %d does not exist; the tree holds %d", index, len(leaves))
@@ -43,7 +47,7 @@ func ProveOutput(leaves []common.Hash, index uint64) (*OutputProof, error) {
 	return &OutputProof{OutputIndex: index, Siblings: siblings}, nil
 }
 
-// nodeAt is LibMerkle32.at: the node, or the level's default beyond the end.
+// nodeAt returns the node, or the level's default beyond the end.
 func nodeAt(nodes []common.Hash, index uint64, defaultNode common.Hash) common.Hash {
 	if index < uint64(len(nodes)) {
 		return nodes[index]
@@ -51,8 +55,8 @@ func nodeAt(nodes []common.Hash, index uint64, defaultNode common.Hash) common.H
 	return defaultNode
 }
 
-// parentLevel is LibMerkle32.parentLevel: pair the level up, padding an odd
-// tail with the level's default node.
+// parentLevel pairs the level up, padding an odd tail with the level's default
+// node.
 func parentLevel(nodes []common.Hash, defaultNode common.Hash) []common.Hash {
 	if len(nodes) == 0 {
 		return nil
@@ -66,8 +70,8 @@ func parentLevel(nodes []common.Hash, defaultNode common.Hash) []common.Hash {
 }
 
 // RootAfterReplacement recomputes the tree root from a proof and a leaf, which
-// is what LibMerkle32.merkleRootAfterReplacement does on chain. Having it here
-// lets the node check a proof it just produced before handing it out.
+// is what LibBinaryMerkleTree.merkleRootAfterReplacement does on chain. Having
+// it here lets the node check a proof it just produced before handing it out.
 func RootAfterReplacement(siblings []common.Hash, index uint64, leaf common.Hash) common.Hash {
 	for _, sibling := range siblings {
 		if index&1 == 0 {

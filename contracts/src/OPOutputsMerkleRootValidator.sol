@@ -152,16 +152,17 @@ contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
         return appContract_ == appContract && acceptedAtL2Block[outputsMerkleRoot] != 0;
     }
 
-    /// @notice The machine's Merkle root as of the highest accepted proposal.
+    /// @inheritdoc IOutputsMerkleRootValidator
     ///
-    /// Not part of the 2.x IOutputsMerkleRootValidator, which asks only about
-    /// outputs roots; 3.0.0-alpha adds it. It costs nothing to answer either
-    /// way, because the OP output root commits to the machine root in the same
-    /// preimage as the outputs root — on this chain the L2 state root simply
-    /// *is* the machine root.
+    /// @dev The machine's Merkle root as of the highest accepted proposal.
+    /// Answering it costs nothing here: the OP output root commits to the
+    /// machine root in the same preimage as the outputs root, because on this
+    /// chain the L2 state root simply *is* the machine root. A validator for an
+    /// EVM L2 would have no such value to return.
     function getLastFinalizedMachineMerkleRoot(address appContract_)
         external
         view
+        override
         returns (bytes32)
     {
         if (appContract_ != appContract) return bytes32(0);

@@ -3,10 +3,10 @@ pragma solidity ^0.8.22;
 
 import {Test} from "forge-std/Test.sol";
 
-import {LibMerkle32} from "cartesi-rollups-contracts/src/library/LibMerkle32.sol";
 import {OutputValidityProof} from "cartesi-rollups-contracts/src/common/OutputValidityProof.sol";
 import {Outputs} from "cartesi-rollups-contracts/src/common/Outputs.sol";
-import {CanonicalMachine} from "cartesi-rollups-contracts/src/common/CanonicalMachine.sol";
+
+import {OutputTree} from "./OutputTree.sol";
 
 import {
     OPOutputsMerkleRootValidator, OutputRootProof
@@ -60,7 +60,7 @@ contract Recipient {
 }
 
 contract OutputExecutionTest is Test {
-    using LibMerkle32 for bytes32[];
+    using OutputTree for bytes32[];
 
     uint32 constant GAME_TYPE = 1;
     uint8 constant IN_PROGRESS = 0;
@@ -91,13 +91,13 @@ contract OutputExecutionTest is Test {
     }
 
     function outputsRoot() internal view returns (bytes32) {
-        return leaves.merkleRoot(CanonicalMachine.LOG2_MAX_OUTPUTS);
+        return leaves.root();
     }
 
     function proofFor(uint256 index) internal view returns (OutputValidityProof memory) {
         return OutputValidityProof({
             outputIndex: uint64(index),
-            outputHashesSiblings: leaves.siblings(index, CanonicalMachine.LOG2_MAX_OUTPUTS)
+            outputHashesSiblings: leaves.siblings(index)
         });
     }
 

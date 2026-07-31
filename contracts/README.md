@@ -18,6 +18,29 @@ forge test
 `soldeer.remappings_generate` is off, so the import paths are a file you can
 read rather than something regenerated behind you.
 
+Cartesi Rollups is pinned to **3.0.0-alpha.6**. Two things follow from that:
+
+- `cartesi-machine-solidity-step` is declared here as well, from git. It is a
+  transitive dependency — `CanonicalMachine` takes its constants from the
+  emulator's own Solidity port — and soldeer does not resolve a dependency's
+  dependencies.
+- 3.0 removed the on-chain tree *builder* (`LibMerkle32`) and kept only the
+  verifier (`LibOutputValidityProof` over `LibBinaryMerkleTree`), which is the
+  right split: a contract never builds the outputs tree, it only checks a proof
+  against a root. The builder now lives in the node (`chain/outputtree.go`),
+  with a copy in `test/OutputTree.sol` for the tests. Since the two share no
+  code, `test/OutputTree.t.sol` and `TestOutputTreeMatchesSolidity` in the Go
+  package pin both to the same root over the same outputs — a disagreement
+  there would otherwise surface as a withdrawal that cannot be executed.
+
+The verification itself is unchanged between 2.2 and 3.0: same
+`OutputValidityProof` struct, same height-63 zero-padded keccak tree, same
+`merkleRootAfterReplacement` semantics. What 3.0 adds to the surface this repo
+implements is `getLastFinalizedMachineMerkleRoot` on
+`IOutputsMerkleRootValidator`, which costs nothing to answer here — OP's output
+root commits to the machine root in the same preimage as the outputs root,
+because on this chain the L2 state root *is* the machine root.
+
 ## What is here
 
 | | |

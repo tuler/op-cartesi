@@ -166,11 +166,11 @@ An earlier draft of this section claimed Isthmus lets us keep the stock portal w
 - **What it does buy, unambiguously:** op-node can compute an output root at all. Without it, `optimism_outputAtBlock` fails on the `eth_getProof` call and `op-proposer` cannot function — there is no chain to propose. It also makes the Cartesi outputs root a committed part of `OutputRootV0`, so anything that verifies against that root is verifying against the machine's real outputs. `op-node`, `op-batcher` and `op-proposer` all stay stock.
 
   **Confirmed against a released op-node** (v1.19.3), rather than argued from the source: `optimism_outputAtBlock` returns an output root for our chain, and the `withdrawalStorageRoot` it reports is byte-for-byte the value `cartesi_getOutputsRoot` gives for the same block. So the output root op-proposer would submit already commits to the Cartesi outputs tree, and nothing on that path calls `eth_getProof`.
-- **What it does not buy:** L1-side withdrawal verification. `OptimismPortal.proveWithdrawalTransaction` verifies a withdrawal with an **MPT storage proof against `messagePasserStorageRoot`**. Feeding it a Cartesi `LibMerkle32` root does not make its `SecureMerkleTrie` verification succeed — the proof formats are unrelated.
+- **What it does not buy:** L1-side withdrawal verification. `OptimismPortal.proveWithdrawalTransaction` verifies a withdrawal with an **MPT storage proof against `messagePasserStorageRoot`**. Feeding it a Cartesi outputs root does not make its `SecureMerkleTrie` verification succeed — the proof formats are unrelated.
 
 So the L1 side still needs Cartesi-aware proof checking, and §4's two options remain live for that half of the problem:
 
-1. Replace the portal's withdrawal-proof verification with `LibMerkle32` verification against the outputs root (a contract change, but a contained one — the surrounding portal logic, the game-type wiring and the proposer are untouched).
+1. Replace the portal's withdrawal-proof verification with Cartesi's own verification against the outputs root (a contract change, but a contained one — the surrounding portal logic, the game-type wiring and the proposer are untouched).
 2. Route withdrawals through Cartesi's existing `Application.validateOutput` against the same outputs root, anchored to the resolved game, and use OP's portal only for deposits. Nearly free for applications already on the voucher path.
 
 Both now verify against the *same* commitment that op-proposer already publishes, which is the real simplification Isthmus delivers: one outputs root, produced by stock OP plumbing, consumed by whichever verifier is chosen.
@@ -189,7 +189,7 @@ The consequence is a deliberate ordering: serve receipts *before* committing the
 ### Staged plan
 
 1. **Thread outputs through the chain.** *(done)* Per-transaction emissions are split into provable outputs and diagnostic reports, attributed by transaction index and hash, and recorded on the block. Outputs of a rejected input are dropped, because a rejection rolls the machine back; its reports are kept, since they are usually the only explanation of the failure. Builder and verifier are tested to record identical outputs — the agreement everything downstream depends on.
-2. **Commit the outputs Merkle root** in the header's `withdrawalsRoot`, making `optimism_outputAtBlock` meaningful. *(done)* The chain is Isthmus from genesis and the fork schedule is not configurable — a pre-Isthmus chain could never be proposed, so supporting one would only add untested paths. The tree matches Cartesi's on-chain tree exactly — height 63 (`CanonicalMachine.LOG2_MAX_OUTPUTS`), leaves `keccak256(output)`, parents `keccak256(left‖right)`, unfilled positions padded with the zero-subtree chain, as `LibMerkle32` does — so existing voucher proofs and tooling verify against it unchanged. The accumulator is cumulative over the chain, not per block, which both models require: Cartesi indexes outputs globally, and a withdrawal must stay provable against the output root of any later block. Verifiers re-derive the root from re-execution and reject a payload that claims outputs the machine did not produce.
+2. **Commit the outputs Merkle root** in the header's `withdrawalsRoot`, making `optimism_outputAtBlock` meaningful. *(done)* The chain is Isthmus from genesis and the fork schedule is not configurable — a pre-Isthmus chain could never be proposed, so supporting one would only add untested paths. The tree matches Cartesi's on-chain tree exactly — height 63 (`CanonicalMachine.LOG2_MAX_OUTPUTS`), leaves `keccak256(output)`, parents `keccak256(left‖right)`, unfilled positions padded with the zero-subtree chain — so existing voucher proofs and tooling verify against it unchanged. The accumulator is cumulative over the chain, not per block, which both models require: Cartesi indexes outputs globally, and a withdrawal must stay provable against the output root of any later block. Verifiers re-derive the root from re-execution and reject a payload that claims outputs the machine did not produce.
 3. **Synthesize receipts** from the recorded outputs. *(done)* Provable outputs become logs, acceptance becomes `status`, and consumed mcycles become `gasUsed`; `eth_getTransactionReceipt` and `eth_getBlockReceipts` serve the standard shape. Each log carries the output's **chain-wide index** as a topic alongside the raw bytes, which is precisely what a Cartesi output validity proof takes — so a receipt is enough to construct the L1 proof later. `receiptsRoot` and the header bloom stay empty, so none of this encoding is frozen into consensus while it is still moving.
 
    Reports deliberately do *not* become logs. Dressing a non-provable emission up as a log would imply it can be proven on L1. They are served instead through a `cartesi_` namespace — `cartesi_getTransactionEmissions` returns outputs with their indices plus the reports, and `cartesi_getOutputsRoot` returns the commitment and output count at a block.
@@ -302,13 +302,16 @@ Two pieces on this side of the boundary:
 
 - **Proofs.** The accumulator in `outputtree.go` carries only a frontier, so it
   cannot prove an old leaf. `ProveOutput` builds the co-path from the stored
-  leaves, mirroring `LibMerkle32.siblings` level for level, and
-  `cartesi_getOutputProof` serves it. The proof is against the commitment of a
+  leaves and `cartesi_getOutputProof` serves it. Building the tree is the
+  off-chain half: Cartesi 2.x shipped a builder on chain in `LibMerkle32`, 3.0
+  dropped it and kept only the verifier, so a test on each side pins the two
+  implementations to the same root. The proof is against the commitment of a
   *chosen* block, not the block that emitted the output: the tree is cumulative,
   so a withdrawal stays provable against every later proposal, and the caller
   wants whichever block was actually proposed.
 - **Execution.** `OutputExecutor` verifies with Cartesi's own
-  `LibOutputValidityProof` over `LibMerkle32`, vendored unmodified, so a proof
+  `LibOutputValidityProof` over `LibBinaryMerkleTree`, taken as a dependency
+  rather than reimplemented, so a proof
   this node produces is checked by Cartesi's real verifier rather than by a
   reimplementation of it. It is a reduced stand-in for `Application` — no
   ownership, upgrades, token receivers or delegate-call vouchers — and a
