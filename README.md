@@ -6,7 +6,7 @@ The core of this project is an **Engine API shim**: a service that sits where op
 
 ## Status
 
-**Roadmap step 1 is done.** Its milestone was *deposits credited in-guest, and blocks derived identically by a second verifier node from L1 data alone* — both now hold on a live devnet. The shim implements the full sequencing loop — `engine_forkchoiceUpdatedV3` (with OP payload attributes) → `engine_getPayloadV4` → `engine_newPayloadV4` — plus verifier-side re-execution, reorg handling via machine snapshots, JWT auth, and the `eth_*` subset op-node and op-batcher read. It generates the `rollup.json` op-node consumes, and runs every fork through Isthmus from genesis (see [Fork support](#fork-support)).
+**Roadmap steps 1 to 3 are done.** On a live devnet the chain sequences, batches to L1, is re-derived block-for-block by an independent verifier, proposes to a `DisputeGameFactory`, survives a restart, and settles withdrawals of both ether and ERC-20 through Cartesi vouchers proven against those proposals. What is *not* done is disputing a proposal — that, and the gaps that have nothing to do with proofs, are in the [roadmap](#roadmap). The shim implements the full sequencing loop — `engine_forkchoiceUpdatedV3` (with OP payload attributes) → `engine_getPayloadV4` → `engine_newPayloadV4` — plus verifier-side re-execution, reorg handling via machine snapshots, JWT auth, and the `eth_*` subset op-node and op-batcher read. It generates the `rollup.json` op-node consumes, and runs every fork through Isthmus from genesis (see [Fork support](#fork-support)).
 
 Compatibility is verified against **op-node's own types** rather than hand-written JSON: the [`integration`](integration/) suite drives the shim over authenticated HTTP using `op-service/eth`, and checks each block with op-node's `ExecutionPayloadEnvelope.CheckBlockHash`, which independently reconstructs the header. A deliberate one-field mutation to header construction is caught there, so the check has teeth.
 
@@ -129,9 +129,23 @@ That fixes the wire protocol too: `engine_forkchoiceUpdatedV3` plus the **V4** p
 
 Jovian and later are not supported: Jovian adds a minimum-base-fee field the shim does not implement.
 
-## Roadmap (from the design doc)
+## Roadmap
 
-1. **Shim MVP** *(done)* — local Cartesi Machine + op-node in sequencer mode on an L1 devnet, permissioned game type, no proofs. Milestone: deposits credited in-guest; a second verifier node derives identical blocks from L1 data alone.
-2. **Batcher/proposer integration** *(next)* — the L1 contract suite, `op-proposer`, and persistence for blocks and outputs, which are still in memory.
-3. **Settlement track A** — Dave/PRT wrapped as an OP `IDisputeGame`, calldata batches, voucher-based withdrawals.
-4. **Settlement track B** — benchmark the freestanding emulator inside a RISC Zero guest; go/no-go on ZK settlement.
+1. **Shim MVP** *(done)* — a Cartesi Machine and op-node in sequencer mode on an L1 devnet. Milestone: deposits credited in-guest, and a second verifier node deriving identical blocks from L1 data alone.
+2. **Batcher, proposer, persistence** *(done)* — the L1 contract suite through `op-deployer`, `op-batcher` posting calldata batches, `op-proposer` creating games, and a store that survives a restart by replaying from a machine checkpoint.
+3. **Withdrawals** *(done)* — the outputs tree in `withdrawalsRoot`, output validity proofs, and an L1 contract that opens a proposal's root claim so Cartesi's own verifier can execute a voucher against it. Cartesi-style portals bring ether and ERC-20 the other way. This was the withdrawal half of what the design doc filed under settlement track A; the disputing half is below.
+4. **A provable definition of a block** *(next)* — the prerequisite for either settlement track, and a design question before it is a coding one. A fault proof disputes a computation `(state, input, cycles) → state`. This chain's block is *N inputs, each with a cycle budget, where exceeding the budget counts as a rejection* — a consensus rule that currently lives in Go, in `chain/chain.go` and `MaxCyclesPerInput`. Writing it down makes the `EvmAdvance` envelope encoding consensus-critical in a way it is not today, so it is much cheaper to settle now than after more code has accreted around the implicit version.
+5. **Settlement track A** — Dave/PRT wrapped as an OP `IDisputeGame`. The L1 side is already shaped for it: `OPOutputsMerkleRootValidator` takes `gameType`, `maturityDelay` and `requireDefenderWins` as constructor arguments, so pointing it at a real game type changes nothing else here.
+6. **Settlement track B** — benchmark the freestanding emulator inside a RISC Zero guest and get a cost per block; go/no-go on ZK settlement. Worth doing early, since the number may redirect the choice.
+
+### Known gaps that are not about proofs
+
+These do not change the trust model, which is why they sit outside the numbered steps — but a chain that ran for real would need them, and they are cheap to state plainly.
+
+- **Inputs are free.** There is no fee market and no metering charged to anyone, so nothing rate-limits the sequencer's ingress. `MaxCyclesPerInput` bounds one input's execution; it does not bound a sender. This is the substantive question hiding behind the next two entries — once an input costs something, the payer needs an identity, and the rest follows from that rather than being bolted on ahead of it.
+- **No account model in the shim.** The state is the machine's memory, so there is no accounts trie to answer from: `eth_getTransactionCount`, `eth_estimateGas` and `eth_feeHistory` are unserved, which is exactly what `cast send` asks for first. `devnet/send-l2-tx.sh` works around it by supplying nonce, gas and price explicitly. `eth_gasPrice` and `eth_feeHistory` could be synthesized from headers today, and `eth_estimateGas` could run the input on a discarded fork and report its cycles; the nonce is the one that implies a design decision.
+- **No replay protection.** The chain does not check a nonce, so a raw transaction can be resubmitted after inclusion and will be executed again. EIP-155 prevents cross-chain replay; nothing prevents same-chain replay. Authorization is the guest's business here, so the durable fix belongs in the guest, where it is covered by the state root.
+- **P2P is disabled**, so unsafe-head gossip and the reorg paths that come with it are untested.
+- **Blob DA is unexercised** — batches are calldata only.
+- **No snapshot sync.** A new node replays from genesis, or from a checkpoint it already has.
+- **Proof construction walks the chain.** `leavesThrough` is linear in chain length, which is fine while outputs are rare and will not be at any other scale; it wants an index from output index to block.
