@@ -1,79 +1,92 @@
 #!/usr/bin/env bash
-# Deploys the two contracts that let a Cartesi output be executed on L1 against
-# an OP proposal, and records their addresses for withdraw.sh.
+# Deploys the contracts that make Cartesi outputs executable on L1 against OP
+# proposals, plus Cartesi-style portals that route deposits through
+# OptimismPortal instead of an InputBox.
 #
-#   OPOutputsMerkleRootValidator — opens a proposal's root claim and records the
-#     Cartesi outputs root it commits to.
-#   OutputExecutor              — proves an output against that root with
-#     Cartesi's own libraries and runs it.
-#
-# Requires the devnet running with contracts deployed (WITH_CONTRACTS=1).
+# See contracts/ for the Foundry project; this only supplies the addresses the
+# devnet already knows and records what came back.
 
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 : "${L1_PORT:=8600}"
 : "${L1_RPC:=http://127.0.0.1:$L1_PORT}"
 : "${DEPLOYER_KEY:=0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6}"
-: "${DEPLOYER_ADDRESS:=0x90F79bf6EB2c4f870365E785982E1f101E93b906}"
-# How long a proposal must stand before its outputs may be executed. Zero on a
-# devnet; a real chain sets this to cover the dispute window.
+# How long a proposal must stand before its outputs may be executed, and
+# whether its game must have resolved. Zero and false are the permissioned
+# posture this chain already runs under — nothing can dispute a proposal,
+# because no fault proof VM can execute a Cartesi Machine. A chain with a real
+# proof system sets both.
 : "${OUTPUT_MATURITY_DELAY:=0}"
-# Whether the game must have resolved for the defender. False is the
-# permissioned posture this chain already runs under: proposals come from an
-# authorised proposer and nothing can dispute them, because no fault proof VM
-# can execute a Cartesi Machine yet.
 : "${OUTPUT_REQUIRE_RESOLVED:=false}"
 : "${OUTPUTS_ENV_FILE:=$DEVNET_DIR/outputs-addresses.env}"
 : "${EXECUTOR_FUNDING:=10000000000000000000}"
+# OptimismPortal's floor is 21000 + 16 per byte, and the registration payload
+# is 22 bytes. The chain meters in machine cycles and ignores this, but L1
+# still checks it.
+: "${REGISTER_GAS_LIMIT:=100000}"
 
 if [ -z "${DISPUTE_GAME_FACTORY_ADDRESS:-}" ]; then
   echo "no DisputeGameFactory; run the devnet with WITH_CONTRACTS=1 first" >&2
   exit 1
 fi
-
-"$REPO_DIR/contracts/build.sh"
-BIN=$(python3 -c "
-import json,sys
-d=json.load(open('$REPO_DIR/contracts/out/contracts.json'))['contracts']
-print(d['src/OPOutputsMerkleRootValidator.sol:OPOutputsMerkleRootValidator']['bin'])
-print(d['src/OutputExecutor.sol:OutputExecutor']['bin'])")
-VALIDATOR_BIN=$(echo "$BIN" | sed -n 1p)
-EXECUTOR_BIN=$(echo "$BIN" | sed -n 2p)
-
-# The two contracts point at each other: the validator answers for one
-# application, and that application is the executor. Rather than add a setter,
-# the executor's address is computed from the deployer's next-but-one nonce and
-# baked into the validator's constructor.
-NONCE=$(cast nonce "$DEPLOYER_ADDRESS" --rpc-url "$L1_RPC")
-EXECUTOR_ADDRESS=$(cast compute-address "$DEPLOYER_ADDRESS" --nonce $((NONCE + 1)) --rpc-url "$L1_RPC" | awk '{print $NF}')
-
-echo "deploying OPOutputsMerkleRootValidator (app will be $EXECUTOR_ADDRESS)" >&2
-VALIDATOR_ARGS=$(cast abi-encode 'f(address,uint32,address,uint256,bool)' \
-  "$DISPUTE_GAME_FACTORY_ADDRESS" "$DISPUTE_GAME_TYPE" "$EXECUTOR_ADDRESS" \
-  "$OUTPUT_MATURITY_DELAY" "$OUTPUT_REQUIRE_RESOLVED")
-VALIDATOR_ADDRESS=$(cast send --private-key "$DEPLOYER_KEY" --rpc-url "$L1_RPC" --json \
-  --create "0x${VALIDATOR_BIN}${VALIDATOR_ARGS#0x}" \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["contractAddress"])')
-
-echo "deploying OutputExecutor" >&2
-EXECUTOR_ARGS=$(cast abi-encode 'f(address)' "$VALIDATOR_ADDRESS")
-DEPLOYED=$(cast send --private-key "$DEPLOYER_KEY" --rpc-url "$L1_RPC" --json \
-  --create "0x${EXECUTOR_BIN}${EXECUTOR_ARGS#0x}" \
-  | python3 -c 'import sys,json;print(json.load(sys.stdin)["contractAddress"])')
-if [ "$(echo "$DEPLOYED" | tr 'A-Z' 'a-z')" != "$(echo "$EXECUTOR_ADDRESS" | tr 'A-Z' 'a-z')" ]; then
-  echo "executor landed at $DEPLOYED but the validator was told $EXECUTOR_ADDRESS" >&2
+if ! command -v forge > /dev/null 2>&1; then
+  echo "forge is not on PATH; install foundry (https://getfoundry.sh)" >&2
   exit 1
 fi
 
-# The executor pays vouchers out of its own balance, the way a Cartesi
-# Application holds the assets it can be instructed to move. Bridging that to
-# the ETH OptimismPortal holds is a separate question — see DESIGN §4.
-cast send "$DEPLOYED" --value "$EXECUTOR_FUNDING" --private-key "$DEPLOYER_KEY" --rpc-url "$L1_RPC" > /dev/null
+cd "$REPO_DIR/contracts"
+[ -d dependencies ] || forge soldeer install
 
-cat > "$OUTPUTS_ENV_FILE" <<EOF
-# Written by devnet/deploy-outputs.sh.
-OUTPUTS_VALIDATOR_ADDRESS=$VALIDATOR_ADDRESS
-OUTPUT_EXECUTOR_ADDRESS=$DEPLOYED
-EOF
+OUT=$(DISPUTE_GAME_FACTORY_ADDRESS="$DISPUTE_GAME_FACTORY_ADDRESS" \
+  DEPOSIT_CONTRACT_ADDRESS="$DEPOSIT_CONTRACT_ADDRESS" \
+  DISPUTE_GAME_TYPE="$DISPUTE_GAME_TYPE" \
+  OUTPUT_MATURITY_DELAY="$OUTPUT_MATURITY_DELAY" \
+  OUTPUT_REQUIRE_RESOLVED="$OUTPUT_REQUIRE_RESOLVED" \
+  forge script script/DeployOutputs.s.sol:DeployOutputs \
+    --rpc-url "$L1_RPC" --private-key "$DEPLOYER_KEY" --broadcast 2>&1)
+
+if ! echo "$OUT" | grep -q "OUTPUT_EXECUTOR_ADDRESS="; then
+  echo "$OUT" | tail -20 >&2
+  exit 1
+fi
+
+{
+  echo "# Written by devnet/deploy-outputs.sh. Sourced by env.sh."
+  echo "$OUT" | grep -oE '(OUTPUTS_VALIDATOR|OUTPUT_EXECUTOR|ERC20_PORTAL|ETHER_PORTAL)_ADDRESS=0x[0-9a-fA-F]{40}'
+} > "$OUTPUTS_ENV_FILE"
+source "$OUTPUTS_ENV_FILE"
+
+# The executor pays vouchers from its own balance, the way a Cartesi
+# Application holds the assets it can be told to move.
+#
+# Ether deposited through OptimismPortal does not land here — it stays in OP's
+# lockbox, where no voucher can reach it — so an ether withdrawal is only
+# payable because of this funding. OPEtherPortal is the path where the two
+# directions agree; see DESIGN §7d.
+cast send "$OUTPUT_EXECUTOR_ADDRESS" --value "$EXECUTOR_FUNDING" \
+  --private-key "$DEPLOYER_KEY" --rpc-url "$L1_RPC" > /dev/null
+
+# Tell the guest which contracts it may credit deposits from.
+#
+# The guest cannot have these baked into its genesis state: they do not exist
+# until L1 is deployed, and L1 cannot be deployed after a genesis that names
+# them. So they arrive as an input like any other — one the guest takes only
+# from the owner address baked into the snapshot. An EOA calling the portal
+# directly is not aliased, so the deposit reaches the guest with `from` set to
+# the owner itself, which is what it checks.
+if [ "$(cast wallet address --private-key "$DEPLOYER_KEY")" != "$GUEST_OWNER" ]; then
+  echo "the deploy key is not the guest's owner ($GUEST_OWNER); the guest will ignore this registration" >&2
+  exit 1
+fi
+register_portal() {
+  cast send "$DEPOSIT_CONTRACT_ADDRESS" \
+    "depositTransaction(address,uint256,uint64,bool,bytes)" \
+    "$OUTPUT_EXECUTOR_ADDRESS" 0 "$REGISTER_GAS_LIMIT" false "0x70$1${2#0x}" \
+    --private-key "$DEPLOYER_KEY" --rpc-url "$L1_RPC" > /dev/null
+}
+register_portal 00 "$ETHER_PORTAL_ADDRESS"
+register_portal 01 "$ERC20_PORTAL_ADDRESS"
+
 echo "wrote $OUTPUTS_ENV_FILE" >&2
-sed 's/^/  /' "$OUTPUTS_ENV_FILE" | grep -v '^  #' >&2
+grep -v '^#' "$OUTPUTS_ENV_FILE" | sed 's/^/  /' >&2
+echo "  registered both portals with the guest" >&2

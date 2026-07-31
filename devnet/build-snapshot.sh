@@ -24,10 +24,19 @@ for image in "$IMAGES_DIR/rootfs.ext2"; do
   fi
 done
 
+# The guest's owner is a genesis parameter: the one address whose inputs it
+# takes as configuration, which is how it learns the portal addresses that do
+# not exist yet when the snapshot is built. Substituting it here rather than
+# editing the app keeps it a chain parameter — and, being part of the stored
+# machine, it is covered by the genesis state root like every other one.
+APP="$(mktemp "${TMPDIR:-/tmp}/op-cartesi-guest.XXXXXX")"
+trap 'rm -f "$APP"' EXIT
+sed "s/__OWNER__/$(echo "${GUEST_OWNER#0x}" | tr 'A-Z' 'a-z')/" "$GUEST_APP" > "$APP"
+
 rm -rf "$SNAPSHOT_DIR"
 cartesi-machine \
   --flash-drive="label:root,data_filename:$IMAGES_DIR/rootfs.ext2" \
-  --append-init-file="$GUEST_APP" \
+  --append-init-file="$APP" \
   --store="$SNAPSHOT_DIR"
 
 echo "stored machine snapshot in $SNAPSHOT_DIR" >&2

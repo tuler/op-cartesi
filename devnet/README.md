@@ -112,10 +112,11 @@ address the deployment authorised, and are never disputed — there is no fault
 proof VM that can execute a Cartesi Machine. That is how OP chains launch;
 real disputes are the settlement track.
 
-Withdrawals still do not work, and deploying `OptimismPortal` does not change
-that: `proveWithdrawalTransaction` verifies an MPT storage proof of the
+Deploying `OptimismPortal` does not make OP's own withdrawal path usable:
+`proveWithdrawalTransaction` verifies an MPT storage proof of the
 L2ToL1MessagePasser account against the L2 state root, and ours is a Cartesi
-hash tree. See [DESIGN.md §4 and §7](../docs/DESIGN.md).
+hash tree. Withdrawals go through Cartesi vouchers instead — see below and
+[DESIGN.md §4 and §7c](../docs/DESIGN.md).
 
 ### Deposits
 
@@ -147,6 +148,67 @@ the path a real user takes. With `WITH_CONTRACTS=0` there is no portal, so
 configured address with `anvil_setCode` instead. Derivation reads the log
 rather than the contract that produced it, so as far as the chain is concerned
 the two are the same, and the guest is credited either way.
+
+### Withdrawals
+
+`deploy-outputs.sh` puts the L1 half in place: the validator that opens an OP
+proposal's root claim, the executor that runs a proven output, and the two
+portals. It also funds the executor and registers the portals with the guest.
+
+```sh
+./devnet/deploy-outputs.sh
+./devnet/withdraw.sh 0x00000000000000000000000000000000000a11ce 500000000000000000
+```
+
+`withdraw.sh` asks the guest for a withdrawal and `execute-voucher.sh` does the
+rest: wait for a proposal covering the voucher's block, open that proposal's
+root claim on L1, and prove the voucher against the outputs root inside it with
+Cartesi's own libraries. Nothing about op-node, op-batcher or op-proposer is
+modified or aware of any of this — the root claim they already publish is the
+commitment the proof runs against.
+
+The proof is built against the *proposed* block, not the block that emitted the
+voucher. The outputs tree is cumulative over the chain, so a withdrawal has to
+stay provable as the tree grows past it; `cartesi_getOutputProof` takes both the
+output index and the block to prove it as of.
+
+### Tokens
+
+ERC-20 goes through a Cartesi-style portal, not `L1StandardBridge`:
+
+```sh
+./devnet/deposit-erc20.sh 1000000000000000000        # deploys a test token first time
+./devnet/balance.sh 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 $TEST_TOKEN_ADDRESS
+./devnet/withdraw-erc20.sh 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 500000000000000000
+```
+
+The portal escrows the tokens in the application contract and hands the guest
+Cartesi's own packed deposit payload as the data of an `OptimismPortal`
+deposit; the withdrawal is a voucher calling `transfer` on the token from that
+same contract. The standard bridge is avoided deliberately: it escrows in
+itself and releases only against the MPT proof this chain cannot produce, so
+tokens sent through it would be stuck. [DESIGN.md §7d](../docs/DESIGN.md).
+
+The guest credits a portal deposit only if the deposit's `from` is a portal it
+was told about — `alias(portal)`, since `OptimismPortal` aliases contract
+callers. It learns those addresses from `GUEST_OWNER`, an address baked into
+the snapshot and therefore into the genesis state root, whose deposits it
+treats as configuration. That indirection exists because the portals do not
+exist when the snapshot is built, and trusting any sender would let any
+contract mint claims against tokens the application really holds.
+
+### Testing the guest
+
+The guest never runs on the host, but its logic can:
+
+```sh
+lua5.4 devnet/test-guest.lua
+```
+
+This lifts the Lua out of `bank-app.sh`, stubs the two calls it makes into the
+machine, and drives it with hand-built deposits and transactions — including
+malformed ones, since an error inside the guest halts the machine, and a halted
+machine is a halted chain.
 
 Two operational notes the script encodes, both easy to trip over by hand:
 

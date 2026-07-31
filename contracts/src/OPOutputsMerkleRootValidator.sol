@@ -1,24 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.22;
 
-import {IOutputsMerkleRootValidator} from "../cartesi/consensus/IOutputsMerkleRootValidator.sol";
+import {IOutputsMerkleRootValidator} from "cartesi-rollups-contracts/src/consensus/IOutputsMerkleRootValidator.sol";
 import {IERC165} from "@openzeppelin-contracts-5.2.0/utils/introspection/IERC165.sol";
 
-/// @notice The subset of OP's dispute game interface this contract reads.
-interface IDisputeGame {
-    function rootClaim() external pure returns (bytes32);
-    function l2BlockNumber() external pure returns (uint256);
-    function status() external view returns (uint8);
-    function createdAt() external pure returns (uint64);
-}
-
-interface IDisputeGameFactory {
-    function gameAtIndex(uint256 index)
-        external
-        view
-        returns (uint32 gameType, uint64 timestamp, IDisputeGame proxy);
-    function gameCount() external view returns (uint256);
-}
+import {IDisputeGame, IDisputeGameFactory} from "./interfaces/IDisputeGame.sol";
 
 /// @notice OP's OutputRootProof, the preimage of the root claim a proposal
 /// records on L1. Verbatim from the OP Stack's Types.sol, because the hash has
@@ -79,6 +65,14 @@ contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
 
     /// @notice An outputs root, and the L2 block whose proposal established it.
     mapping(bytes32 => uint256) public acceptedAtL2Block;
+    /// @notice The machine root of the highest proposal accepted so far, and
+    /// that proposal's L2 block.
+    ///
+    /// This costs nothing to keep: OP's output root already commits to the
+    /// machine's Merkle root in the same preimage as the outputs root, so
+    /// opening a claim yields both of the fields Cartesi's interface asks for.
+    bytes32 internal lastFinalizedMachineRoot;
+    uint256 internal lastFinalizedL2Block;
 
     event OutputsMerkleRootAccepted(
         bytes32 indexed outputsMerkleRoot, uint256 indexed gameIndex, uint256 l2BlockNumber
@@ -141,6 +135,10 @@ contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
         if (l2Block > acceptedAtL2Block[outputsMerkleRoot]) {
             acceptedAtL2Block[outputsMerkleRoot] = l2Block;
         }
+        if (l2Block > lastFinalizedL2Block) {
+            lastFinalizedL2Block = l2Block;
+            lastFinalizedMachineRoot = proof.stateRoot;
+        }
         emit OutputsMerkleRootAccepted(outputsMerkleRoot, gameIndex, l2Block);
     }
 
@@ -152,6 +150,22 @@ contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
         returns (bool)
     {
         return appContract_ == appContract && acceptedAtL2Block[outputsMerkleRoot] != 0;
+    }
+
+    /// @notice The machine's Merkle root as of the highest accepted proposal.
+    ///
+    /// Not part of the 2.x IOutputsMerkleRootValidator, which asks only about
+    /// outputs roots; 3.0.0-alpha adds it. It costs nothing to answer either
+    /// way, because the OP output root commits to the machine root in the same
+    /// preimage as the outputs root — on this chain the L2 state root simply
+    /// *is* the machine root.
+    function getLastFinalizedMachineMerkleRoot(address appContract_)
+        external
+        view
+        returns (bytes32)
+    {
+        if (appContract_ != appContract) return bytes32(0);
+        return lastFinalizedMachineRoot;
     }
 
     /// @inheritdoc IERC165

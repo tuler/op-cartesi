@@ -384,6 +384,61 @@ sharpened by ERC-20:
 Either way the L2 side is guest code, because there are no predeploys. The
 choice is only about which L1 contract holds the assets.
 
+### What is built: option 1
+
+`contracts/src/portals/` is Cartesi's portal, one line different. Cartesi's own
+`ERC20Portal` ends with `getInputBox().addInput(appContract, payload)`; ours
+ends with `OptimismPortal.depositTransaction(appContract, 0, gasLimit, false,
+payload)`. Everything else is unchanged — the escrow goes to the application
+contract, and the payload is `InputEncoding`'s, so a guest written for Cartesi
+Rollups parses it byte for byte.
+
+That substitution works because the two transports carry the same two things: a
+payload and an authenticated sender. Cartesi's `InputBox` stamps `msg.sender`
+into the `EvmAdvance` envelope; `OptimismPortal` aliases a contract caller into
+the deposit's `from`. So `alias(portal)` on this chain plays the part `portal`
+plays there, and a guest that trusts a portal address on one trusts an aliased
+one on the other.
+
+Which leaves one question the ETH path never had to answer: **how does the guest
+learn the portal addresses?** They do not exist when the snapshot is built —
+the machine's root hash is the L2 genesis state, which the rollup config
+commits to, which L1 is deployed against. Naming a portal in genesis would
+require deploying it first, and deploying it requires the chain. The circle has
+to be cut somewhere:
+
+- **Bake in the addresses.** Requires deploying L1 before the snapshot, which
+  inverts the dependency rather than removing it, and makes genesis specific to
+  one L1 deployment.
+- **Trust any sender.** Fatal. Any contract could call `depositTransaction` with
+  bytes shaped like an ERC-20 deposit and mint claims against tokens the
+  application actually holds; a voucher would then pay them out. The portal
+  address *is* the authentication.
+- **Bake in an owner, and let it register the portals as an input.** An address
+  is not a deployment artifact — it can be chosen before anything exists. The
+  guest carries one, and takes configuration from nothing else.
+
+The third is what `devnet/bank-app.sh` does. `GUEST_OWNER` is substituted into
+the app at snapshot time, so it is covered by the genesis state root like every
+other consensus parameter, and registration arrives as an ordinary deposit whose
+`from` is the owner — unaliased, because `OptimismPortal` only aliases contract
+callers. The registration is answered with a notice rather than a report: which
+contracts the guest will credit is consensus state, so it belongs in the outputs
+tree where it can be proven.
+
+The ledger is keyed by `token ‖ account`, with the zero address for ether, so
+one table serves both assets, and a withdrawal is the same voucher either way —
+`transfer(to, amount)` on the token, or a plain value call. Nothing downstream
+of the guest distinguishes them, because to the outputs tree a voucher is a
+voucher.
+
+One asymmetry survives, and it is worth stating plainly rather than hiding in
+the ledger: ether deposited through `OptimismPortal` and ether deposited through
+`OPEtherPortal` are credited the same, but only the second is held anywhere a
+voucher can reach. The first sits in OP's lockbox. The devnet papers over this
+by funding the application contract directly; a real chain would either use the
+Cartesi portal for both directions or accept that OP-path ether is one-way.
+
 ## 8. The app-chain dimension: one machine, many applications
 
 A Cartesi-machine L2 is natively an **app-chain**: the chain's state transition function is whatever the guest program does, which puts it closer to a Cosmos appchain (Monomer's world) than to a general smart-contract L2. That's the point — full Linux, any language, no gas-VM straitjacket. But "one machine = one application" is a configuration choice, not an architectural constraint. Because the guest is a Linux system and the block boundary is just a sequence of CMIO inputs, there is a clean spectrum of ways to host multiple applications on one chain and to add new ones over time — with the crucial property that **none of them change the proving story**. Dave, Asterisc, or RISC Zero prove *the machine*, not any particular application; whatever the guest does, including loading new code, is automatically covered by the same root-hash commitments. Extending the chain is a guest-software problem, not a protocol problem.

@@ -38,6 +38,15 @@ deployer() {
       -v "$DEPLOY_WORKDIR:/w" -w /w "$OP_DEPLOYER_IMAGE" op-deployer "$@"
   fi
 }
+# The workdir is a bind mount in the container and an ordinary directory
+# outside it, so the path op-deployer is told differs by runtime.
+deployer_workdir() {
+  if command -v op-deployer > /dev/null 2>&1; then
+    echo "$DEPLOY_WORKDIR"
+  else
+    echo /w
+  fi
+}
 # Inside a container the L1 is reached over the host gateway, so anvil has to
 # be listening on more than loopback for this to work.
 deployer_l1_rpc() {
@@ -58,7 +67,7 @@ mkdir -p "$DEPLOY_WORKDIR"
 # not needed, because apply does it.)
 echo "generating an op-deployer intent for L1 $L1_CHAIN_ID / L2 $L2_CHAIN_ID" >&2
 deployer init --intent-type custom --l1-chain-id "$L1_CHAIN_ID" \
-  --l2-chain-ids "$L2_CHAIN_ID" --workdir /w > /dev/null
+  --l2-chain-ids "$L2_CHAIN_ID" --workdir "$(deployer_workdir)" > /dev/null
 
 python3 - "$DEPLOY_WORKDIR/intent.toml" <<PY
 import re, sys
@@ -95,15 +104,15 @@ open(path, "w").write(s)
 PY
 
 echo "deploying the L1 contract suite (this takes a minute)" >&2
-deployer apply --workdir /w --l1-rpc-url "$(deployer_l1_rpc)" \
+deployer apply --workdir "$(deployer_workdir)" --l1-rpc-url "$(deployer_l1_rpc)" \
   --private-key "$DEPLOYER_KEY" > "$DEPLOY_WORKDIR/apply.log" 2>&1 || {
   echo "op-deployer apply failed; last lines of $DEPLOY_WORKDIR/apply.log:" >&2
   tail -20 "$DEPLOY_WORKDIR/apply.log" >&2
   exit 1
 }
 
-deployer inspect l1 --workdir /w "$L2_CHAIN_ID" > "$DEPLOY_WORKDIR/l1.json"
-deployer inspect rollup --workdir /w "$L2_CHAIN_ID" > "$DEPLOY_WORKDIR/rollup-opdeployer.json"
+deployer inspect l1 --workdir "$(deployer_workdir)" "$L2_CHAIN_ID" > "$DEPLOY_WORKDIR/l1.json"
+deployer inspect rollup --workdir "$(deployer_workdir)" "$L2_CHAIN_ID" > "$DEPLOY_WORKDIR/rollup-opdeployer.json"
 
 # The batch inbox is derived from the chain id rather than deployed, so it is
 # read from op-deployer's own rollup config; everything else is a contract.

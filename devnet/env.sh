@@ -17,6 +17,12 @@ REPO_DIR="$(dirname "$DEVNET_DIR")"
 # Directory of a stored machine for the server to load. Produced by
 # ./devnet/build-snapshot.sh.
 : "${MACHINE_SNAPSHOT:=}"
+# The address the guest accepts configuration from — currently just which L1
+# portals it will credit deposits from. It is baked into the snapshot, so it is
+# consensus-relevant, and it has to be known before anything is deployed, which
+# is the point: the portals are not. Default is anvil account 5, the key the
+# deploy scripts use.
+: "${GUEST_OWNER:=0x90F79bf6EB2c4f870365E785982E1f101E93b906}"
 
 # --- chain identity (consensus-relevant) -----------------------------------
 : "${L1_CHAIN_ID:=900}"
@@ -32,6 +38,14 @@ REPO_DIR="$(dirname "$DEVNET_DIR")"
 if [ -f "$DEVNET_DIR/l1-addresses.env" ]; then
   # shellcheck disable=SC1091
   source "$DEVNET_DIR/l1-addresses.env"
+fi
+if [ -f "$DEVNET_DIR/outputs-addresses.env" ]; then
+  # shellcheck disable=SC1091
+  source "$DEVNET_DIR/outputs-addresses.env"
+fi
+if [ -f "$DEVNET_DIR/token.env" ]; then
+  # shellcheck disable=SC1091
+  source "$DEVNET_DIR/token.env"
 fi
 : "${L1_GENESIS_HASH:=0x0000000000000000000000000000000000000000000000000000000000000000}"
 : "${L1_GENESIS_NUMBER:=0}"

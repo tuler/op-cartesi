@@ -1,0 +1,32 @@
+# The L1 contracts for op-cartesi: the bridge between OP proposals and Cartesi
+# output execution, plus Cartesi-style portals that route deposits through
+# OptimismPortal instead of an InputBox.
+[profile.default]
+src = "src"
+out = "out"
+test = "test"
+script = "script"
+libs = ["dependencies"]
+solc = "0.8.30"
+optimizer = true
+optimizer_runs = 200
+# Cartesi's contracts are ^0.8.22 and use transient-storage-free code, so the
+# default EVM version is fine; pinning it keeps deployed bytecode stable across
+# solc bumps.
+evm_version = "cancun"
+
+# External code comes from soldeer rather than git submodules. `forge soldeer
+# install` reads this section.
+[dependencies]
+"@openzeppelin-contracts" = "5.2.0"
+# The latest stable line. 3.0.0-alpha replaces LibMerkle32 with
+# LibBinaryMerkleTree and adds a method to IOutputsMerkleRootValidator; the
+# OutputValidityProof struct and the tree itself are unchanged between them, so
+# proofs this node produces verify under either.
+cartesi-rollups-contracts = "2.2.0"
+forge-std = "1.9.6"
+
+[soldeer]
+# Keep dependencies out of the repository; they are reproducible from the
+# versions above.
+remappings_generate = false

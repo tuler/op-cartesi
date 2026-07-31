@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 pragma solidity ^0.8.22;
 
-import {LibOutputValidityProof} from "../cartesi/library/LibOutputValidityProof.sol";
-import {OutputValidityProof} from "../cartesi/common/OutputValidityProof.sol";
-import {Outputs} from "../cartesi/common/Outputs.sol";
-import {IOutputsMerkleRootValidator} from "../cartesi/consensus/IOutputsMerkleRootValidator.sol";
+import {LibOutputValidityProof} from "cartesi-rollups-contracts/src/library/LibOutputValidityProof.sol";
+import {OutputValidityProof} from "cartesi-rollups-contracts/src/common/OutputValidityProof.sol";
+import {Outputs} from "cartesi-rollups-contracts/src/common/Outputs.sol";
+import {IOutputsMerkleRootValidator} from "cartesi-rollups-contracts/src/consensus/IOutputsMerkleRootValidator.sol";
 
 /// @title OutputExecutor
 /// @notice Executes Cartesi outputs against an OP proposal.
