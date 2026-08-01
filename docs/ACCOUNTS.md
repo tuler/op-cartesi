@@ -332,10 +332,14 @@ zero. The moment there are more, the question is where the token
 design decomposes into two decisions, and the first is not a trade-off
 at all.
 
-**Always: a token registry.** An append-only region of the drive whose
-entries carry a token's address and its declared balance width (spec
-§8); a token's **id is its index**, `uint16`, so everything else in the
-drive names tokens in 2 bytes instead of 20. Ids are never reused, and
+**Always: a token registry.** An append-only array whose entries carry
+a token's address and its declared balance width (spec §8) — living in
+the tail of the header page when its capacity fits there (up to 120
+entries, which covers every wide app and most whitelists, and rides
+along in the header's one cached read and one proof), in its own region
+only when a sparse deployment's token ceiling exceeds the page. A
+token's **id is its index**, `uint16`, so everything else in the drive
+names tokens in 2 bytes instead of 20. Ids are never reused, and
 registration is deterministic under either policy an app might want:
 
 - **Owner-registered** — the whitelist case, and exactly the pattern the
