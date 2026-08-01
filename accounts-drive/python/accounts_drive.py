@@ -13,7 +13,7 @@ The same code serves both sides of the drive:
   finishing each input (spec section 10): guest file I/O goes through the
   kernel page cache, and un-synced bytes are not in machine state at the
   yield.
-- **Host**: open the same bytes over a :class:`ReadMemoryStore` against a
+- **Host**: open the same bytes over a :class:`MachineStore` against a
   parked machine, or a :class:`MemStore` holding a copied image (spec
   section 11). All layout, hashing and probing logic is shared, which is what
   keeps two independent parties byte-for-byte agreed about what the drive
@@ -47,14 +47,10 @@ little-endian.
 
 from __future__ import annotations
 
-import base64
 import dataclasses
 import io
-import itertools
-import json
 import os
 import threading
-import urllib.request
 
 __all__ = [
     "MAGIC",
@@ -75,7 +71,7 @@ __all__ = [
     "Store",
     "MemStore",
     "FileStore",
-    "ReadMemoryStore",
+    "MachineStore",
     "Drive",
     "format",
     "open",
@@ -411,62 +407,34 @@ class FileStore(Store):
         return False
 
 
-class ReadMemoryStore(Store):
-    """Reads the drive out of a Cartesi Machine through the
-    cartesi-jsonrpc-machine protocol's ``machine.read_memory`` -- a pure
-    state read that never executes the machine.
+class MachineStore(Store):
+    """Reads the drive out of a Cartesi Machine through whatever machine
+    client the host already uses -- this module deliberately does not speak
+    the machine's JSON-RPC itself. The store only translates drive-relative
+    offsets into the ``(address, length)`` arguments of the client's
+    ``machine.read_memory``.
 
-    ``endpoint`` is the machine server's JSON-RPC URL; ``base_address`` is
-    the drive's start address in the machine's address space. The store is
-    read-only (:meth:`write_at` raises :class:`ReadOnlyStoreError`), and per
-    spec section 11 it must only be used against a quiescent (parked or
-    stored) machine.
-
-    ``opener`` may be a ``urllib.request.OpenerDirector`` (e.g. one built
-    with an empty ``ProxyHandler`` to bypass environment proxies for a
-    localhost machine server); the default honors the environment.
+    ``read_memory`` is a callable ``(address: int, length: int) -> bytes``
+    returning that many bytes at an absolute machine address;
+    ``base_address`` is the drive's start address in the machine's address
+    space. The store is read-only (:meth:`write_at` raises
+    :class:`ReadOnlyStoreError`), and per spec section 11 it must only be
+    used against a quiescent (parked or stored) machine.
     """
 
-    def __init__(self, endpoint: str, base_address: int,
-                 timeout: float = 30.0, opener=None):
-        self.endpoint = endpoint
+    def __init__(self, read_memory, base_address: int):
+        self.read_memory = read_memory
         self.base_address = base_address
-        self.timeout = timeout
-        self._opener = opener if opener is not None else urllib.request.build_opener()
-        self._req_id = itertools.count(1)
 
     def read_at(self, off: int, length: int) -> bytes:
-        body = json.dumps({
-            "jsonrpc": "2.0",
-            "id": next(self._req_id),
-            "method": "machine.read_memory",
-            "params": {"address": self.base_address + off, "length": length},
-        }).encode("utf-8")
-        req = urllib.request.Request(
-            self.endpoint, data=body,
-            headers={"Content-Type": "application/json"})
-        with self._opener.open(req, timeout=self.timeout) as resp:
-            raw = resp.read()
-        try:
-            reply = json.loads(raw)
-        except ValueError as e:
-            raise OSError(f"machine.read_memory: bad response: {e}") from e
-        err = reply.get("error")
-        if err is not None:
-            raise OSError(
-                f"machine.read_memory: {err.get('message')} "
-                f"(code {err.get('code')})")
-        try:
-            data = base64.b64decode(reply["result"], validate=True)
-        except (KeyError, ValueError) as e:
-            raise OSError(f"machine.read_memory: bad result: {e}") from e
+        data = self.read_memory(self.base_address + off, length)
         if len(data) != length:
             raise OSError(
-                f"machine.read_memory: got {len(data)} bytes, want {length}")
-        return data
+                f"read_memory returned {len(data)} bytes, want {length}")
+        return bytes(data)
 
     def write_at(self, off: int, data: bytes) -> None:
-        raise ReadOnlyStoreError("machine.read_memory store is read-only")
+        raise ReadOnlyStoreError("machine store is read-only")
 
 
 # ---------------------------------------------------------------------------

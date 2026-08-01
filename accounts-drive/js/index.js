@@ -2,7 +2,7 @@
 // Accounts Drive Format v1 (docs/ACCOUNTS-DRIVE-SPEC.md).
 
 export { keccak256 } from './keccak.js';
-export { MemStore, FileStore, ReadMemoryStore } from './store.js';
+export { MemStore, FileStore, MachineStore } from './store.js';
 export {
   Drive,
   AccountsDriveError,

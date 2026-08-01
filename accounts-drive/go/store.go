@@ -1,15 +1,10 @@
 package drive
 
 import (
-	"bytes"
-	"encoding/base64"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
-	"net/http"
 	"os"
-	"sync/atomic"
 )
 
 // Store is the byte-level access the library needs. Offsets are relative to
@@ -83,62 +78,34 @@ func (s *FileStore) WriteAt(off uint64, p []byte) error {
 // Sync flushes written bytes to the device.
 func (s *FileStore) Sync() error { return s.F.Sync() }
 
-// ReadMemoryStore reads the drive out of a live Cartesi Machine through the
-// cartesi-jsonrpc-machine protocol's machine.read_memory — a pure state read
-// that never executes the machine. It is read-only, and per spec §11 it must
-// only be used against a quiescent (parked or stored) machine.
-type ReadMemoryStore struct {
-	// Endpoint is the machine server's JSON-RPC URL.
-	Endpoint string
+// MachineStore reads the drive out of a Cartesi Machine through whatever
+// machine client the host already uses — op-cartesi's machine.Remote, or any
+// other client speaking the emulator's protocol. This library deliberately
+// does not implement that protocol itself; the store only translates
+// drive-relative offsets into the (address, length) arguments of the
+// client's machine.read_memory.
+//
+// It is read-only, and per spec §11 it must only be used against a quiescent
+// (parked or stored) machine.
+type MachineStore struct {
 	// Base is the drive's start address in the machine's address space.
-	Base   uint64
-	Client *http.Client
-	reqID  atomic.Uint64
+	Base uint64
+	// ReadMemory is the client's machine.read_memory: it returns length
+	// bytes at an absolute machine address. Wrap a method with a closure to
+	// carry a context or an endpoint.
+	ReadMemory func(address, length uint64) ([]byte, error)
 }
 
-func (r *ReadMemoryStore) ReadAt(off uint64, p []byte) error {
-	body, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0", "id": r.reqID.Add(1), "method": "machine.read_memory",
-		"params": map[string]uint64{"address": r.Base + off, "length": uint64(len(p))},
-	})
+func (m *MachineStore) ReadAt(off uint64, p []byte) error {
+	data, err := m.ReadMemory(m.Base+off, uint64(len(p)))
 	if err != nil {
 		return err
-	}
-	client := r.Client
-	if client == nil {
-		client = http.DefaultClient
-	}
-	resp, err := client.Post(r.Endpoint, "application/json", bytes.NewReader(body))
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return err
-	}
-	var rr struct {
-		Result string `json:"result"`
-		Error  *struct {
-			Code    int    `json:"code"`
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(raw, &rr); err != nil {
-		return fmt.Errorf("machine.read_memory: bad response: %w", err)
-	}
-	if rr.Error != nil {
-		return fmt.Errorf("machine.read_memory: %s (code %d)", rr.Error.Message, rr.Error.Code)
-	}
-	data, err := base64.StdEncoding.DecodeString(rr.Result)
-	if err != nil {
-		return fmt.Errorf("machine.read_memory: %w", err)
 	}
 	if len(data) != len(p) {
-		return fmt.Errorf("machine.read_memory: got %d bytes, want %d", len(data), len(p))
+		return fmt.Errorf("read_memory returned %d bytes, want %d", len(data), len(p))
 	}
 	copy(p, data)
 	return nil
 }
 
-func (r *ReadMemoryStore) WriteAt(uint64, []byte) error { return ErrReadOnly }
+func (m *MachineStore) WriteAt(uint64, []byte) error { return ErrReadOnly }

@@ -296,6 +296,28 @@ function FileStore:close()
   self.f:close()
 end
 
+-- machine_store(read_memory, base) reads the drive out of a Cartesi Machine
+-- through whatever machine client the host already uses — this module
+-- deliberately does not speak the machine's JSON-RPC itself. read_memory is
+-- a function (address, length) -> string returning that many bytes at an
+-- absolute machine address; base is the drive's start address in the
+-- machine's address space. The store is read-only (write_at raises), and per
+-- spec §11 it must only be used against a quiescent machine.
+function M.machine_store(read_memory, base)
+  return {
+    read_at = function(_, off, len)
+      local data = read_memory(base + off, len)
+      if #data ~= len then
+        error(("read_memory returned %d bytes, want %d"):format(#data, len), 2)
+      end
+      return data
+    end,
+    write_at = function()
+      error("machine store is read-only", 2)
+    end,
+  }
+end
+
 -- ======================================================================
 -- Header (spec §5)
 -- ======================================================================

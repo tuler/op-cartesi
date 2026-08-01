@@ -177,3 +177,90 @@ mod tests {
         std::fs::remove_file(&path).ok();
     }
 }
+
+/// A drive read out of a Cartesi Machine through whatever machine client the
+/// host already uses — this crate deliberately does not speak the machine's
+/// JSON-RPC itself. The store only translates drive-relative offsets into
+/// the `(address, length)` arguments of the client's `machine.read_memory`.
+///
+/// Read-only, and per spec §11 only for a quiescent (parked or stored)
+/// machine.
+pub struct MachineStore<F>
+where
+    F: Fn(u64, u64) -> Result<Vec<u8>, Error>,
+{
+    base: u64,
+    read_memory: F,
+}
+
+impl<F> MachineStore<F>
+where
+    F: Fn(u64, u64) -> Result<Vec<u8>, Error>,
+{
+    /// `base` is the drive's start address in the machine's address space;
+    /// `read_memory` returns `length` bytes at an absolute machine address.
+    /// Wrap a client method in a closure (map its error into [`Error::Io`]).
+    pub fn new(base: u64, read_memory: F) -> Self {
+        Self { base, read_memory }
+    }
+}
+
+impl<F> Store for MachineStore<F>
+where
+    F: Fn(u64, u64) -> Result<Vec<u8>, Error>,
+{
+    fn read_at(&self, off: u64, buf: &mut [u8]) -> Result<(), Error> {
+        let data = (self.read_memory)(self.base + off, buf.len() as u64)?;
+        if data.len() != buf.len() {
+            return Err(Error::Io(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!("read_memory returned {} bytes, want {}", data.len(), buf.len()),
+            )));
+        }
+        buf.copy_from_slice(&data);
+        Ok(())
+    }
+
+    fn write_at(&mut self, _off: u64, _data: &[u8]) -> Result<(), Error> {
+        Err(Error::ReadOnly)
+    }
+}
+
+#[cfg(test)]
+mod machine_store_tests {
+    use super::*;
+    use crate::drive::{Config, Drive};
+    use crate::{balance_from_u64, balance_to_u64};
+
+    #[test]
+    fn translates_offsets_and_refuses_writes() {
+        let mem = MemStore::new(1 << 16);
+        let mut d = Drive::format(
+            mem,
+            Config {
+                drive_length: 1 << 16,
+                capacity: 8,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        d.set_account(&[0xbb; 20], 7, &balance_from_u64(5)).unwrap();
+        let image = d.into_store().into_bytes();
+
+        const BASE: u64 = 0x80000000000000;
+        let ms = MachineStore::new(BASE, move |address, length| {
+            assert!(address >= BASE && address + length <= BASE + (1 << 16));
+            let off = (address - BASE) as usize;
+            Ok(image[off..off + length as usize].to_vec())
+        });
+        let mut h = Drive::open(ms).unwrap();
+        let a = h.get_account(&[0xbb; 20]).unwrap().unwrap();
+        assert_eq!(a.nonce, 7);
+        assert_eq!(balance_to_u64(&a.balance), Some(5));
+        assert!(h.get_account(&[0x99; 20]).unwrap().is_none());
+        assert!(matches!(
+            h.set_account(&[0xbb; 20], 8, &balance_from_u64(6)),
+            Err(Error::ReadOnly)
+        ));
+    }
+}

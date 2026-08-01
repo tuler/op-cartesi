@@ -116,6 +116,13 @@ const char *acctdrv_strerror(acctdrv_err e);
  * (mapped to ACCTDRV_ERR_IO). Implementations decide what backs it: a byte
  * buffer, a device file inside the guest, or a remote machine's memory on
  * the host (spec §11 — hosts must read only quiescent state).
+ *
+ * A host wires an existing Cartesi machine client in directly — this
+ * library deliberately does not speak the machine's JSON-RPC itself. The
+ * adapter is three lines: ctx holds the client handle and the drive's base
+ * machine address; read_at calls the client's machine.read_memory with
+ * (base + off, len); write_at returns nonzero (the machine is not writable
+ * from the host).
  */
 typedef struct acctdrv_store {
     void *ctx;
