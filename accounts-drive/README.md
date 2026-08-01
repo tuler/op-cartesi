@@ -19,7 +19,7 @@ usable on **both sides** of the drive:
 | `rust/` | Rust 2021, zero crates | `cargo test` |
 | `c/` | C99, no deps | `make -C c test` |
 | `lua/` | Lua 5.4, pure | `lua5.4 lua/test.lua` |
-| `js/` | Node ≥ 18, no deps | `node --test js/` |
+| `js/` | Node ≥ 18, no deps | `node --test js/test/` |
 | `python/` | Python ≥ 3.8, stdlib | `python3 python/test_accounts_drive.py` |
 
 ## The API, by convention
