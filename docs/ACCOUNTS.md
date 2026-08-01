@@ -191,8 +191,9 @@ completely, frozen by the spec rather than by a library version.
 **v1: an open-addressing hash table with robin-hood probing.** One
 contiguous read per lookup — which is also one compact machine proof,
 since the probe path is a single aligned range. O(1) updates dirtying one
-page. A specification that fits on a page. Accounts are never deleted (a
-nonce only grows), which removes tombstones, the one genuinely fiddly part
+page. A specification that fits on a page. Deletion is rare and tightly
+constrained (§5.7 is about when it is allowed at all), and robin hood
+deletes by backward shift — no tombstones, the one genuinely fiddly part
 of open addressing.
 
 Its known weakness is adversarial clustering: addresses are
@@ -277,7 +278,11 @@ Placement and probing:
   distance from home (mod C); on insert, a candidate that has probed
   further than the resident record swaps with it. Lookup probes from home
   and stops at a match, an empty slot, or a resident whose displacement is
-  smaller than the probe distance. No deletions exist.
+  smaller than the probe distance. Deletion — when policy allows it at
+  all, which §5.7 constrains sharply — is backward-shift: each following
+  record is pulled back one slot until one sits at home or a slot is
+  empty. No tombstones, so an empty slot stays all-zero and exclusion
+  proofs stay one contiguous range.
 - **Fullness is consensus.** An insert that would push `liveCount` past
   `loadLimit` (recommended 7C/8) must deterministically **reject the
   input**. This has the failure mode DESIGN §7d already names — a portal
@@ -344,7 +349,8 @@ at all.
 
 **Always: a token registry.** A region of the drive, declared in the
 header, holding an append-only array of 32-byte entries (token address,
-20 bytes; zero padding, 12); a token's **id is its index**, `uint16`, so
+20 bytes; balance width in bytes, 1 — one of 8, 16 or 32, see below;
+zero padding, 11); a token's **id is its index**, `uint16`, so
 everything else in the drive names tokens in 2 bytes instead of 20. Ids
 are never reused, and registration is deterministic under either policy
 an app might want:
@@ -364,9 +370,13 @@ registered tokens a typical account actually holds. Two shapes:
 - **Wide records** (the account record carries every registered token).
   The accounts table's slot grows to a header-declared power of two; the
   §5.3 layout occupies bytes 0–63 of each slot, and balance columns for
-  ids 0..T−1 follow at `64 + 32·id`. Slot capacities are stepwise: a
-  128-byte slot fits 2 columns, 256 fits 6, 512 fits 14, 1024 fits 30.
-  Marginal cost: 32 bytes per registered token per account, held or not.
+  ids 0..T−1 follow, packed in id order at the widths the registry
+  declares — offsets are prefix sums over the registry, deterministic
+  and stable under append. With full 32-byte columns the capacities are
+  stepwise: a 128-byte slot fits 2, 256 fits 6, 512 fits 14, 1024 fits
+  30; narrower widths stretch them — eight `uint64` columns fit the same
+  128-byte slot. Marginal cost: the declared width per registered token
+  per account, held or not.
   What it buys: **one read — and one Merkle proof — carries the nonce
   and every balance**, which is exactly what an exit builder wants; and
   the column cap doubles as honest whitelist semantics, since a wide app
@@ -392,8 +402,11 @@ registered tokens a typical account actually holds. Two shapes:
   and the token count is unbounded until `uint16` runs out (65,536
   tokens — a 2 MiB registry), which is "arbitrary" for any real app.
 
-The crossover falls out: wide is smaller when d ≳ ½ — when most accounts
-hold most registered tokens — and sparse below that. The power-of-two
+The crossover falls out: with 32-byte columns, wide is smaller when
+d ≳ ½ — when most accounts hold most registered tokens — and sparse
+below that. Narrow widths move it further toward wide, since a column
+costs its declared width while a sparse holding still pays a whole
+slot. The power-of-two
 rounding tilts small sets toward wide harder than the formula suggests:
 an app with native plus one ERC-20 needs a 128-byte slot anyway, and the
 *second* token column in that slot is free. So the guidance is: one or
@@ -417,6 +430,34 @@ Profile fields, at header offset 0x50 (all zero in profile 0):
 | 0x78 | 8 | sparse table capacity |
 | 0x80 | 8 | sparse table load limit |
 | 0x88 | 8 | sparse table live count |
+| 0x90 | 4 | sparse slot size (64, or 32 when every registered width ≤ 8) |
+
+**Balance widths, and why not RLP.** A `uint256` balance is an EVM
+convention, not a need: USDC's entire supply fits a `uint64` with room
+to spare, and `uint128` covers anything real (2^128 wei is ~3.4×10^20
+ether). ewtools itself carries balances as `uint64`. That is what the
+registry's width field is for: a token registers the width its supply
+justifies, wide records pack to it, and a sparse table whose registered
+tokens all declare width ≤ 8 may use **32-byte slots** — token id
+(`uint16`), 2 bytes padding, address, `uint64` balance big-endian —
+exactly one machine tree leaf. A credit that would overflow a declared
+width **deterministically rejects the input**, the same rule as a full
+table; choosing a width no honest supply can overflow is the
+registrar's job, and a mint-happy token gets 32. Two boundaries of this
+compaction are worth stating. The base record's native balance stays
+`uint256`: a 48-byte record would round back up to the 64-byte slot, so
+shrinking it saves nothing. And the compaction tool is deliberately
+*narrower fixed fields*, not variable-length encoding: RLP earns its
+keep in Ethereum because trie nodes are variable-length hashed blobs
+anyway, but here the fixed slot is what the whole design stands on —
+slot arithmetic, O(1) probing, one contiguous range per lookup and per
+proof. Variable-length records would force an indirection layer (an
+offset heap, allocation, compaction) that reinstates everything §4
+rejected LMDB and LSM trees for, while RLP *inside* a fixed slot saves
+no space at all. The zeros it would squeeze are close to free where it
+matters — a page with any record in it is hashed as a page however many
+of its bytes are zero, and zero runs cost almost nothing in a stored
+image.
 
 The devnet bank app is a sparse-profile app in miniature: its ledger is
 already keyed `token ‖ account` with the zero address for ether. The
@@ -430,6 +471,47 @@ into the sparse table.
 - **A change journal.** A ring buffer of `(table, slot)` touched per
   input would let an indexer maintain a historical mirror without
   rereading tables. Nothing in v1 needs it.
+
+### 5.7 Exhaustion: an account must cost something
+
+The tables have fixed capacity, and capacity is consensus — which makes
+filling them an attack. There are two ways to mint records. Deposits
+create balance records, priced somewhat by L1 gas per deposit — dust,
+but not free. Transactions create *nonce* records: the moment the guest
+enforces nonces, the first transaction from a fresh sender allocates a
+slot, and inputs today cost nothing. An attacker can mint permanent
+64-byte records at chain speed for free. So the account model does not
+merely enable a fee market (§1); it *requires* one, and that upgrades
+"inputs are free" from a known gap to a prerequisite.
+
+The mechanisms, and the line between them:
+
+- **An existential minimum on balances.** A credit that would leave a
+  balance below the token's minimum deterministically rejects; a debit
+  that reaches zero deletes the record (backward-shift, §5.3). This is
+  Polkadot's existential deposit and XRP's reserve, and ewtools is
+  already there — its records require a positive balance, and its
+  reference guest deletes on zero. Minimums are app policy, not spec;
+  the registry entry's padding has room if an app wants its declared.
+- **A record with a nonzero nonce is never deleted.** Deleting one
+  re-arms replay of every past transaction from that sender — the
+  attack §1 exists to prevent. Ethereum drew exactly this line:
+  EIP-161's state clearing removes only fully *empty* accounts, never a
+  nonce-bearing one. The Substrate answer — delete freely, because
+  transactions expire and cannot be replayed after a reap — is not
+  available here: these are stock Ethereum transactions with no
+  mortality field, and their stock parseability by op-node and
+  op-batcher is load-bearing (README, "Layout").
+- **So nonce-bearing records are permanent, and permanence is what the
+  fee prices.** The first transaction from a fresh sender must carry at
+  least the flat cost of the 64 bytes it occupies forever. Fees need
+  accounts and accounts need fees; the bootstrap is unglamorous — a
+  flat minimum charge, landing together with nonce enforcement
+  (roadmap step 2), refined into a real market later.
+
+Capacity headroom and the `liveCount` gauge (§5.3) remain the backstop,
+and deletion feeds slack back to the table instead of leaving
+tombstones in it.
 
 ## 6. What the host does with it
 
@@ -591,8 +673,10 @@ as it is for every other Cartesi app.
    root is tested: builder and verifier agree on drive bytes, and a
    record proof round-trips against the header's `stateRoot`.
 2. **v1 — enforcement.** Sender recovery and nonce checking in the guest;
-   mempool gating in the shim; `cartesi_getAccountProof`. This closes the
-   replay-protection gap.
+   mempool gating in the shim; `cartesi_getAccountProof`; and at least a
+   flat per-transaction charge, because nonce records are permanent and
+   must not be free to mint (§5.7). This closes the replay-protection
+   gap.
 3. **v2 — the exit.** `OPAccountsDriveValidator` and the output builder,
    ported from the v3 contracts against `DisputeGameFactory` proposals.
 4. **Later.** The token registry and balance profiles of §5.5 in the
