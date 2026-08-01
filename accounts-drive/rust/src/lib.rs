@@ -12,8 +12,9 @@
 //! shared, which is what keeps two independent parties byte-for-byte agreed
 //! about what the drive means.
 //!
-//! The crate has zero third-party dependencies, including its own Keccak-256
-//! ([`keccak256`]).
+//! The crate's only runtime dependency is the RustCrypto `sha3` crate — the
+//! de-facto standard Keccak-256 implementation, wrapped by [`keccak256`].
+//! The test harness additionally uses RustCrypto's `sha2` and `serde_json`.
 
 mod drive;
 pub mod keccak;

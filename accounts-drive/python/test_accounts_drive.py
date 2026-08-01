@@ -61,6 +61,18 @@ class TestKeccak(unittest.TestCase):
         self.assertEqual(ad.keccak256(*[data[i:i + 7] for i in range(0, len(data), 7)]),
                          whole)
 
+    def test_pure_fallback_agrees(self):
+        # The pure-Python fallback stays pinned even when pycryptodome is
+        # installed, so a guest without packages computes the same drive.
+        self.assertEqual(
+            ad._keccak256_pure(b"").hex(),
+            "c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470")
+        self.assertEqual(
+            ad._keccak256_pure(ZERO_SEED, rep_addr(0xBB)).hex(),
+            "693865af36f54054f08a9e83ec52e6df2001c39673abba1e01d450211dff1a92")
+        data = bytes(range(256)) * 3
+        self.assertEqual(ad._keccak256_pure(data), ad.keccak256(data))
+
 
 class TestHomeSlots(unittest.TestCase):
     def test_mod8(self):

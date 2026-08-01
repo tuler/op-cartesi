@@ -132,12 +132,8 @@ def _keccak_f(st):
         st[0] ^= _KECCAK_RNDC[rnd]
 
 
-def keccak256(*chunks: bytes) -> bytes:
-    """Keccak-256 of the concatenation of the given byte strings.
-
-    This is Ethereum's Keccak-256 -- 0x01 domain padding, not the FIPS SHA-3
-    0x06 padding -- the same function the machine's Merkle tree uses.
-    """
+def _keccak256_pure(*chunks: bytes) -> bytes:
+    """Pure-Python Keccak-256 fallback; see keccak256 for backend selection."""
     st = [0] * 25
     buf = b"".join(bytes(c) for c in chunks)
     n = len(buf)
@@ -155,6 +151,32 @@ def keccak256(*chunks: bytes) -> bytes:
         st[w] ^= int.from_bytes(block[w * 8:w * 8 + 8], "little")
     _keccak_f(st)
     return b"".join((st[w] & _MASK64).to_bytes(8, "little") for w in range(4))
+
+
+# pycryptodome is Python's de-facto standard Keccak; use it when present and
+# fall back to the pure implementation above otherwise (the same pattern
+# eth-hash uses). The fallback is what keeps this module a single file a
+# guest can drop into a rootfs with no packages installed.
+try:
+    from Crypto.Hash import keccak as _pycryptodome_keccak  # type: ignore
+except ImportError:  # pragma: no cover - depends on the environment
+    _pycryptodome_keccak = None
+
+
+def keccak256(*chunks: bytes) -> bytes:
+    """Keccak-256 of the concatenation of the given byte strings.
+
+    This is Ethereum's Keccak-256 -- 0x01 domain padding, not the FIPS SHA-3
+    0x06 padding (hashlib.sha3_256 is the wrong function) -- the same hash
+    the machine's Merkle tree uses. Backed by pycryptodome when importable,
+    by the pure-Python implementation otherwise.
+    """
+    if _pycryptodome_keccak is not None:
+        h = _pycryptodome_keccak.new(digest_bits=256)
+        for c in chunks:
+            h.update(bytes(c))
+        return h.digest()
+    return _keccak256_pure(*chunks)
 
 
 # ---------------------------------------------------------------------------

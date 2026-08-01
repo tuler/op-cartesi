@@ -61,6 +61,11 @@ M.kinds = {
 -- ======================================================================
 -- Keccak-256 (Ethereum's, pre-FIPS 0x01 padding)
 --
+-- Vendored on purpose: there is no de-facto standard pure-Lua Keccak, and
+-- the guest rootfs this module targets ships plain lua5.4 with no package
+-- manager — a single self-contained file is the deployment story.
+-- Correctness is pinned by the spec's independently generated test vectors.
+--
 -- The permutation follows the public-domain tiny_sha3 structure, on native
 -- Lua 5.4 64-bit integers. Lua integers are *signed* 64-bit; that is fine:
 -- xor, and, or, not and shifts operate on the raw 64 bits, `>>` is a
