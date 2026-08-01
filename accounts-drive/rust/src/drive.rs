@@ -55,8 +55,9 @@ pub struct Config {
     pub seed: [u8; 32],
     /// One of [`PROFILE_SINGLE_ASSET`], [`PROFILE_WIDE`], [`PROFILE_SPARSE`].
     pub profile: u32,
-    /// Accounts-table slot size; 0 → 64. Must be 64 outside the wide
-    /// profile, a power of two ≥ 128 in it.
+    /// Accounts-table slot size; 0 → 64. Profile 0 takes 64 (standard
+    /// record) or 32 (compact record, spec §7); must be 64 in the sparse
+    /// profile, a power of two ≥ 128 in the wide profile.
     pub slot_size: u32,
     /// Byte offset of accounts slot 0; 0 → 4096.
     pub table_offset: u64,
@@ -111,8 +112,14 @@ impl Config {
             if ss < 128 || !ss.is_power_of_two() {
                 return cfg(format!("wide slot size {ss}: want a power of two >= 128"));
             }
+        } else if self.profile == PROFILE_SINGLE_ASSET {
+            if ss != 64 && ss != 32 {
+                return cfg(format!(
+                    "slot size {ss}: profile 0 takes 64 (standard record) or 32 (compact record)"
+                ));
+            }
         } else if ss != 64 {
-            return cfg(format!("slot size {ss}: must be 64 outside the wide profile"));
+            return cfg(format!("slot size {ss}: must be 64 in the sparse profile"));
         }
         if self.capacity < 2 {
             return cfg(format!("capacity {} < 2", self.capacity));
@@ -220,12 +227,13 @@ pub struct Token {
     pub width: u32,
 }
 
-/// The fixed 64-byte record of spec §7, decoded.
+/// The account record of spec §7 — standard or compact — decoded.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Account {
     /// The account's 20-byte address (nonzero).
     pub address: [u8; 20],
-    /// Transaction nonce (`uint64` little-endian on the drive).
+    /// Transaction nonce (`uint64` little-endian on the drive; `uint32`
+    /// in the compact record).
     pub nonce: u64,
     /// Native/single-asset balance, 32 bytes big-endian.
     pub balance: Balance,
@@ -603,6 +611,58 @@ impl<S: Store> Drive<S> {
 
     // ------------------------------------------------------------- accounts
 
+    /// Whether the drive uses the 32-byte compact profile-0 record (spec §7).
+    fn compact(&self) -> bool {
+        self.cfg.profile == PROFILE_SINGLE_ASSET && self.cfg.slot_size == 32
+    }
+
+    /// Decodes nonce and balance out of a live account slot, standard or
+    /// compact record.
+    fn decode_account(&self, slot: &[u8]) -> (u64, Balance) {
+        let mut balance = [0u8; 32];
+        if self.compact() {
+            let mut nonce = [0u8; 4];
+            nonce.copy_from_slice(&slot[20..24]);
+            balance[24..].copy_from_slice(&slot[24..32]);
+            (u32::from_le_bytes(nonce) as u64, balance)
+        } else {
+            let mut nonce = [0u8; 8];
+            nonce.copy_from_slice(&slot[24..32]);
+            balance.copy_from_slice(&slot[32..64]);
+            (u64::from_le_bytes(nonce), balance)
+        }
+    }
+
+    /// Builds a record. In the compact record a nonce past `u32::MAX` or a
+    /// balance past `u64::MAX` is [`Error::Overflow`] — the input must be
+    /// rejected (spec §7).
+    fn encode_account(
+        &self,
+        addr: &[u8; 20],
+        nonce: u64,
+        balance: &Balance,
+    ) -> Result<Vec<u8>, Error> {
+        if self.compact() {
+            if nonce > u32::MAX as u64 {
+                return Err(Error::Overflow);
+            }
+            // Big-endian: the balance fits u64 iff every byte above is 0.
+            if !is_zero(&balance[..24]) {
+                return Err(Error::Overflow);
+            }
+            let mut rec = vec![0u8; 32];
+            rec[0..20].copy_from_slice(addr);
+            rec[20..24].copy_from_slice(&(nonce as u32).to_le_bytes());
+            rec[24..32].copy_from_slice(&balance[24..]);
+            return Ok(rec);
+        }
+        let mut rec = vec![0u8; 64];
+        rec[0..20].copy_from_slice(addr);
+        rec[24..32].copy_from_slice(&nonce.to_le_bytes());
+        rec[32..64].copy_from_slice(balance);
+        Ok(rec)
+    }
+
     /// Looks an account up; `None` when the address has no record (which is
     /// a proven statement, not a failure).
     pub fn get_account(&self, addr: &[u8; 20]) -> Result<Option<Account>, Error> {
@@ -613,13 +673,10 @@ impl<S: Store> Drive<S> {
         match self.lookup(&t, addr)? {
             None => Ok(None),
             Some((_, slot)) => {
-                let mut nonce = [0u8; 8];
-                nonce.copy_from_slice(&slot[24..32]);
-                let mut balance = [0u8; 32];
-                balance.copy_from_slice(&slot[32..64]);
+                let (nonce, balance) = self.decode_account(&slot);
                 Ok(Some(Account {
                     address: *addr,
-                    nonce: u64::from_le_bytes(nonce),
+                    nonce,
                     balance,
                 }))
             }
@@ -627,8 +684,9 @@ impl<S: Store> Drive<S> {
     }
 
     /// Writes an account's nonce and balance, inserting the record if the
-    /// address has none. [`Error::TableFull`] means the input carrying this
-    /// change must be rejected (spec §6.3).
+    /// address has none. [`Error::TableFull`] and [`Error::Overflow`] (the
+    /// value exceeds the compact record's `u32` nonce or `u64` balance) mean
+    /// the input carrying this change must be rejected (spec §6.3, §7).
     pub fn set_account(
         &mut self,
         addr: &[u8; 20],
@@ -638,15 +696,12 @@ impl<S: Store> Drive<S> {
         if is_zero(addr) {
             return Err(Error::ZeroAddress);
         }
-        let mut rec = [0u8; 64];
-        rec[0..20].copy_from_slice(addr);
-        rec[24..32].copy_from_slice(&nonce.to_le_bytes());
-        rec[32..64].copy_from_slice(balance);
+        let rec = self.encode_account(addr, nonce, balance)?;
         let t = self.accounts_table();
         if let Some((i, mut slot)) = self.lookup(&t, addr)? {
-            // Update in place, touching only the 64-byte record: in the wide
+            // Update in place, touching only the record bytes: in the wide
             // profile the rest of the slot is token columns.
-            slot[..64].copy_from_slice(&rec);
+            slot[..rec.len()].copy_from_slice(&rec);
             return self.write_slot(&t, i, &slot);
         }
         let n = self.counter(t.count_off)?;
@@ -654,7 +709,7 @@ impl<S: Store> Drive<S> {
             return Err(Error::TableFull);
         }
         let mut full = vec![0u8; t.slot_size as usize];
-        full[..64].copy_from_slice(&rec);
+        full[..rec.len()].copy_from_slice(&rec);
         self.insert(&t, full)
     }
 
@@ -670,7 +725,8 @@ impl<S: Store> Drive<S> {
         let Some((i, slot)) = self.lookup(&t, addr)? else {
             return Ok(false);
         };
-        if !force && !is_zero(&slot[24..32]) {
+        let (nonce, _) = self.decode_account(&slot);
+        if !force && nonce != 0 {
             return Err(Error::NonceProtected);
         }
         self.remove(&t, i)?;
@@ -714,6 +770,10 @@ impl<S: Store> Drive<S> {
         }
         if self.cfg.profile == PROFILE_SPARSE && self.cfg.sparse_slot_size == 32 && width != 8 {
             // 32-byte sparse slots hold u64 balances only (spec §9).
+            return Err(Error::BadWidth);
+        }
+        if self.compact() && width != 8 {
+            // The compact account record holds a u64 balance only (spec §7).
             return Err(Error::BadWidth);
         }
         let mut e = [0u8; 32];
@@ -1123,6 +1183,75 @@ mod tests {
             d.get_token_balance(&user, 9),
             Err(Error::UnknownToken)
         ));
+    }
+
+    /// Pins the 32-byte compact profile-0 record (Appendix B): encoding,
+    /// the u32 nonce and u64 balance bounds, the registry width rule, and
+    /// nonce-protected delete.
+    #[test]
+    fn compact_record() {
+        let s = MemStore::new(1 << 16);
+        let mut d = Drive::format(
+            s,
+            Config {
+                drive_length: 1 << 16,
+                capacity: 8,
+                slot_size: 32,
+                registry_offset: 0x100,
+                registry_capacity: 2,
+                ..Config::default()
+            },
+        )
+        .unwrap();
+        d.set_account(&addr(0xbb), 7, &balance_from_u64(5)).unwrap();
+        // home(bb..) mod 8 = 1.
+        let got = &d.store().bytes()[4096 + 32..4096 + 64];
+        assert_eq!(
+            hex(got),
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb070000000000000000000005"
+        );
+        let a = d.get_account(&addr(0xbb)).unwrap().unwrap();
+        assert_eq!(a.nonce, 7);
+        assert_eq!(balance_to_u64(&a.balance), Some(5));
+        assert!(matches!(
+            d.set_account(&addr(0xbb), 1 << 32, &balance_from_u64(5)),
+            Err(Error::Overflow)
+        ));
+        assert!(matches!(
+            d.set_account(&addr(0xbb), 7, &balance_from_u128(1u128 << 64)),
+            Err(Error::Overflow)
+        ));
+        assert!(matches!(
+            d.register_token(&addr(0x01), 32),
+            Err(Error::BadWidth)
+        ));
+        d.register_token(&[0u8; 20], 8).unwrap();
+        assert!(matches!(
+            d.delete_account(&addr(0xbb), false),
+            Err(Error::NonceProtected)
+        ));
+    }
+
+    #[test]
+    fn compact_slot_size_only_profile0() {
+        let r = Drive::format(
+            MemStore::new(1 << 16),
+            Config {
+                drive_length: 1 << 16,
+                capacity: 8,
+                slot_size: 32,
+                profile: PROFILE_SPARSE,
+                registry_offset: 0x100,
+                registry_capacity: 2,
+                sparse_offset: 8192,
+                sparse_capacity: 8,
+                ..Config::default()
+            },
+        );
+        assert!(
+            r.is_err(),
+            "32-byte account slots outside profile 0 must not format"
+        );
     }
 
     #[test]
