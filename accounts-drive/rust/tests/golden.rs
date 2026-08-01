@@ -3,336 +3,39 @@
 //! zeroed `MemStore`, asserting every op's `expect` kind, every check, and
 //! finally the SHA-256 of the entire drive image.
 //!
-//! The crate takes zero dependencies, tests included, so this file carries
-//! its own minimal JSON parser and SHA-256 (std has neither).
+//! SHA-256 comes from the RustCrypto `sha2` crate (the de-facto standard);
+//! the golden file is parsed untyped with `serde_json`.
 
 use cartesi_accounts_drive::{Balance, Config, Drive, Error, MemStore};
+use serde_json::Value;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
-// ------------------------------------------------------------------ SHA-256
-
-mod sha256 {
-    const K: [u32; 64] = [
-        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
-        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
-        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
-        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
-        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
-        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
-        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
-        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
-        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
-        0xc67178f2,
-    ];
-
-    pub fn digest(data: &[u8]) -> [u8; 32] {
-        let mut h: [u32; 8] = [
-            0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
-            0x5be0cd19,
-        ];
-        // Pad: 0x80, zeros, 64-bit big-endian bit length.
-        let mut msg = data.to_vec();
-        let bitlen = (data.len() as u64).wrapping_mul(8);
-        msg.push(0x80);
-        while msg.len() % 64 != 56 {
-            msg.push(0);
-        }
-        msg.extend_from_slice(&bitlen.to_be_bytes());
-
-        let mut w = [0u32; 64];
-        for chunk in msg.chunks_exact(64) {
-            for i in 0..16 {
-                w[i] = u32::from_be_bytes([
-                    chunk[4 * i],
-                    chunk[4 * i + 1],
-                    chunk[4 * i + 2],
-                    chunk[4 * i + 3],
-                ]);
-            }
-            for i in 16..64 {
-                let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
-                let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
-                w[i] = w[i - 16]
-                    .wrapping_add(s0)
-                    .wrapping_add(w[i - 7])
-                    .wrapping_add(s1);
-            }
-            let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
-                (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
-            for i in 0..64 {
-                let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-                let ch = (e & f) ^ (!e & g);
-                let t1 = hh
-                    .wrapping_add(s1)
-                    .wrapping_add(ch)
-                    .wrapping_add(K[i])
-                    .wrapping_add(w[i]);
-                let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-                let maj = (a & b) ^ (a & c) ^ (b & c);
-                let t2 = s0.wrapping_add(maj);
-                hh = g;
-                g = f;
-                f = e;
-                e = d.wrapping_add(t1);
-                d = c;
-                c = b;
-                b = a;
-                a = t1.wrapping_add(t2);
-            }
-            h[0] = h[0].wrapping_add(a);
-            h[1] = h[1].wrapping_add(b);
-            h[2] = h[2].wrapping_add(c);
-            h[3] = h[3].wrapping_add(d);
-            h[4] = h[4].wrapping_add(e);
-            h[5] = h[5].wrapping_add(f);
-            h[6] = h[6].wrapping_add(g);
-            h[7] = h[7].wrapping_add(hh);
-        }
-        let mut out = [0u8; 32];
-        for i in 0..8 {
-            out[4 * i..4 * i + 4].copy_from_slice(&h[i].to_be_bytes());
-        }
-        out
-    }
-
-    #[test]
-    fn vectors() {
-        fn hex(b: &[u8]) -> String {
-            b.iter().map(|x| format!("{x:02x}")).collect()
-        }
-        assert_eq!(
-            hex(&digest(b"")),
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
-        assert_eq!(
-            hex(&digest(b"abc")),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
-    }
-}
-
-// ------------------------------------------------------- minimal JSON parser
-
-mod json {
-    /// A parsed JSON value. The golden file uses only objects, arrays,
-    /// strings, non-negative integers, and booleans.
-    #[derive(Debug, Clone)]
-    pub enum Json {
-        Null,
-        Bool(bool),
-        Num(u64),
-        Str(String),
-        Arr(Vec<Json>),
-        Obj(Vec<(String, Json)>),
-    }
-
-    impl Json {
-        pub fn get(&self, key: &str) -> Option<&Json> {
-            match self {
-                Json::Obj(kv) => kv.iter().find(|(k, _)| k == key).map(|(_, v)| v),
-                _ => None,
-            }
-        }
-        pub fn str(&self, key: &str) -> &str {
-            match self.get(key) {
-                Some(Json::Str(s)) => s,
-                _ => "",
-            }
-        }
-        pub fn u64(&self, key: &str) -> u64 {
-            match self.get(key) {
-                Some(Json::Num(n)) => *n,
-                _ => 0,
-            }
-        }
-        pub fn bool(&self, key: &str) -> bool {
-            matches!(self.get(key), Some(Json::Bool(true)))
-        }
-        pub fn arr(&self, key: &str) -> &[Json] {
-            match self.get(key) {
-                Some(Json::Arr(a)) => a,
-                _ => &[],
-            }
-        }
-    }
-
-    pub fn parse(s: &str) -> Result<Json, String> {
-        let b = s.as_bytes();
-        let mut p = Parser { b, i: 0 };
-        p.ws();
-        let v = p.value()?;
-        p.ws();
-        if p.i != b.len() {
-            return Err(format!("trailing data at byte {}", p.i));
-        }
-        Ok(v)
-    }
-
-    struct Parser<'a> {
-        b: &'a [u8],
-        i: usize,
-    }
-
-    impl<'a> Parser<'a> {
-        fn ws(&mut self) {
-            while self.i < self.b.len() && matches!(self.b[self.i], b' ' | b'\t' | b'\n' | b'\r') {
-                self.i += 1;
-            }
-        }
-
-        fn peek(&self) -> Option<u8> {
-            self.b.get(self.i).copied()
-        }
-
-        fn expect(&mut self, c: u8) -> Result<(), String> {
-            if self.peek() == Some(c) {
-                self.i += 1;
-                Ok(())
-            } else {
-                Err(format!("expected {:?} at byte {}", c as char, self.i))
-            }
-        }
-
-        fn value(&mut self) -> Result<Json, String> {
-            match self.peek() {
-                Some(b'{') => self.object(),
-                Some(b'[') => self.array(),
-                Some(b'"') => Ok(Json::Str(self.string()?)),
-                Some(b't') => self.lit("true", Json::Bool(true)),
-                Some(b'f') => self.lit("false", Json::Bool(false)),
-                Some(b'n') => self.lit("null", Json::Null),
-                Some(c) if c.is_ascii_digit() => self.number(),
-                other => Err(format!("unexpected {other:?} at byte {}", self.i)),
-            }
-        }
-
-        fn lit(&mut self, word: &str, v: Json) -> Result<Json, String> {
-            if self.b[self.i..].starts_with(word.as_bytes()) {
-                self.i += word.len();
-                Ok(v)
-            } else {
-                Err(format!("bad literal at byte {}", self.i))
-            }
-        }
-
-        fn number(&mut self) -> Result<Json, String> {
-            let start = self.i;
-            while matches!(self.peek(), Some(c) if c.is_ascii_digit()) {
-                self.i += 1;
-            }
-            if matches!(self.peek(), Some(b'.' | b'e' | b'E' | b'-' | b'+')) {
-                return Err(format!("only unsigned integers supported (byte {})", self.i));
-            }
-            std::str::from_utf8(&self.b[start..self.i])
-                .ok()
-                .and_then(|s| s.parse::<u64>().ok())
-                .map(Json::Num)
-                .ok_or_else(|| format!("bad number at byte {start}"))
-        }
-
-        fn string(&mut self) -> Result<String, String> {
-            self.expect(b'"')?;
-            let mut out = String::new();
-            loop {
-                match self.peek() {
-                    None => return Err("unterminated string".into()),
-                    Some(b'"') => {
-                        self.i += 1;
-                        return Ok(out);
-                    }
-                    Some(b'\\') => {
-                        self.i += 1;
-                        let e = self.peek().ok_or("unterminated escape")?;
-                        self.i += 1;
-                        match e {
-                            b'"' => out.push('"'),
-                            b'\\' => out.push('\\'),
-                            b'/' => out.push('/'),
-                            b'b' => out.push('\u{8}'),
-                            b'f' => out.push('\u{c}'),
-                            b'n' => out.push('\n'),
-                            b'r' => out.push('\r'),
-                            b't' => out.push('\t'),
-                            b'u' => {
-                                let hex = self
-                                    .b
-                                    .get(self.i..self.i + 4)
-                                    .and_then(|h| std::str::from_utf8(h).ok())
-                                    .and_then(|h| u32::from_str_radix(h, 16).ok())
-                                    .ok_or("bad \\u escape")?;
-                                self.i += 4;
-                                // Surrogate pairs are not needed by the file.
-                                out.push(char::from_u32(hex).ok_or("bad \\u codepoint")?);
-                            }
-                            _ => return Err(format!("bad escape at byte {}", self.i)),
-                        }
-                    }
-                    Some(_) => {
-                        // Copy one UTF-8 scalar (the file is valid UTF-8).
-                        let s = std::str::from_utf8(&self.b[self.i..])
-                            .map_err(|e| e.to_string())?;
-                        let ch = s.chars().next().unwrap();
-                        out.push(ch);
-                        self.i += ch.len_utf8();
-                    }
-                }
-            }
-        }
-
-        fn array(&mut self) -> Result<Json, String> {
-            self.expect(b'[')?;
-            let mut out = Vec::new();
-            self.ws();
-            if self.peek() == Some(b']') {
-                self.i += 1;
-                return Ok(Json::Arr(out));
-            }
-            loop {
-                self.ws();
-                out.push(self.value()?);
-                self.ws();
-                match self.peek() {
-                    Some(b',') => self.i += 1,
-                    Some(b']') => {
-                        self.i += 1;
-                        return Ok(Json::Arr(out));
-                    }
-                    other => return Err(format!("bad array delimiter {other:?}")),
-                }
-            }
-        }
-
-        fn object(&mut self) -> Result<Json, String> {
-            self.expect(b'{')?;
-            let mut out = Vec::new();
-            self.ws();
-            if self.peek() == Some(b'}') {
-                self.i += 1;
-                return Ok(Json::Obj(out));
-            }
-            loop {
-                self.ws();
-                let k = self.string()?;
-                self.ws();
-                self.expect(b':')?;
-                self.ws();
-                let v = self.value()?;
-                out.push((k, v));
-                self.ws();
-                match self.peek() {
-                    Some(b',') => self.i += 1,
-                    Some(b'}') => {
-                        self.i += 1;
-                        return Ok(Json::Obj(out));
-                    }
-                    other => return Err(format!("bad object delimiter {other:?}")),
-                }
-            }
-        }
-    }
-}
-
 // --------------------------------------------------------------- the harness
+
+/// Untyped field accessors over a `serde_json::Value` object, defaulting on
+/// absent fields exactly like the harness always has.
+trait Fields {
+    fn str(&self, key: &str) -> &str;
+    fn u64(&self, key: &str) -> u64;
+    fn bool(&self, key: &str) -> bool;
+    fn arr(&self, key: &str) -> &[Value];
+}
+
+impl Fields for Value {
+    fn str(&self, key: &str) -> &str {
+        self.get(key).and_then(Value::as_str).unwrap_or("")
+    }
+    fn u64(&self, key: &str) -> u64 {
+        self.get(key).and_then(Value::as_u64).unwrap_or(0)
+    }
+    fn bool(&self, key: &str) -> bool {
+        self.get(key).and_then(Value::as_bool).unwrap_or(false)
+    }
+    fn arr(&self, key: &str) -> &[Value] {
+        self.get(key).and_then(Value::as_array).map_or(&[], Vec::as_slice)
+    }
+}
 
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
@@ -380,7 +83,7 @@ fn kind_of(res: &Result<(), Error>) -> String {
     }
 }
 
-fn replay(sc: &json::Json) {
+fn replay(sc: &Value) {
     let name = sc.str("name");
     let c = sc.get("config").expect("scenario config");
     let mut cfg = Config {
@@ -481,7 +184,7 @@ fn replay(sc: &json::Json) {
         }
     }
 
-    let sum = sha256::digest(d.store().bytes());
+    let sum: [u8; 32] = Sha256::digest(d.store().bytes()).into();
     assert_eq!(hex(&sum), sc.str("sha256"), "{name}: drive image sha256");
 }
 
@@ -491,7 +194,8 @@ fn golden() {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../testdata/golden.json");
     let data = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
-    let root = json::parse(&data).unwrap_or_else(|e| panic!("parse golden.json: {e}"));
+    let root: Value =
+        serde_json::from_str(&data).unwrap_or_else(|e| panic!("parse golden.json: {e}"));
     let scenarios = root.arr("scenarios");
     assert!(!scenarios.is_empty(), "golden file has no scenarios");
     for sc in scenarios {

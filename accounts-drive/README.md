@@ -2,8 +2,14 @@
 
 Implementations of the [Accounts Drive Format v1](../docs/ACCOUNTS-DRIVE-SPEC.md)
 — one per language commonly used by Cartesi applications, each **pure** in its
-language (no bindings, no third-party dependencies, own Keccak-256), each
-usable on **both sides** of the drive:
+language (no cross-language bindings), each usable on **both sides** of the
+drive. Crypto comes from each ecosystem's de-facto standard where one exists —
+`golang.org/x/crypto` (Go), RustCrypto `sha3` (Rust), `@noble/hashes` (JS),
+pycryptodome when importable (Python, with a pure fallback so a single file
+still drops into a guest with no packages) — and is vendored where the
+ecosystem norm is vendoring (C, Lua: no reasonable standard dependency exists
+for a minimal RISC-V rootfs). Every backend is pinned by the same
+independently generated test vectors.
 
 - **Guest**: open the drive over the raw device (`/dev/pmemN`) and maintain
   it as part of the state transition. On a pmem drive, sync before finishing

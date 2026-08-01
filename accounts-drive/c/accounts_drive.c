@@ -40,7 +40,14 @@
 
 static const uint8_t acctdrv_magic[8] = {'c', 't', 's', 'i', 'a', 'c', 'c', 't'};
 
-/* ------------------------------------------------------------- Keccak-256 */
+/* ------------------------------------------------------------- Keccak-256
+ *
+ * Vendored on purpose: C has no de-facto standard Keccak dependency that is
+ * reasonable for a guest — OpenSSL only gained KECCAK-256 in 3.2 and is no
+ * dependency to hand a minimal RISC-V rootfs. The C norm is vendoring a
+ * known reference; this follows the public-domain tiny_sha3 structure
+ * (M-J. Saarinen), and correctness is pinned by the spec's independently
+ * generated test vectors. */
 
 static const uint64_t keccak_rndc[24] = {
     0x0000000000000001ull, 0x0000000000008082ull, 0x800000000000808aull,

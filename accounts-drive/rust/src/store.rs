@@ -5,7 +5,8 @@
 //! ([`FileStore`]), or — on the host — a remote machine's memory.
 //!
 //! There is no HTTP-backed store here because the Rust standard library has
-//! no HTTP client and this crate takes zero dependencies. Hosts that read a
+//! no HTTP client and this crate keeps its dependency footprint to the
+//! RustCrypto hashes. Hosts that read a
 //! live (parked) machine implement `Store` themselves over the
 //! cartesi-jsonrpc-machine protocol's `machine.read_memory` — a pure state
 //! read that never executes the machine — returning [`Error::ReadOnly`] from

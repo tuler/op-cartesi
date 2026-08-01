@@ -2,7 +2,12 @@
 name = "cartesi-accounts-drive"
 version = "0.1.0"
 edition = "2021"
-description = "Pure-Rust implementation of the Cartesi Accounts Drive Format v1 (no dependencies)"
+description = "Pure-Rust implementation of the Cartesi Accounts Drive Format v1"
 
-# Zero third-party crates, tests included: the library builds and tests offline.
+# Hashing comes from the de-facto standard RustCrypto crates.
 [dependencies]
+sha3 = "0.12.0"
+
+[dev-dependencies]
+serde_json = "1.0.151"
+sha2 = "0.11.0"
