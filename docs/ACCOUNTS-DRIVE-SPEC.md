@@ -111,8 +111,8 @@ The first 4096 bytes of the drive. All integers little-endian.
 | 0x30 | 32 | `seed` — hash key (§6.1) | any value; fixed at deployment |
 | 0x50 | 4 | `profile` — 0 single-asset, 1 wide, 2 sparse | |
 | 0x54 | 4 | `slotSize` — accounts-table slot size in bytes | 64 in profiles 0 and 2; a power of two ≥ 128 in profile 1 |
-| 0x58 | 8 | `registryOffset` | profiles 1–2; multiple of 32; may point into the header page tail (see geometry rules) |
-| 0x60 | 8 | `registryCapacity` — max token entries | profiles 1–2; ≤ 65536 |
+| 0x58 | 8 | `registryOffset` | required in profiles 1–2, optional in profile 0 (declaring the single asset, §7); multiple of 32; may point into the header page tail (see geometry rules) |
+| 0x60 | 8 | `registryCapacity` — max token entries | ≤ 65536; 0 iff no registry |
 | 0x68 | 8 | `tokenCount` — registered tokens | ≤ registryCapacity |
 | 0x70 | 8 | `sparseOffset` | profile 2; multiple of `sparseSlotSize` |
 | 0x78 | 8 | `sparseCapacity` — slot count of the sparse table | profile 2; ≥ 2 |
