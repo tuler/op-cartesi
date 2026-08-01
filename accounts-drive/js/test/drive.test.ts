@@ -7,13 +7,13 @@ import assert from 'node:assert/strict';
 import {
   MemStore, format, open, AccountsDriveError,
   ProfileWide, ProfileSparse, bytesToHex, hexToBytes,
-} from '../index.js';
+} from '../src/index.ts';
 
-function repAddr(b) {
+function repAddr(b: number): Uint8Array {
   return new Uint8Array(20).fill(b);
 }
 
-async function kindOf(promise) {
+async function kindOf(promise: Promise<unknown>): Promise<string> {
   try {
     await promise;
     return 'ok';
@@ -61,7 +61,7 @@ test('probe walkthrough (spec Appendix B, C=8)', async () => {
   for (const b of [0xbb, 0xdd, 0xee, 0xaa]) {
     await d.setAccount(repAddr(b), 0n, 1n);
   }
-  const slotAddr = (i) => s.bytes[4096 + 64 * i];
+  const slotAddr = (i: number): number => s.bytes[4096 + 64 * i];
   // bb home 1 → slot 1; dd home 1 → slot 2; ee home 1 → slot 3; aa home 5 → slot 5.
   for (const [slot, want] of [[1, 0xbb], [2, 0xdd], [3, 0xee], [5, 0xaa], [0, 0], [4, 0], [6, 0], [7, 0]]) {
     assert.equal(slotAddr(slot), want, `slot ${slot}`);
@@ -98,8 +98,8 @@ test('addresses accepted as hex strings; zero address refused', async () => {
   const d = await format(s, { driveLength: 1 << 16, capacity: 8 });
   await d.setAccount('bb'.repeat(20), 7n, 5n);
   const a = await d.getAccount('0x' + 'bb'.repeat(20));
-  assert.equal(a.nonce, 7n);
-  assert.equal(a.balance, 5n);
+  assert.equal(a!.nonce, 7n);
+  assert.equal(a!.balance, 5n);
   assert.equal(await kindOf(d.getAccount(new Uint8Array(20))), 'zeroAddress');
   assert.equal(await kindOf(d.setAccount('00'.repeat(20), 0n, 1n)), 'zeroAddress');
 });
@@ -123,8 +123,8 @@ test('wide profile: columns, overflow, auto-create, reopen', async () => {
   await d.setAccount(user, 9n, 500n);
   assert.equal(await d.getTokenBalance(user, id2), 12345n);
   const a = await d.getAccount(user);
-  assert.equal(a.nonce, 9n);
-  assert.equal(a.balance, 500n);
+  assert.equal(a!.nonce, 9n);
+  assert.equal(a!.balance, 500n);
   // Width 8 column overflows past 2^64-1.
   assert.equal(await kindOf(d.setTokenBalance(user, id2, 1n << 64n)), 'overflow');
   // Reopen: registry and balances survive.
@@ -167,8 +167,8 @@ test('compact record: encoding, bounds, registry width (spec §7)', async () => 
     'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb070000000000000000000005',
   );
   const a = await d.getAccount(repAddr(0xbb));
-  assert.equal(a.nonce, 7n);
-  assert.equal(a.balance, 5n);
+  assert.equal(a!.nonce, 7n);
+  assert.equal(a!.balance, 5n);
   // Nonce past uint32 and balance past uint64 must be refused.
   assert.equal(await kindOf(d.setAccount(repAddr(0xbb), 1n << 32n, 5n)), 'overflow');
   assert.equal(await kindOf(d.setAccount(repAddr(0xbb), 7n, 1n << 64n)), 'overflow');

@@ -5,7 +5,7 @@
 import { keccak_256 } from "@noble/hashes/sha3.js";
 
 // keccak256 hashes the concatenation of the given byte chunks.
-export function keccak256(...data) {
+export function keccak256(...data: Uint8Array[]): Uint8Array {
   const h = keccak_256.create();
   for (const d of data) h.update(d);
   return h.digest();

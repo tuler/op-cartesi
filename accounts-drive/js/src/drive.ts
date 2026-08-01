@@ -15,7 +15,8 @@
 // compact profile-0 record); addresses are 20-byte Uint8Arrays (40-char hex
 // strings are accepted everywhere).
 
-import { keccak256 } from './keccak.js';
+import { keccak256 } from './keccak.ts';
+import type { Store } from './store.ts';
 
 // Profiles (spec §5).
 export const ProfileSingleAsset = 0;
@@ -51,6 +52,85 @@ const OFF_SPARSE_LIVE_COUNT = 0x88;
 const OFF_SPARSE_SLOT_SIZE = 0x90;
 const MIN_REGISTRY_OFFSET = 0x100;
 
+/** An address: 20 raw bytes, or 40 hex chars (optionally 0x-prefixed). */
+export type AddressLike = Uint8Array | string;
+
+/** A registered token's balance width in bytes (spec §8). */
+export type TokenWidth = 8 | 16 | 32;
+
+/** A registry entry, in id order. */
+export interface Token {
+  address: Uint8Array;
+  width: TokenWidth;
+}
+
+/** A token resolved by address: its registry id plus the entry. */
+export interface ResolvedToken extends Token {
+  id: number;
+}
+
+/** An account record: BigInt nonce and native balance. */
+export interface Account {
+  address: Uint8Array;
+  nonce: bigint;
+  balance: bigint;
+}
+
+/**
+ * Config describes a drive's geometry for `format`. Zero (or absent) fields
+ * take the same defaults as the Go reference — see `normalizeConfig`.
+ */
+export interface Config {
+  driveLength?: number;
+  capacity?: number;
+  loadLimit?: number;
+  /** 32 bytes or 64 hex chars; absent means zero. */
+  seed?: Uint8Array | string;
+  profile?: number;
+  slotSize?: number;
+  tableOffset?: number;
+  registryOffset?: number;
+  registryCapacity?: number;
+  sparseOffset?: number;
+  sparseCapacity?: number;
+  sparseLoadLimit?: number;
+  sparseSlotSize?: number;
+}
+
+/** NormalizedConfig is a Config with every default applied (deployment-
+ * constant geometry, as cached by an open Drive). */
+export interface NormalizedConfig {
+  driveLength: number;
+  capacity: number;
+  loadLimit: number;
+  seed: Uint8Array;
+  profile: number;
+  slotSize: number;
+  tableOffset: number;
+  registryOffset: number;
+  registryCapacity: number;
+  sparseOffset: number;
+  sparseCapacity: number;
+  sparseLoadLimit: number;
+  sparseSlotSize: number;
+}
+
+/**
+ * ErrorKind is the golden taxonomy: every condition a caller is expected to
+ * branch on. In a guest, tableFull, registryFull and overflow are exactly
+ * the conditions the spec requires to be answered by rejecting the input.
+ */
+export type ErrorKind =
+  | 'tableFull'
+  | 'registryFull'
+  | 'overflow'
+  | 'nonceProtected'
+  | 'duplicateToken'
+  | 'unknownToken'
+  | 'badWidth'
+  | 'zeroAddress'
+  | 'profile';
+
 /**
  * AccountsDriveError is the error type for every condition a caller is
  * expected to branch on. `kind` is one of the golden taxonomy kinds:
@@ -60,7 +140,9 @@ const MIN_REGISTRY_OFFSET = 0x100;
  * conditions the spec requires to be answered by rejecting the input.
  */
 export class AccountsDriveError extends Error {
-  constructor(kind, message) {
+  kind: ErrorKind;
+
+  constructor(kind: ErrorKind, message?: string) {
     super(message ?? kind);
     this.name = 'AccountsDriveError';
     this.kind = kind;
@@ -68,7 +150,7 @@ export class AccountsDriveError extends Error {
 }
 
 const err = {
-  tableFull: (msg) => new AccountsDriveError('tableFull', msg ?? 'table at load limit'),
+  tableFull: (msg?: string) => new AccountsDriveError('tableFull', msg ?? 'table at load limit'),
   registryFull: () => new AccountsDriveError('registryFull', 'token registry full'),
   overflow: () => new AccountsDriveError('overflow', 'balance exceeds declared width'),
   zeroAddress: () => new AccountsDriveError('zeroAddress', 'zero address is invalid'),
@@ -77,13 +159,13 @@ const err = {
   profile: () => new AccountsDriveError('profile', 'operation not available in this profile'),
   unknownToken: () => new AccountsDriveError('unknownToken', 'token not registered'),
   duplicateToken: () => new AccountsDriveError('duplicateToken', 'token already registered'),
-  badWidth: (msg) => new AccountsDriveError('badWidth', msg ?? 'balance width must be 8, 16 or 32'),
+  badWidth: (msg?: string) => new AccountsDriveError('badWidth', msg ?? 'balance width must be 8, 16 or 32'),
 };
 
 // ---------------------------------------------------------------- helpers
 
 /** Decodes a hex string (optionally 0x-prefixed) into a Uint8Array. */
-export function hexToBytes(hex) {
+export function hexToBytes(hex: string): Uint8Array {
   if (hex.startsWith('0x') || hex.startsWith('0X')) hex = hex.slice(2);
   if (hex.length % 2 !== 0 || /[^0-9a-fA-F]/.test(hex)) {
     throw new Error(`invalid hex string ${JSON.stringify(hex)}`);
@@ -96,13 +178,13 @@ export function hexToBytes(hex) {
 }
 
 /** Encodes bytes as a lowercase hex string (no 0x prefix). */
-export function bytesToHex(bytes) {
+export function bytesToHex(bytes: Uint8Array): string {
   let s = '';
   for (const b of bytes) s += b.toString(16).padStart(2, '0');
   return s;
 }
 
-function toAddress(a) {
+function toAddress(a: AddressLike): Uint8Array {
   const b = typeof a === 'string' ? hexToBytes(a) : a;
   if (!(b instanceof Uint8Array) || b.length !== 20) {
     throw new Error('address must be 20 bytes (or 40 hex chars)');
@@ -110,24 +192,24 @@ function toAddress(a) {
   return b;
 }
 
-function isZero(b) {
+function isZero(b: Uint8Array): boolean {
   for (const x of b) if (x !== 0) return false;
   return true;
 }
 
-function bytesEqual(a, b) {
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
   return true;
 }
 
-function isPow2(n) {
+function isPow2(n: number): boolean {
   const b = BigInt(n);
   return b > 0n && (b & (b - 1n)) === 0n;
 }
 
 /** Reads bytes as an unsigned big-endian BigInt. */
-function readBE(bytes) {
+function readBE(bytes: Uint8Array): bigint {
   let v = 0n;
   for (const b of bytes) v = (v << 8n) | BigInt(b);
   return v;
@@ -135,7 +217,7 @@ function readBE(bytes) {
 
 /** Writes a non-negative BigInt big-endian into buf (zero-padded on the
  * left, like Go's big.Int.FillBytes), or throws overflow. */
-function putBE(buf, v) {
+function putBE(buf: Uint8Array, v: bigint): void {
   if (v < 0n || v >> BigInt(8 * buf.length) !== 0n) throw err.overflow();
   for (let i = buf.length - 1; i >= 0; i--) {
     buf[i] = Number(v & 0xffn);
@@ -143,23 +225,23 @@ function putBE(buf, v) {
   }
 }
 
-function getLE64(bytes, off) {
+function getLE64(bytes: Uint8Array, off: number): bigint {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(off, true);
 }
 
-function getLE32(bytes, off) {
+function getLE32(bytes: Uint8Array, off: number): number {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(off, true);
 }
 
 /** home implements spec §6.1: LE64(keccak256(seed ‖ key)[0..8]) mod capacity. */
-export function home(seed, key, capacity) {
+export function home(seed: Uint8Array, key: Uint8Array, capacity: number): number {
   const h = keccak256(seed, key);
   return Number(getLE64(h, 0) % BigInt(capacity));
 }
 
 /** sparseKey builds the sparse table's 22-byte key (spec §6.1):
  * 2-byte little-endian token id ‖ 20-byte address. */
-export function sparseKey(id, addr) {
+export function sparseKey(id: number, addr: Uint8Array): Uint8Array {
   const k = new Uint8Array(22);
   k[0] = id & 0xff;
   k[1] = (id >> 8) & 0xff;
@@ -175,8 +257,8 @@ export function sparseKey(id, addr) {
  * for the sparse profile sparseSlotSize 0 → 64, sparseLoadLimit 0 → ⅞.
  * `seed` may be a 32-byte Uint8Array or 64 hex chars; absent means zero.
  */
-function normalizeConfig(config) {
-  const c = {
+function normalizeConfig(config: Config): NormalizedConfig {
+  const c: NormalizedConfig = {
     driveLength: Number(config.driveLength ?? 0),
     capacity: Number(config.capacity ?? 0),
     loadLimit: Number(config.loadLimit ?? 0),
@@ -208,7 +290,7 @@ function normalizeConfig(config) {
   return c;
 }
 
-function validateConfig(c) {
+function validateConfig(c: NormalizedConfig): void {
   if (c.driveLength === 0 || !isPow2(c.driveLength)) {
     throw new Error(`drive length ${c.driveLength} is not a power of two`);
   }
@@ -234,7 +316,8 @@ function validateConfig(c) {
   if (c.tableOffset < HEADER_SIZE || c.tableOffset % ss !== 0) {
     throw new Error(`table offset ${c.tableOffset}: want >= ${HEADER_SIZE} and a multiple of the slot size`);
   }
-  const regions = [
+  interface Region { name: string; off: number; len: number }
+  const regions: Region[] = [
     { name: 'header', off: 0, len: HEADER_SIZE },
     { name: 'accounts table', off: c.tableOffset, len: c.capacity * ss },
   ];
@@ -289,6 +372,19 @@ function validateConfig(c) {
 
 // ---------------------------------------------------------------- drive
 
+// A table descriptor makes the probing code (spec §6) profile-agnostic:
+// keyOf() extracts the record's key; a slot is live iff the address part
+// (20 bytes at liveOff) is nonzero.
+interface Table {
+  base: number;
+  capacity: number;
+  slotSize: number;
+  countOff: number;
+  limit: number;
+  keyOf: (slot: Uint8Array) => Uint8Array;
+  liveOff: number;
+}
+
 /**
  * Drive is an open accounts drive. Geometry is cached at open (it is
  * immutable by spec); the registry is cached too and refreshed on writes
@@ -298,25 +394,30 @@ function validateConfig(c) {
  * Construct through `format` or `open`, not `new`.
  */
 export class Drive {
-  constructor(store, cfg) {
+  store: Store;
+  cfg: NormalizedConfig;
+  tokens_: Token[];
+  colOff: number[]; // wide profile: column byte offset per token id
+
+  constructor(store: Store, cfg: NormalizedConfig) {
     this.store = store;
     this.cfg = cfg;
     this.tokens_ = [];
-    this.colOff = []; // wide profile: column byte offset per token id
+    this.colOff = [];
   }
 
   /** Returns the drive's geometry (normalized, deployment-constant). */
-  config() {
+  config(): NormalizedConfig {
     return { ...this.cfg, seed: this.cfg.seed.slice() };
   }
 
   /** Returns the cached registry, in id order: [{address, width}, ...]. */
-  tokens() {
+  tokens(): Token[] {
     return this.tokens_.map((t) => ({ address: t.address.slice(), width: t.width }));
   }
 
   /** Re-reads the registry (and the wide column offsets). */
-  async reloadRegistry() {
+  async reloadRegistry(): Promise<void> {
     this.tokens_ = [];
     this.colOff = [];
     if (this.cfg.registryOffset === 0) return;
@@ -339,38 +440,35 @@ export class Drive {
 
   // -------------------------------------------------------------- counters
 
-  async #counter(off) {
+  async #counter(off: number): Promise<bigint> {
     const b = await this.store.readAt(off, 8);
     return getLE64(b, 0);
   }
 
-  async #setCounter(off, v) {
+  async #setCounter(off: number, v: bigint): Promise<void> {
     const b = new Uint8Array(8);
     new DataView(b.buffer).setBigUint64(0, BigInt(v), true);
     await this.store.writeAt(off, b);
   }
 
   /** The accounts table's occupied-slot count (BigInt). */
-  async liveCount() {
+  async liveCount(): Promise<bigint> {
     return this.#counter(OFF_LIVE_COUNT);
   }
 
   /** The sparse table's occupied-slot count (BigInt). */
-  async sparseLiveCount() {
+  async sparseLiveCount(): Promise<bigint> {
     return this.#counter(OFF_SPARSE_LIVE_COUNT);
   }
 
   /** The number of registered tokens (BigInt). */
-  async tokenCount() {
+  async tokenCount(): Promise<bigint> {
     return this.#counter(OFF_TOKEN_COUNT);
   }
 
   // -------------------------------------------------------------- tables
 
-  // A table descriptor makes the probing code (spec §6) profile-agnostic:
-  // keyOf() extracts the record's key; a slot is live iff the address part
-  // (20 bytes at liveOff) is nonzero.
-  #accountsTable() {
+  #accountsTable(): Table {
     return {
       base: this.cfg.tableOffset,
       capacity: this.cfg.capacity,
@@ -382,7 +480,7 @@ export class Drive {
     };
   }
 
-  #sparseTable() {
+  #sparseTable(): Table {
     return {
       base: this.cfg.sparseOffset,
       capacity: this.cfg.sparseCapacity,
@@ -399,29 +497,29 @@ export class Drive {
     };
   }
 
-  #home(key, capacity) {
+  #home(key: Uint8Array, capacity: number): number {
     return home(this.cfg.seed, key, capacity);
   }
 
-  async #readSlot(t, i) {
+  async #readSlot(t: Table, i: number): Promise<Uint8Array> {
     return this.store.readAt(t.base + t.slotSize * i, t.slotSize);
   }
 
-  async #writeSlot(t, i, s) {
+  async #writeSlot(t: Table, i: number, s: Uint8Array): Promise<void> {
     await this.store.writeAt(t.base + t.slotSize * i, s);
   }
 
-  #live(t, slot) {
+  #live(t: Table, slot: Uint8Array): boolean {
     return !isZero(slot.subarray(t.liveOff, t.liveOff + 20));
   }
 
-  #displacement(t, slot, at) {
+  #displacement(t: Table, slot: Uint8Array, at: number): number {
     return (at + t.capacity - this.#home(t.keyOf(slot), t.capacity)) % t.capacity;
   }
 
   // lookup implements spec §6.2, returning {index, slot} when found, null
   // when absent.
-  async #lookup(t, key) {
+  async #lookup(t: Table, key: Uint8Array): Promise<{ index: number; slot: Uint8Array } | null> {
     const h = this.#home(key, t.capacity);
     for (let dist = 0; dist < t.capacity; dist++) {
       const i = (h + dist) % t.capacity;
@@ -435,7 +533,7 @@ export class Drive {
 
   // insert implements spec §6.3. The caller has checked the key is absent
   // and the load limit has room; insert bumps the live counter itself.
-  async #insert(t, rec) {
+  async #insert(t: Table, rec: Uint8Array): Promise<void> {
     let carry = rec;
     let h = this.#home(t.keyOf(carry), t.capacity);
     let dist = 0;
@@ -460,7 +558,7 @@ export class Drive {
   }
 
   // remove implements spec §6.4 (backward shift) from a known slot index.
-  async #remove(t, i) {
+  async #remove(t: Table, i: number): Promise<void> {
     for (;;) {
       const j = (i + 1) % t.capacity;
       const next = await this.#readSlot(t, j);
@@ -480,12 +578,12 @@ export class Drive {
   // compact reports whether the drive uses the 32-byte profile-0 record
   // (spec §7): address at 0..20, uint32 little-endian nonce at 20..24,
   // uint64 big-endian balance at 24..32.
-  #compact() {
+  #compact(): boolean {
     return this.cfg.profile === ProfileSingleAsset && this.cfg.slotSize === 32;
   }
 
   // decodeAccount reads nonce and balance out of a live account slot.
-  #decodeAccount(slot) {
+  #decodeAccount(slot: Uint8Array): { nonce: bigint; balance: bigint } {
     if (this.#compact()) {
       return { nonce: BigInt(getLE32(slot, 20)), balance: readBE(slot.subarray(24, 32)) };
     }
@@ -495,7 +593,7 @@ export class Drive {
   // encodeAccount builds a record. In the compact record a nonce past
   // uint32 or a balance past uint64 is kind "overflow" — the input must be
   // rejected.
-  #encodeAccount(addr, nonce, balance) {
+  #encodeAccount(addr: Uint8Array, nonce: bigint, balance: bigint): Uint8Array {
     if (this.#compact()) {
       if (nonce > 0xffffffffn) throw err.overflow();
       const rec = new Uint8Array(32);
@@ -515,13 +613,13 @@ export class Drive {
    * Looks an account up. Absence is a result, not an error: returns
    * `{address, nonce, balance}` (BigInt nonce/balance) or null.
    */
-  async getAccount(addr) {
-    addr = toAddress(addr);
-    if (isZero(addr)) throw err.zeroAddress();
-    const found = await this.#lookup(this.#accountsTable(), addr);
+  async getAccount(addr: AddressLike): Promise<Account | null> {
+    const address = toAddress(addr);
+    if (isZero(address)) throw err.zeroAddress();
+    const found = await this.#lookup(this.#accountsTable(), address);
     if (!found) return null;
     const { nonce, balance } = this.#decodeAccount(found.slot);
-    return { address: addr.slice(), nonce, balance };
+    return { address: address.slice(), nonce, balance };
   }
 
   /**
@@ -531,12 +629,12 @@ export class Drive {
    * In the compact record (spec §7) a nonce past uint32 or a balance past
    * uint64 is kind "overflow", which also means rejecting the input.
    */
-  async setAccount(addr, nonce, balance) {
-    addr = toAddress(addr);
-    if (isZero(addr)) throw err.zeroAddress();
-    const rec = this.#encodeAccount(addr, BigInt(nonce ?? 0), BigInt(balance ?? 0));
+  async setAccount(addr: AddressLike, nonce?: bigint | number, balance?: bigint | number): Promise<void> {
+    const address = toAddress(addr);
+    if (isZero(address)) throw err.zeroAddress();
+    const rec = this.#encodeAccount(address, BigInt(nonce ?? 0), BigInt(balance ?? 0));
     const t = this.#accountsTable();
-    const found = await this.#lookup(t, addr);
+    const found = await this.#lookup(t, address);
     if (found) {
       // Update in place, touching only the record bytes: in the wide
       // profile the rest of the slot is token columns.
@@ -558,11 +656,11 @@ export class Drive {
    * profile the record's token columns go with it. Returns false when there
    * was no record.
    */
-  async deleteAccount(addr, force = false) {
-    addr = toAddress(addr);
-    if (isZero(addr)) throw err.zeroAddress();
+  async deleteAccount(addr: AddressLike, force = false): Promise<boolean> {
+    const address = toAddress(addr);
+    if (isZero(address)) throw err.zeroAddress();
     const t = this.#accountsTable();
-    const found = await this.#lookup(t, addr);
+    const found = await this.#lookup(t, address);
     if (!found) return false;
     const { nonce } = this.#decodeAccount(found.slot);
     if (!force && nonce !== 0n) throw err.nonceProtected();
@@ -573,10 +671,10 @@ export class Drive {
   // -------------------------------------------------------------- registry
 
   /** Resolves a token address to `{id, address, width}`, or null. */
-  tokenByAddress(addr) {
-    addr = toAddress(addr);
+  tokenByAddress(addr: AddressLike): ResolvedToken | null {
+    const address = toAddress(addr);
     for (let i = 0; i < this.tokens_.length; i++) {
-      if (bytesEqual(this.tokens_[i].address, addr)) {
+      if (bytesEqual(this.tokens_[i].address, address)) {
         return { id: i, address: this.tokens_[i].address.slice(), width: this.tokens_[i].width };
       }
     }
@@ -589,11 +687,11 @@ export class Drive {
    * the registry must have room (spec §8, kind "registryFull"). Both mean
    * rejecting the input in a guest.
    */
-  async registerToken(addr, width) {
-    addr = toAddress(addr);
+  async registerToken(addr: AddressLike, width: number): Promise<number> {
+    const address = toAddress(addr);
     if (this.cfg.registryOffset === 0) throw err.profile();
     if (width !== 8 && width !== 16 && width !== 32) throw err.badWidth();
-    if (this.tokenByAddress(addr)) throw err.duplicateToken();
+    if (this.tokenByAddress(address)) throw err.duplicateToken();
     const n = this.tokens_.length;
     if (n >= this.cfg.registryCapacity) throw err.registryFull();
     if (this.cfg.profile === ProfileWide) {
@@ -610,7 +708,7 @@ export class Drive {
       throw err.badWidth('the compact account record requires width 8');
     }
     const e = new Uint8Array(32);
-    e.set(addr, 0);
+    e.set(address, 0);
     e[20] = width;
     await this.store.writeAt(this.cfg.registryOffset + 32 * n, e);
     await this.#setCounter(OFF_TOKEN_COUNT, BigInt(n + 1));
@@ -618,7 +716,7 @@ export class Drive {
     if (this.colOff.length > 0) {
       col = this.colOff[this.colOff.length - 1] + this.tokens_[this.tokens_.length - 1].width;
     }
-    this.tokens_.push({ address: addr.slice(), width });
+    this.tokens_.push({ address: address.slice(), width });
     this.colOff.push(col);
     return n;
   }
@@ -629,19 +727,19 @@ export class Drive {
    * Reads an account's balance of a registered token (BigInt). An absent
    * record (or column of an absent account) is zero, not an error.
    */
-  async getTokenBalance(addr, id) {
-    addr = toAddress(addr);
-    if (isZero(addr)) throw err.zeroAddress();
+  async getTokenBalance(addr: AddressLike, id: number): Promise<bigint> {
+    const address = toAddress(addr);
+    if (isZero(address)) throw err.zeroAddress();
     if (!(Number.isInteger(id) && id >= 0 && id < this.tokens_.length)) throw err.unknownToken();
     switch (this.cfg.profile) {
       case ProfileWide: {
-        const found = await this.#lookup(this.#accountsTable(), addr);
+        const found = await this.#lookup(this.#accountsTable(), address);
         if (!found) return 0n;
         const off = this.colOff[id];
         return readBE(found.slot.subarray(off, off + this.tokens_[id].width));
       }
       case ProfileSparse: {
-        const found = await this.#lookup(this.#sparseTable(), sparseKey(id, addr));
+        const found = await this.#lookup(this.#sparseTable(), sparseKey(id, address));
         if (!found) return 0n;
         if (this.cfg.sparseSlotSize === 32) return readBE(found.slot.subarray(24, 32));
         return readBE(found.slot.subarray(32, 64));
@@ -658,43 +756,43 @@ export class Drive {
    * record is created with a zero nonce and native balance; in the sparse
    * profile a balance reaching zero deletes its record (spec §9).
    */
-  async setTokenBalance(addr, id, value) {
-    addr = toAddress(addr);
-    value = BigInt(value ?? 0);
-    if (isZero(addr)) throw err.zeroAddress();
+  async setTokenBalance(addr: AddressLike, id: number, value?: bigint | number): Promise<void> {
+    const address = toAddress(addr);
+    const v = BigInt(value ?? 0);
+    if (isZero(address)) throw err.zeroAddress();
     if (!(Number.isInteger(id) && id >= 0 && id < this.tokens_.length)) throw err.unknownToken();
     const width = this.tokens_[id].width;
-    if (value < 0n || value >> BigInt(8 * width) !== 0n) throw err.overflow();
+    if (v < 0n || v >> BigInt(8 * width) !== 0n) throw err.overflow();
     switch (this.cfg.profile) {
       case ProfileWide: {
         const t = this.#accountsTable();
-        const found = await this.#lookup(t, addr);
+        const found = await this.#lookup(t, address);
         const off = this.colOff[id];
         if (!found) {
-          if (value === 0n) return;
+          if (v === 0n) return;
           const n = await this.#counter(t.countOff);
           if (n >= BigInt(t.limit)) throw err.tableFull();
           const full = new Uint8Array(t.slotSize);
-          full.set(addr, 0);
-          putBE(full.subarray(off, off + width), value);
+          full.set(address, 0);
+          putBE(full.subarray(off, off + width), v);
           await this.#insert(t, full);
           return;
         }
-        putBE(found.slot.subarray(off, off + width), value);
+        putBE(found.slot.subarray(off, off + width), v);
         await this.#writeSlot(t, found.index, found.slot);
         return;
       }
       case ProfileSparse: {
         const t = this.#sparseTable();
-        const key = sparseKey(id, addr);
+        const key = sparseKey(id, address);
         const found = await this.#lookup(t, key);
-        if (value === 0n) {
+        if (v === 0n) {
           if (!found) return;
           await this.#remove(t, found.index);
           return;
         }
         if (found) {
-          this.#putSparseBalance(found.slot, value);
+          this.#putSparseBalance(found.slot, v);
           await this.#writeSlot(t, found.index, found.slot);
           return;
         }
@@ -703,8 +801,8 @@ export class Drive {
         const rec = new Uint8Array(t.slotSize);
         rec[0] = id & 0xff;
         rec[1] = (id >> 8) & 0xff;
-        rec.set(addr, 4);
-        this.#putSparseBalance(rec, value);
+        rec.set(address, 4);
+        this.#putSparseBalance(rec, v);
         await this.#insert(t, rec);
         return;
       }
@@ -713,7 +811,7 @@ export class Drive {
     }
   }
 
-  #putSparseBalance(slot, v) {
+  #putSparseBalance(slot: Uint8Array, v: bigint): void {
     if (this.cfg.sparseSlotSize === 32) {
       putBE(slot.subarray(24, 32), v);
     } else {
@@ -728,9 +826,8 @@ export class Drive {
  * format writes a v1 header (and nothing else) describing `config` onto a
  * store that must be all-zero, then opens it. It is how a snapshot build
  * formats the drive image, and how tests build drives from nothing.
- * @returns {Promise<Drive>}
  */
-export async function format(store, config) {
+export async function format(store: Store, config: Config): Promise<Drive> {
   const cfg = normalizeConfig(config);
   validateConfig(cfg);
   const h = new Uint8Array(HEADER_SIZE);
@@ -757,9 +854,8 @@ export async function format(store, config) {
 
 /**
  * open reads and validates the header, caches the geometry and the registry.
- * @returns {Promise<Drive>}
  */
-export async function open(store) {
+export async function open(store: Store): Promise<Drive> {
   const h = await store.readAt(0, HEADER_SIZE);
   const dv = new DataView(h.buffer, h.byteOffset, h.byteLength);
   if (!bytesEqual(h.subarray(OFF_MAGIC, OFF_MAGIC + 8), Magic)) {
@@ -773,7 +869,7 @@ export async function open(store) {
   if (flags !== 0) {
     throw new Error(`unsupported accounts drive version: nonzero flags 0x${flags.toString(16)}`);
   }
-  const cfg = {
+  const cfg: NormalizedConfig = {
     driveLength: 0,
     capacity: Number(dv.getBigUint64(OFF_CAPACITY, true)),
     tableOffset: Number(dv.getBigUint64(OFF_TABLE_OFFSET, true)),
