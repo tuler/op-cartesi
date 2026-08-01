@@ -492,6 +492,45 @@ func scenarios() []goldenScenario {
 		out = append(out, sc)
 	}
 
+	// 6. Compact profile-0 records: one leaf per account, uint32 nonce,
+	// uint64 balance, width-8 registry rule.
+	{
+		sc := goldenScenario{
+			Name: "compact",
+			Config: goldenConfig{
+				DriveLength: 1 << 16, Capacity: 64, LoadLimit: 56, Seed: seedHex(0x55),
+				SlotSize: 32, TableOffset: 4096,
+				RegistryOffset: 0x100, RegistryCapacity: 2,
+			},
+		}
+		var ops []goldenOp
+		ops = append(ops,
+			goldenOp{Op: "registerToken", Token: drvAddr("golden-compact-token", 0), Width: 8, Expect: "ok"},
+			goldenOp{Op: "registerToken", Token: drvAddr("golden-compact-token", 1), Width: 16, Expect: "badWidth"})
+		for i := 0; i < 20; i++ {
+			ops = append(ops, goldenOp{Op: "setAccount", Addr: drvAddr("golden-compact", i), Nonce: uint64(i) * 200_000_000, Value: num(int64(i+1) * 1_000_000), Expect: "ok"})
+		}
+		for i := 0; i < 5; i++ {
+			ops = append(ops, goldenOp{Op: "setAccount", Addr: drvAddr("golden-compact", i), Nonce: uint64(i)*200_000_000 + 1, Value: num(int64(i+1) * 999_983), Expect: "ok"})
+		}
+		ops = append(ops,
+			goldenOp{Op: "setAccount", Addr: drvAddr("golden-compact", 6), Nonce: 1 << 32, Value: num(1), Expect: "overflow"},
+			goldenOp{Op: "setAccount", Addr: drvAddr("golden-compact", 6), Nonce: 1, Value: shifted(1, 64), Expect: "overflow"},
+			goldenOp{Op: "setAccount", Addr: drvAddr("golden-compact", 2), Nonce: 0, Value: num(0), Expect: "ok"},
+			goldenOp{Op: "deleteAccount", Addr: drvAddr("golden-compact", 2), Expect: "ok"},
+			goldenOp{Op: "deleteAccount", Addr: drvAddr("golden-compact", 3), Expect: "nonceProtected"},
+			goldenOp{Op: "deleteAccount", Addr: drvAddr("golden-compact", 3), Force: true, Expect: "ok"})
+		sc.Ops = ops
+		sc.Checks = []goldenCheck{
+			{Check: "account", Addr: drvAddr("golden-compact", 0)},
+			{Check: "account", Addr: drvAddr("golden-compact", 2)},
+			{Check: "account", Addr: drvAddr("golden-compact", 3)},
+			{Check: "account", Addr: drvAddr("golden-compact", 19)},
+			{Check: "liveCount", Table: "accounts"},
+		}
+		out = append(out, sc)
+	}
+
 	return out
 }
 

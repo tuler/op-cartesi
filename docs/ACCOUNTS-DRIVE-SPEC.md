@@ -110,7 +110,7 @@ The first 4096 bytes of the drive. All integers little-endian.
 | 0x28 | 8 | `liveCount` — occupied accounts slots | maintained exactly (§6.5) |
 | 0x30 | 32 | `seed` — hash key (§6.1) | any value; fixed at deployment |
 | 0x50 | 4 | `profile` — 0 single-asset, 1 wide, 2 sparse | |
-| 0x54 | 4 | `slotSize` — accounts-table slot size in bytes | 64 in profiles 0 and 2; a power of two ≥ 128 in profile 1 |
+| 0x54 | 4 | `slotSize` — accounts-table slot size in bytes | 64 or 32 in profile 0 (32 selects the compact record, §7); 64 in profile 2; a power of two ≥ 128 in profile 1 |
 | 0x58 | 8 | `registryOffset` | required in profiles 1–2, optional in profile 0 (declaring the single asset, §7); multiple of 32; may point into the header page tail (see geometry rules) |
 | 0x60 | 8 | `registryCapacity` — max token entries | ≤ 65536; 0 iff no registry |
 | 0x68 | 8 | `tokenCount` — registered tokens | ≤ registryCapacity |
@@ -235,8 +235,11 @@ These are what make the proof procedure of §12 sound.
 
 ## 7. The accounts table
 
-`capacity` slots of `slotSize` bytes at `tableOffset`. Record, first 64
-bytes of a slot:
+`capacity` slots of `slotSize` bytes at `tableOffset`. Two record
+layouts exist; which one a drive uses is fixed by `slotSize`.
+
+**The standard record** — `slotSize` 64, and the first 64 bytes of
+every wide slot:
 
 | Offset | Size | Field |
 |---|---|---|
@@ -244,6 +247,23 @@ bytes of a slot:
 | 20 | 4 | zero padding |
 | 24 | 8 | nonce, `uint64` little-endian |
 | 32 | 32 | balance, `uint256` big-endian |
+
+**The compact record** — profile 0 with `slotSize` 32 only. For
+single-asset applications whose asset needs at most a `uint64` (a
+6-decimals stablecoin, comfortably) and whose accounts will not exceed
+2^32 − 1 transactions:
+
+| Offset | Size | Field |
+|---|---|---|
+| 0 | 20 | account address (nonzero) |
+| 20 | 4 | nonce, `uint32` little-endian |
+| 24 | 8 | balance, `uint64` big-endian |
+
+Exactly one machine tree leaf per account. Two constraints follow: a
+registry entry, if declared, MUST carry width 8; and a change that
+would push the balance past `uint64` or the nonce past `uint32` MUST
+be refused by rejecting the input — the width rule of §8, applied to
+the record itself.
 
 - In **profile 0** the balance denominates the application's single
   asset — the native asset or a single token; which one is application
@@ -455,10 +475,14 @@ and the home slot at two capacities:
 
 **Records.**
 
-- Account record, address `bb..`, nonce 7, balance 5:
+- Account record (standard), address `bb..`, nonce 7, balance 5:
   ```
   bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 00000000 0700000000000000
   0000000000000000000000000000000000000000000000000000000000000005
+  ```
+- Account record (compact), address `bb..`, nonce 7, balance 5:
+  ```
+  bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb 07000000 0000000000000005
   ```
 - Sparse 32-byte record, token id 3, address `bb..`, balance 1000000:
   ```

@@ -132,8 +132,12 @@ func (c *Config) validate() error {
 		if ss < 128 || ss&(ss-1) != 0 {
 			return fmt.Errorf("wide slot size %d: want a power of two ≥ 128", ss)
 		}
+	case c.Profile == ProfileSingleAsset:
+		if ss != 64 && ss != 32 {
+			return fmt.Errorf("slot size %d: profile 0 takes 64 (standard record) or 32 (compact record)", ss)
+		}
 	case ss != 64:
-		return fmt.Errorf("slot size %d: must be 64 outside the wide profile", ss)
+		return fmt.Errorf("slot size %d: must be 64 in the sparse profile", ss)
 	}
 	if c.Capacity < 2 {
 		return fmt.Errorf("capacity %d < 2", c.Capacity)
@@ -491,11 +495,48 @@ func (d *Drive) remove(t table, i uint64) error {
 
 // ---------------------------------------------------------------- accounts
 
-// Account is the fixed 64-byte record of spec §7, decoded.
+// Account is the record of spec §7 — standard or compact — decoded.
 type Account struct {
 	Address [20]byte
 	Nonce   uint64
 	Balance *big.Int
+}
+
+// compact reports whether the drive uses the 32-byte profile-0 record.
+func (d *Drive) compact() bool {
+	return d.cfg.Profile == ProfileSingleAsset && d.cfg.SlotSize == 32
+}
+
+// decodeAccount reads nonce and balance out of a live account slot.
+func (d *Drive) decodeAccount(slot []byte) (nonce uint64, balance *big.Int) {
+	if d.compact() {
+		return uint64(binary.LittleEndian.Uint32(slot[20:24])), new(big.Int).SetBytes(slot[24:32])
+	}
+	return binary.LittleEndian.Uint64(slot[24:32]), new(big.Int).SetBytes(slot[32:64])
+}
+
+// encodeAccount builds a record. In the compact record a nonce past uint32
+// or a balance past uint64 is ErrOverflow — the input must be rejected.
+func (d *Drive) encodeAccount(addr [20]byte, nonce uint64, balance *big.Int) ([]byte, error) {
+	if d.compact() {
+		if nonce > 0xffffffff {
+			return nil, ErrOverflow
+		}
+		rec := make([]byte, 32)
+		copy(rec[0:20], addr[:])
+		binary.LittleEndian.PutUint32(rec[20:24], uint32(nonce))
+		if err := putBE(rec[24:32], balance); err != nil {
+			return nil, err
+		}
+		return rec, nil
+	}
+	rec := make([]byte, 64)
+	copy(rec[0:20], addr[:])
+	binary.LittleEndian.PutUint64(rec[24:32], nonce)
+	if err := putBE(rec[32:64], balance); err != nil {
+		return nil, err
+	}
+	return rec, nil
 }
 
 // GetAccount looks an account up; found is false when the address has no
@@ -509,22 +550,19 @@ func (d *Drive) GetAccount(addr [20]byte) (a Account, found bool, err error) {
 		return a, false, err
 	}
 	a.Address = addr
-	a.Nonce = binary.LittleEndian.Uint64(slot[24:32])
-	a.Balance = new(big.Int).SetBytes(slot[32:64])
+	a.Nonce, a.Balance = d.decodeAccount(slot)
 	return a, true, nil
 }
 
 // SetAccount writes an account's nonce and balance, inserting the record if
-// the address has none. ErrTableFull means the input carrying this change
-// must be rejected (spec §6.3).
+// the address has none. ErrTableFull and ErrOverflow mean the input carrying
+// this change must be rejected (spec §6.3, §7).
 func (d *Drive) SetAccount(addr [20]byte, nonce uint64, balance *big.Int) error {
 	if isZero(addr[:]) {
 		return ErrZeroAddress
 	}
-	rec := make([]byte, 64)
-	copy(rec[0:20], addr[:])
-	binary.LittleEndian.PutUint64(rec[24:32], nonce)
-	if err := putBE(rec[32:64], balance); err != nil {
+	rec, err := d.encodeAccount(addr, nonce, balance)
+	if err != nil {
 		return err
 	}
 	t := d.accountsTable()
@@ -533,9 +571,9 @@ func (d *Drive) SetAccount(addr [20]byte, nonce uint64, balance *big.Int) error 
 		return err
 	}
 	if ok {
-		// Update in place, touching only the 64-byte record: in the wide
+		// Update in place, touching only the record bytes: in the wide
 		// profile the rest of the slot is token columns.
-		copy(slot[:64], rec)
+		copy(slot[:len(rec)], rec)
 		return d.writeSlot(t, i, slot)
 	}
 	n, err := d.counter(t.countOff)
@@ -563,7 +601,8 @@ func (d *Drive) DeleteAccount(addr [20]byte, force bool) (bool, error) {
 	if err != nil || !ok {
 		return false, err
 	}
-	if !force && !isZero(slot[24:32]) {
+	nonce, _ := d.decodeAccount(slot)
+	if !force && nonce != 0 {
 		return false, ErrNonceProtected
 	}
 	return true, d.remove(t, i)
@@ -609,6 +648,9 @@ func (d *Drive) RegisterToken(addr [20]byte, width int) (uint16, error) {
 	}
 	if d.cfg.Profile == ProfileSparse && d.cfg.SparseSlotSize == 32 && width != 8 {
 		return 0, fmt.Errorf("%w: 32-byte sparse slots require width 8", ErrBadWidth)
+	}
+	if d.compact() && width != 8 {
+		return 0, fmt.Errorf("%w: the compact account record requires width 8", ErrBadWidth)
 	}
 	e := make([]byte, 32)
 	copy(e[:20], addr[:])
