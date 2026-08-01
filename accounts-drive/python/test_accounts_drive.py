@@ -233,6 +233,62 @@ class TestErrorKinds(unittest.TestCase):
         self.assertEqual(a.address, rep_addr(0xBB))
 
 
+class TestCompactRecord(unittest.TestCase):
+    """The 32-byte profile-0 record (spec section 7): the encoding pin from
+    Appendix B, the uint32 nonce and uint64 balance bounds, the registry
+    width rule, and slot size 32 being profile-0-only."""
+
+    def kind(self, fn, *args, **kw):
+        try:
+            fn(*args, **kw)
+            return "ok"
+        except ad.AccountsDriveError as e:
+            return e.kind
+
+    def test_compact_record(self):
+        s = ad.MemStore(1 << 16)
+        d = ad.format(s, ad.Config(
+            drive_length=1 << 16, capacity=8, slot_size=32,
+            registry_offset=0x100, registry_capacity=2))
+        d.set_account(rep_addr(0xBB), 7, 5)
+        want = bytes.fromhex(
+            "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb070000000000000000000005")
+        got = s.read_at(4096 + 32 * 1, 32)  # home(bb..) mod 8 = 1
+        self.assertEqual(got, want)
+        a = d.get_account(rep_addr(0xBB))
+        self.assertEqual((a.nonce, a.balance), (7, 5))
+        # Bounds: uint32 nonce and uint64 balance exactly fit; one past
+        # either is kind "overflow" (reject the input).
+        d.set_account(rep_addr(0xCC), (1 << 32) - 1, (1 << 64) - 1)
+        a = d.get_account(rep_addr(0xCC))
+        self.assertEqual((a.nonce, a.balance), ((1 << 32) - 1, (1 << 64) - 1))
+        self.assertEqual(self.kind(d.set_account, rep_addr(0xBB), 1 << 32, 5),
+                         "overflow")
+        self.assertEqual(self.kind(d.set_account, rep_addr(0xBB), 7, 1 << 64),
+                         "overflow")
+        # A registry entry on a compact drive must declare width 8.
+        self.assertEqual(self.kind(d.register_token, rep_addr(0x01), 32),
+                         "badWidth")
+        d.register_token(bytes(20), 8)  # width 8, zero addr = native asset
+        # The nonce protection reads the u32.
+        self.assertEqual(self.kind(d.delete_account, rep_addr(0xBB)),
+                         "nonceProtected")
+        self.assertTrue(d.delete_account(rep_addr(0xBB), force=True))
+
+    def test_slot_size_32_only_in_profile0(self):
+        with self.assertRaises(ValueError):
+            ad.format(ad.MemStore(1 << 16), ad.Config(
+                drive_length=1 << 16, capacity=8, slot_size=32,
+                profile=ad.PROFILE_SPARSE,
+                registry_offset=0x100, registry_capacity=2,
+                sparse_offset=8192, sparse_capacity=8))
+        with self.assertRaises(ValueError):
+            ad.format(ad.MemStore(1 << 18), ad.Config(
+                drive_length=1 << 18, capacity=8, slot_size=32,
+                profile=ad.PROFILE_WIDE,
+                registry_offset=0x100, registry_capacity=2))
+
+
 class TestStores(unittest.TestCase):
     def test_file_store(self):
         with tempfile.TemporaryDirectory() as tmp:

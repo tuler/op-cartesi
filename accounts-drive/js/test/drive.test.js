@@ -153,6 +153,40 @@ test('sparse profile: u256 values, zero deletes', async () => {
   assert.equal(await kindOf(d.getTokenBalance(user, 9)), 'unknownToken');
 });
 
+test('compact record: encoding, bounds, registry width (spec §7)', async () => {
+  const s = new MemStore(1 << 16);
+  const d = await format(s, {
+    driveLength: 1 << 16, capacity: 8, slotSize: 32,
+    registryOffset: 0x100, registryCapacity: 2,
+  });
+  await d.setAccount(repAddr(0xbb), 7n, 5n);
+  // home(bb..) mod 8 = 1
+  const got = s.bytes.subarray(4096 + 32 * 1, 4096 + 32 * 2);
+  assert.equal(
+    bytesToHex(got),
+    'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb070000000000000000000005',
+  );
+  const a = await d.getAccount(repAddr(0xbb));
+  assert.equal(a.nonce, 7n);
+  assert.equal(a.balance, 5n);
+  // Nonce past uint32 and balance past uint64 must be refused.
+  assert.equal(await kindOf(d.setAccount(repAddr(0xbb), 1n << 32n, 5n)), 'overflow');
+  assert.equal(await kindOf(d.setAccount(repAddr(0xbb), 7n, 1n << 64n)), 'overflow');
+  // A registry entry, if declared, must carry width 8.
+  assert.equal(await kindOf(d.registerToken(repAddr(0x01), 32)), 'badWidth');
+  assert.equal(await kindOf(d.registerToken(new Uint8Array(20), 8)), 'ok');
+  // Nonce protection reads the uint32.
+  assert.equal(await kindOf(d.deleteAccount(repAddr(0xbb), false)), 'nonceProtected');
+});
+
+test('32-byte account slots only format in profile 0', async () => {
+  await assert.rejects(format(new MemStore(1 << 16), {
+    driveLength: 1 << 16, capacity: 8, slotSize: 32, profile: ProfileSparse,
+    registryOffset: 0x100, registryCapacity: 2,
+    sparseOffset: 8192, sparseCapacity: 8,
+  }), /slot size/);
+});
+
 test('sparse 32-byte slots require width 8', async () => {
   const s = new MemStore(1 << 16);
   const d = await format(s, {

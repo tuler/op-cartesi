@@ -11,8 +11,9 @@
 //
 // All Drive methods are async (the store interface is async because the host
 // store speaks HTTP). Balances are BigInt, encoded big-endian at the declared
-// width; nonces are BigInt (uint64 little-endian on the drive); addresses are
-// 20-byte Uint8Arrays (40-char hex strings are accepted everywhere).
+// width; nonces are BigInt (uint64 little-endian on the drive, uint32 in the
+// compact profile-0 record); addresses are 20-byte Uint8Arrays (40-char hex
+// strings are accepted everywhere).
 
 import { keccak256 } from './keccak.js';
 
@@ -146,6 +147,10 @@ function getLE64(bytes, off) {
   return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getBigUint64(off, true);
 }
 
+function getLE32(bytes, off) {
+  return new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(off, true);
+}
+
 /** home implements spec §6.1: LE64(keccak256(seed ‖ key)[0..8]) mod capacity. */
 export function home(seed, key, capacity) {
   const h = keccak256(seed, key);
@@ -215,8 +220,12 @@ function validateConfig(c) {
     if (ss < 128 || !isPow2(ss)) {
       throw new Error(`wide slot size ${ss}: want a power of two >= 128`);
     }
+  } else if (c.profile === ProfileSingleAsset) {
+    if (ss !== 64 && ss !== 32) {
+      throw new Error(`slot size ${ss}: profile 0 takes 64 (standard record) or 32 (compact record)`);
+    }
   } else if (ss !== 64) {
-    throw new Error(`slot size ${ss}: must be 64 outside the wide profile`);
+    throw new Error(`slot size ${ss}: must be 64 in the sparse profile`);
   }
   if (c.capacity < 2) throw new Error(`capacity ${c.capacity} < 2`);
   if (c.loadLimit < 1 || c.loadLimit >= c.capacity) {
@@ -468,6 +477,40 @@ export class Drive {
 
   // -------------------------------------------------------------- accounts
 
+  // compact reports whether the drive uses the 32-byte profile-0 record
+  // (spec §7): address at 0..20, uint32 little-endian nonce at 20..24,
+  // uint64 big-endian balance at 24..32.
+  #compact() {
+    return this.cfg.profile === ProfileSingleAsset && this.cfg.slotSize === 32;
+  }
+
+  // decodeAccount reads nonce and balance out of a live account slot.
+  #decodeAccount(slot) {
+    if (this.#compact()) {
+      return { nonce: BigInt(getLE32(slot, 20)), balance: readBE(slot.subarray(24, 32)) };
+    }
+    return { nonce: getLE64(slot, 24), balance: readBE(slot.subarray(32, 64)) };
+  }
+
+  // encodeAccount builds a record. In the compact record a nonce past
+  // uint32 or a balance past uint64 is kind "overflow" — the input must be
+  // rejected.
+  #encodeAccount(addr, nonce, balance) {
+    if (this.#compact()) {
+      if (nonce > 0xffffffffn) throw err.overflow();
+      const rec = new Uint8Array(32);
+      rec.set(addr, 0);
+      new DataView(rec.buffer).setUint32(20, Number(nonce), true);
+      putBE(rec.subarray(24, 32), balance);
+      return rec;
+    }
+    const rec = new Uint8Array(64);
+    rec.set(addr, 0);
+    new DataView(rec.buffer).setBigUint64(24, nonce, true);
+    putBE(rec.subarray(32, 64), balance);
+    return rec;
+  }
+
   /**
    * Looks an account up. Absence is a result, not an error: returns
    * `{address, nonce, balance}` (BigInt nonce/balance) or null.
@@ -477,30 +520,25 @@ export class Drive {
     if (isZero(addr)) throw err.zeroAddress();
     const found = await this.#lookup(this.#accountsTable(), addr);
     if (!found) return null;
-    const { slot } = found;
-    return {
-      address: addr.slice(),
-      nonce: getLE64(slot, 24),
-      balance: readBE(slot.subarray(32, 64)),
-    };
+    const { nonce, balance } = this.#decodeAccount(found.slot);
+    return { address: addr.slice(), nonce, balance };
   }
 
   /**
    * Writes an account's nonce and balance, inserting the record if the
    * address has none. Throws kind "tableFull" when the insert would pass
    * the load limit — in a guest that means rejecting the input (spec §6.3).
+   * In the compact record (spec §7) a nonce past uint32 or a balance past
+   * uint64 is kind "overflow", which also means rejecting the input.
    */
   async setAccount(addr, nonce, balance) {
     addr = toAddress(addr);
     if (isZero(addr)) throw err.zeroAddress();
-    const rec = new Uint8Array(64);
-    rec.set(addr, 0);
-    new DataView(rec.buffer).setBigUint64(24, BigInt(nonce ?? 0), true);
-    putBE(rec.subarray(32, 64), BigInt(balance ?? 0));
+    const rec = this.#encodeAccount(addr, BigInt(nonce ?? 0), BigInt(balance ?? 0));
     const t = this.#accountsTable();
     const found = await this.#lookup(t, addr);
     if (found) {
-      // Update in place, touching only the 64-byte record: in the wide
+      // Update in place, touching only the record bytes: in the wide
       // profile the rest of the slot is token columns.
       found.slot.set(rec, 0);
       await this.#writeSlot(t, found.index, found.slot);
@@ -526,7 +564,8 @@ export class Drive {
     const t = this.#accountsTable();
     const found = await this.#lookup(t, addr);
     if (!found) return false;
-    if (!force && !isZero(found.slot.subarray(24, 32))) throw err.nonceProtected();
+    const { nonce } = this.#decodeAccount(found.slot);
+    if (!force && nonce !== 0n) throw err.nonceProtected();
     await this.#remove(t, found.index);
     return true;
   }
@@ -566,6 +605,9 @@ export class Drive {
     }
     if (this.cfg.profile === ProfileSparse && this.cfg.sparseSlotSize === 32 && width !== 8) {
       throw err.badWidth('32-byte sparse slots require width 8');
+    }
+    if (this.#compact() && width !== 8) {
+      throw err.badWidth('the compact account record requires width 8');
     }
     const e = new Uint8Array(32);
     e.set(addr, 0);
