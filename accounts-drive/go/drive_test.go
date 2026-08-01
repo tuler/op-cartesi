@@ -282,6 +282,58 @@ func TestSparseProfile(t *testing.T) {
 	}
 }
 
+// TestCompactRecord pins the 32-byte profile-0 record: encoding, the uint32
+// nonce and uint64 balance bounds, and the registry width rule.
+func TestCompactRecord(t *testing.T) {
+	s := NewMemStore(1 << 16)
+	d, err := Format(s, Config{
+		DriveLength: 1 << 16, Capacity: 8, SlotSize: 32,
+		RegistryOffset: 0x100, RegistryCapacity: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetAccount(addr(0xbb), 7, big.NewInt(5)); err != nil {
+		t.Fatal(err)
+	}
+	got := s.B[4096+32*1 : 4096+32*2] // home(bb..) mod 8 = 1
+	want := h2b(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb070000000000000000000005")
+	if !bytes.Equal(got, want) {
+		t.Fatalf("compact record:\n got %x\nwant %x", got, want)
+	}
+	a, found, err := d.GetAccount(addr(0xbb))
+	if err != nil || !found || a.Nonce != 7 || a.Balance.Int64() != 5 {
+		t.Fatal(a, found, err)
+	}
+	if err := d.SetAccount(addr(0xbb), 1<<32, big.NewInt(5)); !errors.Is(err, ErrOverflow) {
+		t.Fatalf("nonce past uint32: want ErrOverflow, got %v", err)
+	}
+	big65 := new(big.Int).Lsh(big.NewInt(1), 64)
+	if err := d.SetAccount(addr(0xbb), 7, big65); !errors.Is(err, ErrOverflow) {
+		t.Fatalf("balance past uint64: want ErrOverflow, got %v", err)
+	}
+	if _, err := d.RegisterToken(addr(0x01), 32); !errors.Is(err, ErrBadWidth) {
+		t.Fatalf("compact registry width: want ErrBadWidth, got %v", err)
+	}
+	if _, err := d.RegisterToken([20]byte{}, 8); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.DeleteAccount(addr(0xbb), false); !errors.Is(err, ErrNonceProtected) {
+		t.Fatalf("want ErrNonceProtected, got %v", err)
+	}
+}
+
+func TestCompactSlotSizeOnlyProfile0(t *testing.T) {
+	_, err := Format(NewMemStore(1<<16), Config{
+		DriveLength: 1 << 16, Capacity: 8, SlotSize: 32, Profile: ProfileSparse,
+		RegistryOffset: 0x100, RegistryCapacity: 2,
+		SparseOffset: 8192, SparseCapacity: 8,
+	})
+	if err == nil {
+		t.Fatal("32-byte account slots outside profile 0 must not format")
+	}
+}
+
 func TestSparse32RequiresWidth8(t *testing.T) {
 	s := NewMemStore(1 << 16)
 	d, err := Format(s, Config{

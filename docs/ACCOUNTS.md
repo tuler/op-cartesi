@@ -253,8 +253,11 @@ little-endian, RISC-V-native, matching the ewtools precedent.
 A robin-hood hash table of **64-byte records** — two machine tree
 leaves, so one record is one aligned `get_proof` of 58 siblings — each
 holding the account address, a `uint64` nonce, and a `uint256` balance
-(exact layout and algorithms: spec §6–§7). The decisions behind the
-bytes:
+(exact layout and algorithms: spec §6–§7). A single-asset chain whose
+asset fits a `uint64` can halve that: the **compact record** (spec §7)
+packs the address, a `uint32` nonce — room for four billion
+transactions per account — and a `uint64` balance into exactly one
+leaf. The decisions behind the bytes:
 
 - **The balance is big-endian** — byte-for-byte the EVM ABI word —
   because the one reader that cannot cheaply flip bytes is an L1
@@ -407,9 +410,11 @@ machine tree leaf per holding (spec §9). A credit that would overflow a declare
 width **deterministically rejects the input**, the same rule as a full
 table; choosing a width no honest supply can overflow is the
 registrar's job, and a mint-happy token gets 32. Two boundaries of this
-compaction are worth stating. The base record's native balance stays
-`uint256`: a 48-byte record would round back up to the 64-byte slot, so
-shrinking it saves nothing. And the compaction tool is deliberately
+compaction are worth stating. Narrowing only the standard record's
+balance would save nothing — a 48-byte record rounds back up to the
+64-byte slot — which is why the real shrink is the compact profile-0
+record (spec §7): narrow the nonce too, and the record lands exactly
+on one 32-byte leaf. And the compaction tool is deliberately
 *narrower fixed fields*, not variable-length encoding: RLP earns its
 keep in Ethereum because trie nodes are variable-length hashed blobs
 anyway, but here the fixed slot is what the whole design stands on —
