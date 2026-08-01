@@ -318,6 +318,146 @@ static void test_sparse32_record_encoding(void)
     printf("PASS sparse 32-byte record encoding\n");
 }
 
+static void test_compact_record_encoding(void)
+{
+    acctdrv_memstore ms;
+    acctdrv_store st;
+    acctdrv_config cfg;
+    acctdrv_drive d;
+    acctdrv_account a;
+    acctdrv_err err;
+    uint8_t bb[20], tok[20], bal[32], big[32], want[32];
+    int found, deleted;
+
+    memset(image, 0, 1u << 16);
+    ms.data = image;
+    ms.length = 1u << 16;
+    st = acctdrv_mem_store(&ms);
+    memset(&cfg, 0, sizeof cfg);
+    cfg.drive_length = 1u << 16;
+    cfg.capacity = 8;
+    cfg.slot_size = 32; /* profile 0: the compact record (spec §7) */
+    cfg.registry_offset = 0x100;
+    cfg.registry_capacity = 2;
+    err = acctdrv_format(&d, &st, &cfg);
+    if (err) {
+        FAIL("compact: format: %s", acctdrv_strerror(err));
+        return;
+    }
+    memset(bb, 0xbb, 20);
+    memset(bal, 0, 32);
+    bal[31] = 5;
+    err = acctdrv_set_account(&d, bb, 7, bal);
+    if (err) {
+        FAIL("compact: setAccount: %s", acctdrv_strerror(err));
+        return;
+    }
+    unhex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb070000000000000000000005",
+          want, 32);
+    /* home(bb..) mod 8 = 1: the record sits in slot 1. */
+    if (memcmp(image + 4096 + 32 * 1, want, 32) != 0) {
+        char got[65];
+        tohex(image + 4096 + 32 * 1, 32, got);
+        FAIL("compact record = %s", got);
+        return;
+    }
+    err = acctdrv_get_account(&d, bb, &a, &found);
+    if (err || !found || a.nonce != 7 || memcmp(a.balance, bal, 32) != 0) {
+        FAIL("compact: getAccount: err=%s found=%d nonce=%llu",
+             acctdrv_strerror(err), found, (unsigned long long)a.nonce);
+        return;
+    }
+    /* Nonce past uint32 must be refused (spec §7). */
+    err = acctdrv_set_account(&d, bb, 0x100000000ull, bal);
+    if (err != ACCTDRV_ERR_OVERFLOW)
+        FAIL("compact: nonce past uint32: %s, want overflow",
+             acctdrv_strerror(err));
+    /* Balance past uint64 (any nonzero byte above the low 8) too. */
+    memset(big, 0, 32);
+    big[23] = 1; /* 2^64 */
+    err = acctdrv_set_account(&d, bb, 7, big);
+    if (err != ACCTDRV_ERR_OVERFLOW)
+        FAIL("compact: balance past uint64: %s, want overflow",
+             acctdrv_strerror(err));
+    /* Registry entries on a compact drive must carry width 8 (spec §7). */
+    memset(tok, 0x01, 20);
+    err = acctdrv_register_token(&d, tok, 32, NULL);
+    if (err != ACCTDRV_ERR_BAD_WIDTH)
+        FAIL("compact: registerToken width 32: %s, want bad width",
+             acctdrv_strerror(err));
+    err = acctdrv_register_token(&d, tok, 8, NULL);
+    if (err)
+        FAIL("compact: registerToken width 8: %s", acctdrv_strerror(err));
+    /* Delete protection reads the uint32 nonce (spec §7). */
+    err = acctdrv_delete_account(&d, bb, 0, &deleted);
+    if (err != ACCTDRV_ERR_NONCE_PROTECTED)
+        FAIL("compact: delete without force: %s, want nonce protected",
+             acctdrv_strerror(err));
+    err = acctdrv_delete_account(&d, bb, 1, &deleted);
+    if (err || !deleted) {
+        FAIL("compact: forced delete: %s deleted=%d", acctdrv_strerror(err),
+             deleted);
+        return;
+    }
+    printf("PASS compact record encoding\n");
+}
+
+static void test_compact_slot_size_only_profile0(void)
+{
+    acctdrv_memstore ms;
+    acctdrv_store st;
+    acctdrv_config cfg;
+    acctdrv_drive d;
+    acctdrv_err err;
+
+    memset(image, 0, 1u << 16);
+    ms.data = image;
+    ms.length = 1u << 16;
+    st = acctdrv_mem_store(&ms);
+
+    /* Format: 32-byte account slots are refused outside profile 0. */
+    memset(&cfg, 0, sizeof cfg);
+    cfg.drive_length = 1u << 16;
+    cfg.capacity = 8;
+    cfg.slot_size = 32;
+    cfg.profile = ACCTDRV_PROFILE_SPARSE;
+    cfg.registry_offset = 0x100;
+    cfg.registry_capacity = 2;
+    cfg.sparse_offset = 8192;
+    cfg.sparse_capacity = 8;
+    err = acctdrv_format(&d, &st, &cfg);
+    if (err != ACCTDRV_ERR_CONFIG)
+        FAIL("sparse format with 32-byte slots: %s, want config error",
+             acctdrv_strerror(err));
+    cfg.profile = ACCTDRV_PROFILE_WIDE;
+    err = acctdrv_format(&d, &st, &cfg);
+    if (err != ACCTDRV_ERR_CONFIG)
+        FAIL("wide format with 32-byte slots: %s, want config error",
+             acctdrv_strerror(err));
+
+    /* Open: a sparse header patched to slotSize 32 must not open. */
+    memset(image, 0, 1u << 16);
+    memset(&cfg, 0, sizeof cfg);
+    cfg.drive_length = 1u << 16;
+    cfg.capacity = 8;
+    cfg.profile = ACCTDRV_PROFILE_SPARSE;
+    cfg.registry_offset = 0x100;
+    cfg.registry_capacity = 2;
+    cfg.sparse_offset = 8192;
+    cfg.sparse_capacity = 8;
+    err = acctdrv_format(&d, &st, &cfg);
+    if (err) {
+        FAIL("sparse format: %s", acctdrv_strerror(err));
+        return;
+    }
+    image[0x54] = 32; /* slotSize field (LE32 at 0x54): 64 -> 32 */
+    err = acctdrv_open(&d, &st);
+    if (err != ACCTDRV_ERR_CORRUPT)
+        FAIL("open sparse drive with 32-byte slots: %s, want corrupt",
+             acctdrv_strerror(err));
+    printf("PASS compact slot size only in profile 0\n");
+}
+
 /* ------------------------------------------------- (b) the golden replay */
 
 static const char *op_name(golden_op_kind k)
@@ -494,6 +634,8 @@ int main(void)
     test_keccak_and_homes();
     test_account_record_encoding();
     test_sparse32_record_encoding();
+    test_compact_record_encoding();
+    test_compact_slot_size_only_profile0();
     for (i = 0; i < GOLDEN_NUM_SCENARIOS; i++)
         run_scenario(&golden_scenarios[i]);
     if (failures) {
