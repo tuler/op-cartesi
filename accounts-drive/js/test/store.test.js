@@ -1,14 +1,13 @@
-// Store implementations: FileStore over a real image file, and
-// ReadMemoryStore over a local JSON-RPC server speaking machine.read_memory.
+// Store implementations: FileStore over a real image file, and the
+// MachineStore adapter over a fake machine client's read_memory.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtemp, writeFile, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createServer } from 'node:http';
 import { Buffer } from 'node:buffer';
-import { MemStore, FileStore, ReadMemoryStore, format, open } from '../index.js';
+import { MemStore, FileStore, MachineStore, format, open } from '../index.js';
 
 function repAddr(b) {
   return new Uint8Array(20).fill(b);
@@ -44,39 +43,31 @@ test('FileStore: format, write, sync, reopen byte-identical', async () => {
   }
 });
 
-test('ReadMemoryStore: reads via machine.read_memory, refuses writes', async (t) => {
-  // A quiescent "machine": one MemStore image served over JSON-RPC.
+test('MachineStore: translates offsets into read_memory arguments, refuses writes', async () => {
+  // A quiescent "machine": one MemStore image behind a fake machine client.
   const image = new MemStore(1 << 16);
   const written = await format(image, { driveLength: 1 << 16, capacity: 8 });
   await written.setAccount(repAddr(0xbb), 7n, 5n);
   const base = 0x90000000000000n; // drive start in machine address space (> 2^53)
 
-  const server = createServer((req, res) => {
-    let body = '';
-    req.on('data', (c) => { body += c; });
-    req.on('end', () => {
-      // Addresses can exceed 2^53; parse the request without JSON.parse's
-      // number precision loss.
-      const address = BigInt(body.match(/"address":\s*(\d+)/)[1]);
-      const length = Number(body.match(/"length":\s*(\d+)/)[1]);
-      const id = JSON.parse(body).id;
-      const off = Number(address - base);
-      const data = Buffer.from(image.bytes.subarray(off, off + length)).toString('base64');
-      res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ jsonrpc: '2.0', id, result: data }));
-    });
-  });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(() => server.close());
+  let calls = 0;
+  const readMemory = async (address, length) => {
+    assert.equal(typeof address, 'bigint');
+    assert.ok(address >= base && address + BigInt(length) <= base + BigInt(1 << 16),
+      `read outside the drive: ${address} + ${length}`);
+    calls++;
+    const off = Number(address - base);
+    return image.bytes.subarray(off, off + length);
+  };
 
-  const endpoint = `http://127.0.0.1:${server.address().port}/`;
-  const store = new ReadMemoryStore(endpoint, base);
+  const store = new MachineStore(readMemory, base);
   const d = await open(store);
   const a = await d.getAccount(repAddr(0xbb));
   assert.equal(a.nonce, 7n);
   assert.equal(a.balance, 5n);
   assert.equal(await d.getAccount(repAddr(0x99)), null);
   assert.equal(await d.liveCount(), 1n);
+  assert.ok(calls > 0, 'adapter was never called');
   await assert.rejects(store.writeAt(0, new Uint8Array(1)), /read-only/);
 });
 

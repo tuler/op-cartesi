@@ -10,16 +10,12 @@ scenario in ../testdata/golden.json and matching the SHA-256 of the entire
 resulting drive image.
 """
 
-import base64
 import hashlib
-import http.server
 import json
 import os
 import sys
 import tempfile
-import threading
 import unittest
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -317,49 +313,31 @@ class TestStores(unittest.TestCase):
                 self.assertEqual((a.nonce, a.balance), (7, 5))
                 self.assertEqual(d2.live_count(), 1)
 
-    def test_read_memory_store(self):
-        # Serve a formatted image over a local machine.read_memory JSON-RPC
-        # endpoint and read it back through ReadMemoryStore.
-        base = 0x90000000000
+    def test_machine_store(self):
+        # Read a formatted image back through the MachineStore adapter as a
+        # host would: the adapter translates drive offsets into the
+        # (address, length) arguments of an existing machine client.
+        base = 0x90000000000000  # > 2**53, as real drive addresses are
         mem = ad.MemStore(1 << 16)
         d = ad.format(mem, ad.Config(drive_length=1 << 16, capacity=8))
         d.set_account(rep_addr(0xBB), 7, 5)
 
-        class Handler(http.server.BaseHTTPRequestHandler):
-            def do_POST(self):
-                req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-                params = req["params"]
-                data = mem.read_at(params["address"] - base, params["length"])
-                body = json.dumps({
-                    "jsonrpc": "2.0", "id": req["id"],
-                    "result": base64.b64encode(data).decode(),
-                }).encode()
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(body)))
-                self.end_headers()
-                self.wfile.write(body)
+        calls = []
 
-            def log_message(self, *args):
-                pass
+        def read_memory(address, length):
+            self.assertGreaterEqual(address, base)
+            self.assertLessEqual(address + length, base + (1 << 16))
+            calls.append((address, length))
+            return mem.read_at(address - base, length)
 
-        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        try:
-            endpoint = f"http://127.0.0.1:{server.server_address[1]}/"
-            rms = ad.ReadMemoryStore(
-                endpoint, base,
-                opener=urllib.request.build_opener(urllib.request.ProxyHandler({})))
-            host = ad.open(rms)
-            a = host.get_account(rep_addr(0xBB))
-            self.assertEqual((a.nonce, a.balance), (7, 5))
-            self.assertIsNone(host.get_account(rep_addr(0x99)))
-            with self.assertRaises(ad.ReadOnlyStoreError):
-                rms.write_at(0, b"\x00")
-        finally:
-            server.shutdown()
-            server.server_close()
+        ms = ad.MachineStore(read_memory, base)
+        host = ad.open(ms)
+        a = host.get_account(rep_addr(0xBB))
+        self.assertEqual((a.nonce, a.balance), (7, 5))
+        self.assertIsNone(host.get_account(rep_addr(0x99)))
+        self.assertTrue(calls, "adapter was never called")
+        with self.assertRaises(ad.ReadOnlyStoreError):
+            ms.write_at(0, b"\x00")
 
 
 class TestGolden(unittest.TestCase):

@@ -46,10 +46,14 @@ surface:
   sparse records, zero deletes a sparse record), width-checked.
 - Counters: `live_count()`, `sparse_live_count()`, `token_count()`.
 - Stores: an in-memory image everywhere; a file store for guests (with
-  `sync` where the language can express it); a `machine.read_memory`-backed
-  read-only store where the standard library has an HTTP client (Go, Node,
-  Python). Other languages expose the same store interface and leave the
-  transport to the caller.
+  `sync` where the language can express it); and a **machine store
+  adapter** for hosts. The libraries deliberately do not speak the
+  machine's JSON-RPC themselves — hosts already have a machine client
+  (op-cartesi's `machine.Remote` in Go, a NodeJS machine client, …), so
+  the adapter only translates drive-relative offsets into the
+  `(address, length)` arguments of whatever `read_memory` function it is
+  given, and refuses writes. In C the store interface itself is that
+  adapter: point `read_at` at the client, add the base address.
 
 Errors use one taxonomy (the golden `expect` kinds): `ok`, `tableFull`,
 `registryFull`, `overflow`, `nonceProtected`, `duplicateToken`,

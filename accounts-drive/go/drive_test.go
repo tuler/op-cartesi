@@ -334,6 +334,47 @@ func TestCompactSlotSizeOnlyProfile0(t *testing.T) {
 	}
 }
 
+// TestMachineStore reads a drive back through the machine-store adapter the
+// way a host would: the adapter translates drive offsets into the
+// (address, length) arguments of an existing machine client's read_memory.
+func TestMachineStore(t *testing.T) {
+	mem := NewMemStore(1 << 16)
+	d, err := Format(mem, Config{DriveLength: 1 << 16, Capacity: 8})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetAccount(addr(0xbb), 7, big.NewInt(5)); err != nil {
+		t.Fatal(err)
+	}
+	const base = uint64(0x80000000000000)
+	calls := 0
+	ms := &MachineStore{Base: base, ReadMemory: func(address, length uint64) ([]byte, error) {
+		if address < base || address+length > base+(1<<16) {
+			t.Fatalf("read outside the drive: address %#x length %d", address, length)
+		}
+		calls++
+		b := make([]byte, length)
+		if err := mem.ReadAt(address-base, b); err != nil {
+			return nil, err
+		}
+		return b, nil
+	}}
+	h, err := Open(ms)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, found, err := h.GetAccount(addr(0xbb))
+	if err != nil || !found || a.Nonce != 7 || a.Balance.Int64() != 5 {
+		t.Fatal(a, found, err)
+	}
+	if calls == 0 {
+		t.Fatal("adapter was never called")
+	}
+	if err := h.SetAccount(addr(0xbb), 8, big.NewInt(6)); !errors.Is(err, ErrReadOnly) {
+		t.Fatalf("write through the adapter: want ErrReadOnly, got %v", err)
+	}
+}
+
 func TestSparse32RequiresWidth8(t *testing.T) {
 	s := NewMemStore(1 << 16)
 	d, err := Format(s, Config{

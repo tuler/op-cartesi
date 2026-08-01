@@ -89,45 +89,27 @@ export class FileStore {
   }
 }
 
-/** ReadMemoryStore reads the drive out of a Cartesi Machine through the
- * cartesi-jsonrpc-machine protocol's machine.read_memory — a pure state read
- * that never executes the machine. It is read-only, and per spec §11 it must
- * only be used against a quiescent (parked or stored) machine. */
-export class ReadMemoryStore {
+/** MachineStore reads the drive out of a Cartesi Machine through whatever
+ * machine client the host already uses — this library deliberately does not
+ * speak the machine's JSON-RPC itself. The store only translates
+ * drive-relative offsets into the (address, length) arguments of the
+ * client's machine.read_memory. Read-only; per spec §11 use it only against
+ * a quiescent (parked or stored) machine. */
+export class MachineStore {
   /**
-   * @param {string} endpoint the machine server's JSON-RPC URL
+   * @param {(address: bigint, length: number) => Promise<Uint8Array>} readMemory
+   *   the machine client's read_memory: bytes at an absolute machine address
    * @param {number|bigint} baseAddress the drive's start address in the machine's address space
    */
-  constructor(endpoint, baseAddress) {
-    this.endpoint = endpoint;
+  constructor(readMemory, baseAddress) {
+    this.readMemory = readMemory;
     this.base = BigInt(baseAddress);
-    this.reqId = 0;
   }
 
   async readAt(off, len) {
-    const address = this.base + BigInt(off);
-    const id = ++this.reqId;
-    // Built by hand so 64-bit addresses survive as exact JSON integers.
-    const body = `{"jsonrpc":"2.0","id":${id},"method":"machine.read_memory",` +
-      `"params":{"address":${address.toString()},"length":${Number(len)}}}`;
-    const resp = await fetch(this.endpoint, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body,
-    });
-    if (!resp.ok) {
-      throw new Error(`machine.read_memory: HTTP ${resp.status}`);
-    }
-    const rr = await resp.json();
-    if (rr.error) {
-      throw new Error(`machine.read_memory: ${rr.error.message} (code ${rr.error.code})`);
-    }
-    if (typeof rr.result !== 'string') {
-      throw new Error('machine.read_memory: bad response');
-    }
-    const data = new Uint8Array(Buffer.from(rr.result, 'base64'));
+    const data = await this.readMemory(this.base + BigInt(off), Number(len));
     if (data.length !== Number(len)) {
-      throw new Error(`machine.read_memory: got ${data.length} bytes, want ${len}`);
+      throw new Error(`read_memory returned ${data.length} bytes, want ${len}`);
     }
     return data;
   }

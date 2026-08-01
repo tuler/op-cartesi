@@ -413,6 +413,30 @@ local function test_file_store()
   print("ok  file store round trip")
 end
 
+-- machine store adapter: translates drive offsets into the read_memory
+-- arguments of an existing machine client; read-only.
+do
+  local mem = ad.mem_store(1 << 16)
+  local d = assert(ad.format(mem, { drive_length = 1 << 16, capacity = 8 }))
+  assert(d:set_account(rep_addr(0xbb), 7, "\x05"))
+  local image = mem:snapshot()
+  local base = 0x80000000000000
+  local calls = 0
+  local ms = ad.machine_store(function(address, length)
+    assert(address >= base and address + length <= base + (1 << 16),
+      "read outside the drive")
+    calls = calls + 1
+    return image:sub(address - base + 1, address - base + length)
+  end, base)
+  local h = assert(ad.open(ms))
+  local a = assert(h:get_account(rep_addr(0xbb)))
+  check(a.nonce == 7 and a.balance:byte(32) == 5, "machine_store lookup")
+  check(h:get_account(rep_addr(0x99)) == nil, "machine_store absence")
+  check(calls > 0, "adapter was never called")
+  check(not pcall(function() ms:write_at(0, "\0") end), "machine_store read-only")
+  print("ok  machine store adapter")
+end
+
 -- ========================================================== golden replay
 
 local function run_op(d, op)

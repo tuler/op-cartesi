@@ -25,7 +25,7 @@ pub use drive::{
     VERSION,
 };
 pub use keccak::keccak256;
-pub use store::{FileStore, MemStore, Store};
+pub use store::{FileStore, MachineStore, MemStore, Store};
 
 /// A balance: 32 bytes, big-endian — byte-identical to an EVM ABI `uint256`
 /// word (spec §2).
