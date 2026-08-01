@@ -6,6 +6,14 @@
 # the state the machine's Merkle root commits to — which is the whole point: a
 # deposit is credited by the execution layer, not by the shim around it.
 #
+# The ledger lives on a dedicated *accounts drive* (docs/ACCOUNTS-DRIVE-SPEC.md,
+# maintained through the pure-Lua library in accounts-drive/lua): a profile-2
+# (sparse) drive whose account records carry the ether balance and whose sparse
+# table carries one record per nonzero ERC-20 holding. Because the drive layout
+# is a published standard, the host reads balances and nonces straight out of
+# machine memory (eth_getBalance, eth_getTransactionCount) with one
+# machine.read_memory each — no inspect fork. See docs/ACCOUNTS.md §10, v0.
+#
 # Three ways in, and the difference between them is who holds the asset on L1:
 #
 #   OptimismPortal.depositTransaction with a value   ether, held by OP's lockbox
@@ -168,29 +176,135 @@ local function parseDeposit(raw)
 end
 
 -- ------------------------------------------------------------------- ledger
--- Keyed by token ‖ account, with the zero address standing for ether, so one
--- table serves both.
+-- The ledger is the accounts drive. Ether lives in the account record's
+-- uint256 balance; ERC-20 balances live in the sparse table, with tokens
+-- registered first-seen on deposit (width 32: devnet tokens are arbitrary
+-- ERC-20s, so they get the full uint256). The zero address still stands for
+-- ether at this app's boundaries (inspect queries, portal payloads); it maps
+-- to the account record rather than to a token id.
+--
+-- build-snapshot.sh writes the library to /var/lib next to this app.
+package.path = "/var/lib/?.lua;" .. package.path
+local ad = require("accounts_drive")
+
 local ETHER = string.rep("0", 40)
-local balances = {}
 
-local function key(token, addr) return token .. ":" .. addr end
+-- The accounts drive is the machine's second flash drive: the kernel numbers
+-- pmem devices in --flash-drive order, the root filesystem is always first
+-- (/dev/pmem0), and build-snapshot.sh declares the accounts drive right after
+-- it — so it is /dev/pmem1.
+local drive_fs = assert(ad.file_store("/dev/pmem1"))
 
-local function balanceOf(addr, token)
-  return balances[key(token or ETHER, addr)] or ZERO
+-- Format the drive at boot if it is still blank (build-snapshot.sh ships it
+-- zero-filled). This runs before the first yield, so the formatted header is
+-- part of the stored snapshot and covered by the genesis state root like
+-- every other chain parameter. The geometry below is therefore consensus:
+-- header page, in-header token registry (offset 0x100, capacity 8), accounts
+-- table at 4096 with 4096 64-byte slots, sparse table right after it at
+-- 266240 (= 4096 + 4096*64) with 4096 64-byte slots; load limits are the
+-- library's 7/8 default. The seed stays the library's all-zero default — a
+-- devnet chain parameter, kept at zero so genesis is reproducible from this
+-- file alone; a production chain would pick a random seed at genesis to make
+-- probe-chain grinding (ACCOUNTS.md §5.3) start from nothing.
+local drive
+if drive_fs:read_at(0, 8) == "ctsiacct" then
+  drive = assert(ad.open(drive_fs))
+else
+  drive = assert(ad.format(drive_fs, {
+    drive_length = 1048576, -- 1 MiB (2^20), matches build-snapshot.sh
+    profile = ad.PROFILE_SPARSE,
+    capacity = 4096,
+    registry_offset = 0x100,
+    registry_capacity = 8,
+    sparse_offset = 266240,
+    sparse_capacity = 4096,
+  }))
 end
 
+-- syncDrive gets the input's drive writes out of Lua's stdio buffer and the
+-- kernel page cache and into the device — i.e. into machine state — before
+-- the next yield (spec §10). Cartesi's kernel has no DAX, so a plain write()
+-- can still be sitting in guest RAM at the yield, where the host could not
+-- read it and the genesis root would not cover the format above.
+local function syncDrive()
+  drive_fs:sync()
+  os.execute("sync")
+end
+
+-- Conversions between the app's 64-char-hex amounts and the library's raw
+-- 20-byte addresses / 32-byte big-endian balances, using the hex helpers
+-- above. hex32(bin) is hex() applied to a whole 32-byte string.
+local function hex32(bin) return hex(bin, 1, 32) end
+
+-- tokenId resolves a token to its registry id, optionally registering it
+-- first-seen (register_token returns nil, kind when the registry is full).
+-- Note id 0 is a valid id and Lua treats it as truthy, so `if id` works.
+local function tokenId(token, register)
+  local id = drive:token_by_address(hexdecode(token))
+  if id ~= nil then return id end
+  if not register then return nil end
+  return drive:register_token(hexdecode(token), 32)
+end
+
+local function balanceOf(addr, token)
+  -- Queries arrive with attacker-chosen lengths (inspect); anything that is
+  -- not a 20-byte address has no balance rather than being an error.
+  if #addr ~= 40 then return ZERO end
+  token = token or ETHER
+  if token == ETHER then
+    local acct = drive:get_account(hexdecode(addr))
+    if not acct then return ZERO end
+    return hex32(acct.balance)
+  end
+  local id = tokenId(token, false)
+  if id == nil then return ZERO end
+  local bal = drive:get_token_balance(hexdecode(addr), id)
+  if not bal then return ZERO end
+  return hex32(bal)
+end
+
+-- setBalance writes a 64-char-hex balance to the drive; register says whether
+-- an unseen token may be registered (credits yes, debits no — registration is
+-- first-seen *on deposit*). Returns true, or nil when the drive refuses:
+-- tableFull, registryFull and overflow are exactly the conditions the spec
+-- requires to be answered by rejecting the input (spec §6.3, §8), and the
+-- machine rollback that rejection triggers reverts the drive along with
+-- everything else, so a refused write needs no undo.
+local function setBalance(addr, token, value, register)
+  if token == ETHER then
+    local a = hexdecode(addr)
+    local acct = drive:get_account(a)
+    -- The nonce rides along unchanged. This guest does not bump nonces yet:
+    -- enforcement (and with it sender recovery) is ACCOUNTS.md roadmap v1.
+    return drive:set_account(a, acct and acct.nonce or 0, hexdecode(pad(value)))
+  end
+  local id = tokenId(token, register)
+  if id == nil then return nil end
+  return drive:set_token_balance(hexdecode(addr), id, hexdecode(pad(value)))
+end
+
+-- credit returns the new balance, or nil when the drive refuses the write —
+-- the caller must then reject the input (see setBalance).
 local function credit(addr, amount, token)
   token = token or ETHER
   local updated = add(balanceOf(addr, token), amount)
-  balances[key(token, addr)] = updated
+  if not setBalance(addr, token, updated, true) then return nil end
   return updated
 end
 
--- debit returns the new balance, or nil when the account is short.
+-- debit returns the new balance, or nil when the account is short (or the
+-- drive refuses the write; either way the caller rejects).
 local function debit(addr, amount, token)
   token = token or ETHER
   local left = sub(balanceOf(addr, token), amount)
-  if left then balances[key(token, addr)] = left end
+  if not left then return nil end
+  if token ~= ETHER and tokenId(token, false) == nil then
+    -- A token nobody ever deposited can only get here with amount zero (its
+    -- balance is zero); there is no record to update, and a withdrawal must
+    -- not be a way to mint registry entries.
+    return left
+  end
+  if not setBalance(addr, token, left, false) then return nil end
   return left
 end
 
@@ -329,10 +443,16 @@ local function advance(raw)
     -- contract on L1, so this credit is one a voucher can actually pay out.
     local d = portalDeposit
     local updated = credit(d.sender, d.amount, d.token)
+    -- A refused credit (accounts table or registry at its load limit) must
+    -- reject the input (spec §6.3, §8); rejection rolls the drive back with
+    -- the rest of the machine. The L1 escrow has already happened — this is
+    -- the deposit-stuck caveat of ACCOUNTS.md §5.3, answered by capacity
+    -- headroom, not by cleverness here.
+    if not updated then return "reject" end
     rollup("notice", '{"payload":"0x' .. pad(d.token) .. pad(d.sender) .. pad(d.amount) .. updated .. '"}')
     rollup("report", '{"payload":"0x' .. pad(d.sender) .. updated .. '"}')
 
-  elseif deposit and not isZero(deposit.mint) then
+  elseif deposit and not isZero(deposit.mint) and #deposit.to == 40 then
     -- OP's own ether deposit. Crediting the recipient rather than the sender
     -- collapses OP's two-step "mint to `from`, then transfer `value` to `to`"
     -- into the one step this guest can express: it has no transfers, only a
@@ -342,7 +462,11 @@ local function advance(raw)
     -- The ether itself stays in OP's lockbox, which no voucher can reach, so
     -- this credit is only as good as whatever else funds the application
     -- contract. OPEtherPortal is the path where the two directions agree.
+    -- (The `to == 40` guard above: a deposit with an empty or malformed `to`
+    -- has no 20-byte account to credit — the drive is keyed by real
+    -- addresses — so it falls through to the record-and-accept branch.)
     local updated = credit(deposit.to, deposit.mint)
+    if not updated then return "reject" end -- drive refused: see the portal branch
     -- The notice is the provable half: it enters the outputs tree and so the
     -- block's withdrawals root, which is what a verifier re-derives.
     rollup("notice", '{"payload":"0x' .. pad(deposit.to) .. pad(deposit.mint) .. updated .. '"}')
@@ -383,6 +507,13 @@ end
 -- ---------------------------------------------------------------- main loop
 local status = "accept"
 while true do
+  -- The drive bytes must be current in machine state at every yield (spec
+  -- §10): finish parks the machine, and the host reads the drive out of the
+  -- parked state. This covers the boot-time format too — the first finish is
+  -- the yield the snapshot is stored at, so the genesis root covers the
+  -- formatted header. Syncing before a rejecting finish is harmless: the
+  -- rollback reverts the drive either way.
+  syncDrive()
   local req = rollup("finish", '{"status":"' .. status .. '"}')
   if req == "" then os.exit(1) end
   local raw = hexdecode(field(req, "payload") or "0x")

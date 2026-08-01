@@ -3,6 +3,7 @@ package engineapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 
@@ -132,6 +133,54 @@ func (e *EthAPI) Call(ctx context.Context, args CallArgs, id *rpc.BlockNumberOrH
 		out = append(out, report...)
 	}
 	return out, nil
+}
+
+// GetBalance serves the account's native balance out of the guest's accounts
+// drive: resolve the block tag to a parked machine, read the record straight
+// from machine memory — no fork, no execution (docs/ACCOUNTS.md §6.2).
+func (e *EthAPI) GetBalance(ctx context.Context, addr common.Address, id *rpc.BlockNumberOrHash) (*hexutil.Big, error) {
+	_, balance, err := e.accountAt(ctx, addr, id)
+	if err != nil {
+		return nil, err
+	}
+	return (*hexutil.Big)(balance), nil
+}
+
+// GetTransactionCount serves the account's nonce from the same record. The
+// chain does not yet *enforce* nonces — that is the guest's half of
+// ACCOUNTS.md roadmap v1 — so until the guest starts bumping them this
+// faithfully reports what the drive holds: zero.
+func (e *EthAPI) GetTransactionCount(ctx context.Context, addr common.Address, id *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
+	nonce, _, err := e.accountAt(ctx, addr, id)
+	if err != nil {
+		return 0, err
+	}
+	return hexutil.Uint64(nonce), nil
+}
+
+// accountAt is the shared block-resolution-plus-drive-read behind the two
+// account methods.
+func (e *EthAPI) accountAt(ctx context.Context, addr common.Address, id *rpc.BlockNumberOrHash) (uint64, *big.Int, error) {
+	b, err := e.blockFromOptional(id)
+	if err != nil {
+		return 0, nil, err
+	}
+	if b == nil {
+		return 0, nil, fmt.Errorf("unknown block")
+	}
+	nonce, balance, err := e.chain.AccountAt(ctx, b.Hash(), addr)
+	if errors.Is(err, chain.ErrNoAccountsDrive) {
+		// A machine without an accounts drive — the in-memory mock, or a guest
+		// predating the drive — is answered with zeros rather than an error.
+		// An RPC consumer cannot distinguish an empty account from a missing
+		// ledger anyway, and erroring would break every wallet pointed at a
+		// mock-machine dev node (and the existing tests that run one).
+		return 0, new(big.Int), nil
+	}
+	if err != nil {
+		return 0, nil, err
+	}
+	return nonce, balance, nil
 }
 
 // MinerAPI serves the miner namespace op-batcher requires.

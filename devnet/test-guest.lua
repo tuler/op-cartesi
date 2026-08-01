@@ -8,13 +8,39 @@
 -- an unbacked withdrawal. It is also the one part of this repo that never
 -- runs on the host, which is exactly why it is worth being able to run here.
 --
--- The guest talks to the machine through two calls, `io.open` on a scratch
--- file and `io.popen` on the `rollup` tool, so stubbing those two is enough to
--- drive it with whatever inputs a test wants and read back what it emitted.
--- The Lua source is taken out of the shell script it is embedded in, so this
--- tests the file that is actually appended to the snapshot.
+-- The guest talks to the machine through `io.open` on a scratch file,
+-- `io.popen` on the `rollup` tool, and — since the ledger moved onto the
+-- accounts drive — `io.open` on /dev/pmem1 plus `os.execute("sync")`.
+-- Stubbing those is enough to drive it with whatever inputs a test wants and
+-- read back what it emitted: the drive device is redirected to a temp file,
+-- which the accounts-drive library reads and writes exactly as it would the
+-- raw device. The Lua source is taken out of the shell script it is embedded
+-- in, so this tests the file that is actually appended to the snapshot.
+--
+-- One fidelity gap, deliberate: a real machine reverts the drive when an
+-- input is rejected, and this harness does not. The guest never writes the
+-- drive before deciding to reject (debits check the balance first), so the
+-- temp image still ends byte-exact — and the drive checks at the bottom
+-- would catch a change that starts writing before rejecting.
 
-local path = arg[1] or (arg[0]:match("^(.*)/[^/]*$") or ".") .. "/bank-app.sh"
+local script_dir = arg[0]:match("^(.*)/[^/]*$") or "."
+local path = arg[1] or script_dir .. "/bank-app.sh"
+
+-- The accounts-drive library, from the repo. The guest prepends
+-- /var/lib/?.lua (where build-snapshot.sh installs it); that path does not
+-- exist here, so require falls through to this one.
+package.path = script_dir .. "/../accounts-drive/lua/?.lua;" .. package.path
+local ad = require("accounts_drive")
+
+-- The temp file standing in for /dev/pmem1: 1 MiB of zeros, exactly what
+-- build-snapshot.sh declares, so the guest's boot-time format runs here too.
+local DRIVE_LENGTH = 1048576
+local drivePath = os.tmpname()
+do
+  local f = assert(io.open(drivePath, "wb"))
+  f:write(("\0"):rep(DRIVE_LENGTH))
+  f:close()
+end
 
 -- ------------------------------------------------------------------ fixtures
 -- The addresses are arbitrary except for the aliases, which come from OP's
@@ -119,10 +145,14 @@ end
 
 local function run(src)
   local written
-  local realOpen, realPopen, realExit = io.open, io.popen, os.exit
+  local realOpen, realPopen, realExit, realExecute = io.open, io.popen, os.exit, os.execute
   io.open = function(p, mode)
     if p == "/var/lib/bank.in" then
       return { write = function(_, s) written = s end, close = function() end }
+    end
+    if p == "/dev/pmem1" then
+      -- The accounts drive: a plain file here, the raw device in the guest.
+      return realOpen(drivePath, mode)
     end
     return realOpen(p, mode)
   end
@@ -130,12 +160,16 @@ local function run(src)
     local out = handle(cmd:match("^rollup (%S+)"), written)
     return { read = function() return out end, close = function() end }
   end
+  -- os.execute("sync") flushes the guest kernel's page cache; there is no
+  -- guest kernel here, and the library's own sync() already flushed to the
+  -- temp file, so it is a no-op.
+  os.execute = function() return true end
   os.exit = function() error("guest exited", 0) end
 
   local chunk = assert(load(src, "@bank.lua"))
   local ok, err = pcall(chunk)
 
-  io.open, io.popen, os.exit = realOpen, realPopen, realExit
+  io.open, io.popen, os.exit, os.execute = realOpen, realPopen, realExit, realExecute
   if not ok and err ~= "guest exited" then error(err, 0) end
 end
 
@@ -301,6 +335,37 @@ check("an unknown payload emits nothing provable", payloadAt(UNKNOWN, "notice"),
 
 check("a truncated transaction does not halt the machine", statusOf(TRUNCATED), "accept")
 check("a truncated deposit does not halt the machine", statusOf(TRUNCATED_DEPOSIT), "accept")
+
+-- ------------------------------------------------------- the drive itself
+-- The reports above show what the guest *said*; the point of the accounts
+-- drive is what an outside reader *finds*. Open the image with the library
+-- directly — the same read path the host's eth_getBalance takes — and check
+-- the credited balances really are drive bytes, not Lua state that died with
+-- the run. Expected: ether 2 (portal) + 3 (OP deposit) − 4 (withdrawal) = 1,
+-- with the overdraw rejected before any write; token 0x64 − 0x40 = 0x24.
+local dfs = assert(ad.file_store(drivePath))
+local d = assert(ad.open(dfs), "the guest never formatted the drive")
+
+local acct = d:get_account(bin(USER))
+check("the ether balance is on the drive",
+  acct and tohex(acct.balance) or nil, string.rep("0", 63) .. "1")
+check("the account nonce is untouched (no enforcement yet)",
+  acct and acct.nonce or nil, 0)
+
+local tokenID = d:token_by_address(bin(TOKEN))
+check("the token was registered first-seen with id 0", tokenID, 0)
+check("the token registered at width 32",
+  tokenID and d:tokens()[tokenID + 1].width or nil, 32)
+check("the token balance is on the drive",
+  tokenID and tohex(d:get_token_balance(bin(USER), tokenID)) or nil,
+  string.rep("0", 62) .. "24")
+
+check("no other account records exist", d:live_count(), 1)
+check("one sparse holding exists", d:sparse_live_count(), 1)
+check("an absent account is absent, not zero-filled", d:get_account(bin(NOT_OWNER)), nil)
+
+dfs:close()
+os.remove(drivePath)
 
 if failures > 0 then
   print(failures .. " failed")

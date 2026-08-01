@@ -133,14 +133,13 @@ cast rpc eth_call \
 # "0x...0de0b6b3a7640000"
 ```
 
-`cast rpc eth_call` rather than `cast call`: the latter reads the caller's
-nonce first, and this chain serves no `eth_getTransactionCount` because its
-guest has no account model to take a nonce from.
-
-The balance is kept by the guest (`bank-app.sh`), not by the shim, so it is
-part of the state the machine's Merkle root commits to. Reading it goes through
-`eth_call`, which the shim answers by running the machine's inspect protocol on
-a fork it then discards.
+The balance is kept by the guest (`bank-app.sh`), not by the shim, on the
+accounts drive of [docs/ACCOUNTS.md](../docs/ACCOUNTS.md), so it is part of
+the state the machine's Merkle root commits to — and readable two ways: the
+`eth_call` above runs the guest's own inspect protocol on a discarded fork,
+while plain `eth_getBalance` reads the drive record straight out of machine
+memory with no execution at all. `eth_getTransactionCount` is served the same
+way (the nonce is 0 until the guest starts enforcing nonces).
 
 With the contracts deployed, this calls `OptimismPortal.depositTransaction` —
 the path a real user takes. With `WITH_CONTRACTS=0` there is no portal, so
@@ -205,8 +204,9 @@ The guest never runs on the host, but its logic can:
 lua5.4 devnet/test-guest.lua
 ```
 
-This lifts the Lua out of `bank-app.sh`, stubs the two calls it makes into the
-machine, and drives it with hand-built deposits and transactions — including
+This lifts the Lua out of `bank-app.sh`, stubs the calls it makes into the
+machine (the `rollup` tool, and the accounts-drive device, which becomes a
+temp file), and drives it with hand-built deposits and transactions — including
 malformed ones, since an error inside the guest halts the machine, and a halted
 machine is a halted chain.
 

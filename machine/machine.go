@@ -104,6 +104,14 @@ type Machine interface {
 	// which is what actually keeps the chain's state untouched.
 	Inspect(ctx context.Context, query []byte, maxCycles uint64) (*InspectResult, error)
 
+	// ReadMemory copies length bytes at an absolute machine address out of the
+	// machine's state without executing anything — no cycles run, no state
+	// changes, no fork needed. It is how the host reads structured guest state
+	// (the accounts drive) from a machine parked at a yield; callers must only
+	// interpret bytes read from a parked machine (spec §11 of
+	// docs/ACCOUNTS-DRIVE-SPEC.md).
+	ReadMemory(ctx context.Context, address, length uint64) ([]byte, error)
+
 	// RootHash returns the Merkle root of the machine's entire state.
 	RootHash(ctx context.Context) (common.Hash, error)
 

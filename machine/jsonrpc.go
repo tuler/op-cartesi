@@ -411,6 +411,62 @@ func (r *Remote) GuestOutputsRoot(ctx context.Context) (common.Hash, error) {
 	return common.BytesToHash(req.Data), nil
 }
 
+// ReadMemory copies bytes out of the loaded machine. The method is
+// machine.read_memory {address, length}, the result base64 bytes — the same
+// encoding style as every other buffer here. It executes nothing: the server
+// memcpys from the machine's address space (in 0.21 it even reads across
+// range boundaries, zero-filling gaps), and requests are processed
+// sequentially, so a read against a parked machine is consistent by
+// construction.
+func (r *Remote) ReadMemory(ctx context.Context, address, length uint64) ([]byte, error) {
+	var b binary
+	if err := r.call(ctx, "machine.read_memory", map[string]any{"address": address, "length": length}, &b); err != nil {
+		return nil, err
+	}
+	if uint64(len(b)) != length {
+		return nil, fmt.Errorf("read_memory returned %d bytes, want %d", len(b), length)
+	}
+	return b, nil
+}
+
+// accountsDriveLabel is the label the accounts drive is declared under
+// (docs/ACCOUNTS-DRIVE-SPEC.md §4), and accountsDriveDefaultStart the spec's
+// recommended well-known start address — the classic PMA_DRIVE_START, which
+// devnet/build-snapshot.sh pins explicitly.
+const (
+	accountsDriveLabel        = "accounts"
+	accountsDriveDefaultStart = uint64(0x80000000000000)
+)
+
+// AccountsDriveStart discovers the accounts drive's start address, by label
+// from the machine's initial config. found is false when the machine's config
+// declares no drive labeled "accounts".
+//
+// The config route is best-effort: machine.get_initial_config's flash_drive
+// entries carry label and start in 0.21, but unlike the hot-path methods in
+// this file its shape is not pinned by a test against every guest, so a
+// failure falls back to the spec's well-known start instead of erroring. The
+// fallback is safe to guess with: a wrong address is caught downstream by the
+// drive's magic check, so at worst "config unreadable" degrades into "drive
+// unreadable", never into misread balances.
+func (r *Remote) AccountsDriveStart(ctx context.Context) (start uint64, found bool, err error) {
+	var cfg struct {
+		FlashDrive []struct {
+			Label string `json:"label"`
+			Start uint64 `json:"start"`
+		} `json:"flash_drive"`
+	}
+	if err := r.call(ctx, "machine.get_initial_config", nil, &cfg); err != nil {
+		return accountsDriveDefaultStart, true, nil
+	}
+	for _, d := range cfg.FlashDrive {
+		if d.Label == accountsDriveLabel {
+			return d.Start, true, nil
+		}
+	}
+	return 0, false, nil
+}
+
 func (r *Remote) RootHash(ctx context.Context) (common.Hash, error) {
 	var b binary
 	if err := r.call(ctx, "machine.get_root_hash", nil, &b); err != nil {

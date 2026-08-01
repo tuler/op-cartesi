@@ -20,6 +20,15 @@ type Mock struct {
 	mu   sync.Mutex
 	root common.Hash
 
+	// driveBase and driveImage are the mock's accounts drive: a static
+	// in-memory image served through ReadMemory, so the host's account-read
+	// paths are testable without an emulator. The zero value means no drive —
+	// ReadMemory errors and AccountsDriveStart reports absence, which is what
+	// a guest without an accounts drive looks like. Install one with
+	// SetAccountsDrive.
+	driveBase  uint64
+	driveImage []byte
+
 	// RejectFn, when set, marks inputs the mock refuses (rx-rejected).
 	// Rejected inputs leave the state untouched.
 	RejectFn func(input []byte) bool
@@ -88,6 +97,47 @@ func (m *Mock) Inspect(_ context.Context, query []byte, maxCycles uint64) (*Insp
 	return &InspectResult{Accepted: true, Cycles: cycles, Reports: reports}, nil
 }
 
+// SetAccountsDrive installs an in-memory accounts-drive image at the given
+// base address. The mock keeps the slice as given (its "state" hash never
+// covers the image; the drive is test fixture, not mock state), so a test may
+// go on writing through a store backed by the same slice — but forks taken
+// afterwards copy it, as a real machine's fork would.
+func (m *Mock) SetAccountsDrive(base uint64, image []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.driveBase, m.driveImage = base, image
+}
+
+// ReadMemory serves reads from the installed drive image. A mock without one
+// has no memory to read — the error stands in for a guest with no accounts
+// drive, and chain code maps it accordingly.
+func (m *Mock) ReadMemory(_ context.Context, address, length uint64) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.driveImage == nil {
+		return nil, fmt.Errorf("mock machine has no memory image to read at %#x", address)
+	}
+	end := address + length
+	if end < address || address < m.driveBase || end > m.driveBase+uint64(len(m.driveImage)) {
+		return nil, fmt.Errorf("read [%#x,%#x) outside the mock's drive [%#x,%#x)",
+			address, end, m.driveBase, m.driveBase+uint64(len(m.driveImage)))
+	}
+	out := make([]byte, length)
+	copy(out, m.driveImage[address-m.driveBase:])
+	return out, nil
+}
+
+// AccountsDriveStart mirrors Remote's discovery: the installed image's base,
+// or found=false when no drive was installed.
+func (m *Mock) AccountsDriveStart(context.Context) (uint64, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.driveImage == nil {
+		return 0, false, nil
+	}
+	return m.driveBase, true, nil
+}
+
 func (m *Mock) RootHash(context.Context) (common.Hash, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -97,12 +147,20 @@ func (m *Mock) RootHash(context.Context) (common.Hash, error) {
 func (m *Mock) Fork(context.Context) (Machine, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// The drive image is copied: a fork shares no mutable state with its
+	// parent, and the drive is machine state like everything else.
+	var image []byte
+	if m.driveImage != nil {
+		image = append([]byte(nil), m.driveImage...)
+	}
 	return &Mock{
-		root:      m.root,
-		RejectFn:  m.RejectFn,
-		CycleCost: m.CycleCost,
-		OutputFn:  m.OutputFn,
-		InspectFn: m.InspectFn,
+		root:       m.root,
+		driveBase:  m.driveBase,
+		driveImage: image,
+		RejectFn:   m.RejectFn,
+		CycleCost:  m.CycleCost,
+		OutputFn:   m.OutputFn,
+		InspectFn:  m.InspectFn,
 	}, nil
 }
 
