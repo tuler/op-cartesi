@@ -4,10 +4,10 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { keccak256 } from '../keccak.js';
-import { home, sparseKey, bytesToHex } from '../drive.js';
+import { keccak256 } from '../src/keccak.ts';
+import { home, sparseKey, bytesToHex } from '../src/drive.ts';
 
-function repAddr(b) {
+function repAddr(b: number): Uint8Array {
   return new Uint8Array(20).fill(b);
 }
 
@@ -47,7 +47,7 @@ test('keccak handles rate-boundary and multi-block inputs', () => {
 
 test('home slots (spec Appendix B, zero seed)', () => {
   const seed = new Uint8Array(32);
-  const want = { 0xaa: 5, 0xbb: 1, 0xcc: 7, 0xdd: 1, 0xee: 1 };
+  const want: Record<number, number> = { 0xaa: 5, 0xbb: 1, 0xcc: 7, 0xdd: 1, 0xee: 1 };
   for (const [b, w] of Object.entries(want)) {
     assert.equal(home(seed, repAddr(Number(b)), 8), w, `home(${Number(b).toString(16)}..) mod 8`);
   }

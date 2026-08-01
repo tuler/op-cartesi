@@ -9,28 +9,66 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
-import { MemStore, format, AccountsDriveError, bytesToHex } from '../index.js';
+import { MemStore, format, AccountsDriveError, bytesToHex } from '../src/index.ts';
+import type { Config } from '../src/index.ts';
+
+interface GoldenOp {
+  op: string;
+  addr?: string;
+  token?: string;
+  nonce?: number | string;
+  value?: string;
+  force?: boolean;
+  width?: number;
+  id?: number;
+  expect: string;
+}
+
+interface GoldenCheck {
+  check: string;
+  addr?: string;
+  id?: number;
+  found?: boolean;
+  nonce?: number | string;
+  value?: string;
+  table?: string;
+  count?: number;
+  index?: number;
+  hex?: string;
+}
+
+interface GoldenScenario {
+  name: string;
+  config: Config & { driveLength: number };
+  ops: GoldenOp[];
+  checks: GoldenCheck[];
+  sha256: string;
+}
+
+interface GoldenFile {
+  scenarios: GoldenScenario[];
+}
 
 const goldenPath = fileURLToPath(new URL('../../testdata/golden.json', import.meta.url));
-const golden = JSON.parse(readFileSync(goldenPath, 'utf8'));
+const golden = JSON.parse(readFileSync(goldenPath, 'utf8')) as GoldenFile;
 
 assert.ok(Array.isArray(golden.scenarios) && golden.scenarios.length > 0, 'golden file has no scenarios');
 
-function be32(v) {
+function be32(v: bigint): string {
   return v.toString(16).padStart(64, '0');
 }
 
-function hexToBig(s) {
+function hexToBig(s?: string): bigint {
   return s ? BigInt('0x' + s) : 0n;
 }
 
-async function kindOf(promise) {
+async function kindOf(promise: Promise<unknown>): Promise<string> {
   try {
     await promise;
     return 'ok';
   } catch (e) {
     if (e instanceof AccountsDriveError) return e.kind;
-    return 'error: ' + e.message;
+    return 'error: ' + (e as Error).message;
   }
 }
 
@@ -40,19 +78,19 @@ for (const sc of golden.scenarios) {
     const d = await format(store, sc.config);
     for (let i = 0; i < sc.ops.length; i++) {
       const op = sc.ops[i];
-      let outcome;
+      let outcome: string;
       switch (op.op) {
         case 'setAccount':
-          outcome = await kindOf(d.setAccount(op.addr, BigInt(op.nonce ?? 0), hexToBig(op.value)));
+          outcome = await kindOf(d.setAccount(op.addr!, BigInt(op.nonce ?? 0), hexToBig(op.value)));
           break;
         case 'deleteAccount':
-          outcome = await kindOf(d.deleteAccount(op.addr, op.force ?? false));
+          outcome = await kindOf(d.deleteAccount(op.addr!, op.force ?? false));
           break;
         case 'registerToken':
-          outcome = await kindOf(d.registerToken(op.token, op.width ?? 0));
+          outcome = await kindOf(d.registerToken(op.token!, op.width ?? 0));
           break;
         case 'setTokenBalance':
-          outcome = await kindOf(d.setTokenBalance(op.addr, op.id ?? 0, hexToBig(op.value)));
+          outcome = await kindOf(d.setTokenBalance(op.addr!, op.id ?? 0, hexToBig(op.value)));
           break;
         default:
           assert.fail(`op ${i}: unknown op ${op.op}`);
@@ -64,7 +102,7 @@ for (const sc of golden.scenarios) {
       const where = `check ${i} (${c.check})`;
       switch (c.check) {
         case 'account': {
-          const a = await d.getAccount(c.addr);
+          const a = await d.getAccount(c.addr!);
           assert.equal(a !== null, c.found ?? false, `${where}: found`);
           if (a !== null) {
             assert.equal(a.nonce, BigInt(c.nonce ?? 0), `${where}: nonce`);
@@ -73,7 +111,7 @@ for (const sc of golden.scenarios) {
           break;
         }
         case 'tokenBalance': {
-          const v = await d.getTokenBalance(c.addr, c.id ?? 0);
+          const v = await d.getTokenBalance(c.addr!, c.id ?? 0);
           assert.equal(be32(v), c.value, where);
           break;
         }
