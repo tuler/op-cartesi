@@ -1,7 +1,9 @@
 # A standard account model for the guest
 
-**Status: proposal.** Nothing below is implemented; this document is the
-research and the design decision it leads to. It fills the gap the README
+**Status: adopted.** This document is the research and the design decision
+it led to; the format is specified in ACCOUNTS-DRIVE-SPEC.md, implemented
+in six languages under accounts-drive/, and roadmap steps 1–2 (§10) run on
+the devnet. It fills the gap the README
 lists as "no account model in the shim", and it does so where the README
 says the durable fix belongs — in the guest, covered by the state root.
 
@@ -640,11 +642,13 @@ as it is for every other Cartesi app.
    delete the nonce workaround in `send-l2-tx.sh`. Test like the outputs
    root is tested: builder and verifier agree on drive bytes, and a
    record proof round-trips against the header's `stateRoot`.
-2. **v1 — enforcement.** Sender recovery and nonce checking in the guest;
-   mempool gating in the shim; `cartesi_getAccountProof`; and at least a
-   flat per-transaction charge, because nonce records are permanent and
-   must not be free to mint (§5.7). This closes the replay-protection
-   gap.
+2. **v1 — enforcement.** *(done)* Sender recovery and nonce checking in
+   the guest; mempool gating in the shim; `cartesi_getAccountProof`; and
+   the flat per-transaction charge of §5.7 as an owner-settable
+   parameter — which the devnet defaults to zero, honestly leaving nonce
+   records free to mint until a deployment sets a real fee, because
+   fresh devnet senders hold no ether to charge. This closes the
+   replay-protection gap.
 3. **v2 — the exit.** `OPAccountsDriveValidator` and the output builder,
    ported from the v3 contracts against `DisputeGameFactory` proposals.
 4. **Later.** The token registry and balance profiles of §5.5 in the

@@ -146,10 +146,10 @@ func (e *EthAPI) GetBalance(ctx context.Context, addr common.Address, id *rpc.Bl
 	return (*hexutil.Big)(balance), nil
 }
 
-// GetTransactionCount serves the account's nonce from the same record. The
-// chain does not yet *enforce* nonces — that is the guest's half of
-// ACCOUNTS.md roadmap v1 — so until the guest starts bumping them this
-// faithfully reports what the drive holds: zero.
+// GetTransactionCount serves the account's nonce from the same record. Since
+// ACCOUNTS.md roadmap v1 the guest enforces and bumps this nonce for every
+// ordinary L2 transaction, so what the drive holds is the next nonce a
+// wallet must sign with — exactly what this method exists to answer.
 func (e *EthAPI) GetTransactionCount(ctx context.Context, addr common.Address, id *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
 	nonce, _, err := e.accountAt(ctx, addr, id)
 	if err != nil {

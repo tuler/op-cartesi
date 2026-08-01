@@ -467,6 +467,62 @@ func (r *Remote) AccountsDriveStart(ctx context.Context) (start uint64, found bo
 	return 0, false, nil
 }
 
+// MerkleProof is machine.get_proof's answer: the aligned range
+// [TargetAddress, TargetAddress + 2^Log2TargetSize) of the machine's address
+// space hashes to TargetHash, and folding TargetHash with the
+// Log2RootSize − Log2TargetSize SiblingHashes reproduces RootHash — the same
+// root the chain publishes as a block's stateRoot. Siblings are relayed in
+// the order the emulator returns them.
+type MerkleProof struct {
+	TargetAddress  uint64
+	Log2TargetSize uint64
+	TargetHash     common.Hash
+	Log2RootSize   uint64
+	RootHash       common.Hash
+	SiblingHashes  []common.Hash
+}
+
+// GetProof asks the server to prove an aligned power-of-two range of the
+// machine's address space against its current root hash. The method is
+// machine.get_proof {address, log2_target_size}, hashes base64 — the same
+// call style as every other method here. Like ReadMemory it executes
+// nothing; the proof machinery is incremental, so the cost is rehashing
+// pages dirtied since the last tree update, not the whole tree.
+func (r *Remote) GetProof(ctx context.Context, address, log2TargetSize uint64) (*MerkleProof, error) {
+	var res struct {
+		TargetAddress  uint64   `json:"target_address"`
+		Log2TargetSize uint64   `json:"log2_target_size"`
+		TargetHash     binary   `json:"target_hash"`
+		Log2RootSize   uint64   `json:"log2_root_size"`
+		RootHash       binary   `json:"root_hash"`
+		SiblingHashes  []binary `json:"sibling_hashes"`
+	}
+	if err := r.call(ctx, "machine.get_proof", map[string]any{
+		"address":          address,
+		"log2_target_size": log2TargetSize,
+	}, &res); err != nil {
+		return nil, err
+	}
+	if len(res.TargetHash) != common.HashLength || len(res.RootHash) != common.HashLength {
+		return nil, fmt.Errorf("get_proof: hash lengths %d/%d, want %d", len(res.TargetHash), len(res.RootHash), common.HashLength)
+	}
+	proof := &MerkleProof{
+		TargetAddress:  res.TargetAddress,
+		Log2TargetSize: res.Log2TargetSize,
+		TargetHash:     common.BytesToHash(res.TargetHash),
+		Log2RootSize:   res.Log2RootSize,
+		RootHash:       common.BytesToHash(res.RootHash),
+		SiblingHashes:  make([]common.Hash, 0, len(res.SiblingHashes)),
+	}
+	for i, s := range res.SiblingHashes {
+		if len(s) != common.HashLength {
+			return nil, fmt.Errorf("get_proof: sibling %d has %d bytes, want %d", i, len(s), common.HashLength)
+		}
+		proof.SiblingHashes = append(proof.SiblingHashes, common.BytesToHash(s))
+	}
+	return proof, nil
+}
+
 func (r *Remote) RootHash(ctx context.Context) (common.Hash, error) {
 	var b binary
 	if err := r.call(ctx, "machine.get_root_hash", nil, &b); err != nil {

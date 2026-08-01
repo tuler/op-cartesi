@@ -2,6 +2,7 @@ package machine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,12 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/crypto"
 )
+
+// ErrProofsUnsupported is the mock's answer to GetProof: its "state" is a
+// single rolled-up hash, not a Merkle tree over an address space, so there
+// is nothing sound it could prove. Callers that can serve partial results
+// without proofs branch on this; the RPC surfaces it as an error.
+var ErrProofsUnsupported = errors.New("machine Merkle proofs require a real emulator (machine.get_proof); the mock machine computes none")
 
 // Mock is a deterministic in-memory stand-in for a Cartesi Machine, used for
 // development and tests. Its "state" is a single 32-byte hash advanced as
@@ -136,6 +143,13 @@ func (m *Mock) AccountsDriveStart(context.Context) (uint64, bool, error) {
 		return 0, false, nil
 	}
 	return m.driveBase, true, nil
+}
+
+// GetProof mirrors Remote's proof capability in signature only: the mock has
+// no hash tree, so it reports ErrProofsUnsupported and lets the caller
+// decide how much of its answer survives without proofs.
+func (m *Mock) GetProof(context.Context, uint64, uint64) (*MerkleProof, error) {
+	return nil, ErrProofsUnsupported
 }
 
 func (m *Mock) RootHash(context.Context) (common.Hash, error) {

@@ -535,3 +535,82 @@ func TestRemoteStoreFromFork(t *testing.T) {
 		t.Fatalf("the machine broke after a fork stored from it: %v", err)
 	}
 }
+
+// GetProof must return a proof that actually folds up to the machine's own
+// root hash — that is what cartesi_getAccountProof serves, and what an
+// external verifier checks against a block's stateRoot.
+func TestRemoteGetProof(t *testing.T) {
+	ctx := context.Background()
+	remote := startServer(t)
+
+	root, err := remote.RootHash(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// One 4 KiB page at the accounts drive's well-known start: an aligned
+	// range every snapshot has, and the granularity the account-proof RPC
+	// uses (chain.proofPageLog2).
+	const address, log2Size = uint64(0x80000000000000), uint64(12)
+	proof, err := remote.GetProof(ctx, address, log2Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if proof.TargetAddress != address || proof.Log2TargetSize != log2Size {
+		t.Fatalf("proof is for [%#x, 2^%d), want [%#x, 2^%d)", proof.TargetAddress, proof.Log2TargetSize, address, log2Size)
+	}
+	if proof.RootHash != root {
+		t.Fatalf("proof root %s, machine root %s", proof.RootHash, root)
+	}
+	if n := uint64(len(proof.SiblingHashes)); n != proof.Log2RootSize-log2Size {
+		t.Fatalf("%d siblings, want log2RootSize−log2TargetSize = %d", n, proof.Log2RootSize-log2Size)
+	}
+	// Fold the target hash with the siblings and expect the root. The
+	// emulator's documented sibling order has varied across tooling, so try
+	// bottom-up (sibling i at tree level log2Size+i) first and top-down as
+	// the fallback, requiring exactly one to reproduce the root.
+	fold := func(bottomUp bool) common.Hash {
+		hash := proof.TargetHash
+		for i := range proof.SiblingHashes {
+			level := log2Size + uint64(i)
+			sibling := proof.SiblingHashes[i]
+			if !bottomUp {
+				sibling = proof.SiblingHashes[len(proof.SiblingHashes)-1-i]
+			}
+			if (address>>level)&1 == 0 {
+				hash = crypto.Keccak256Hash(hash[:], sibling[:])
+			} else {
+				hash = crypto.Keccak256Hash(sibling[:], hash[:])
+			}
+		}
+		return hash
+	}
+	switch {
+	case fold(true) == root:
+		t.Log("sibling order: bottom-up")
+	case fold(false) == root:
+		t.Log("sibling order: top-down")
+	default:
+		t.Fatal("neither sibling order folds the target hash to the root hash")
+	}
+
+	// The proof must describe the same bytes ReadMemory serves: hash the page
+	// up from its 32-byte leaves and expect the target hash.
+	data, err := remote.ReadMemory(ctx, address, 1<<log2Size)
+	if err != nil {
+		t.Fatal(err)
+	}
+	level := make([]common.Hash, (1<<log2Size)/32)
+	for i := range level {
+		level[i] = crypto.Keccak256Hash(data[i*32 : (i+1)*32])
+	}
+	for len(level) > 1 {
+		next := make([]common.Hash, len(level)/2)
+		for i := range next {
+			next[i] = crypto.Keccak256Hash(level[2*i][:], level[2*i+1][:])
+		}
+		level = next
+	}
+	if level[0] != proof.TargetHash {
+		t.Fatalf("page bytes hash to %s, proof claims %s", level[0], proof.TargetHash)
+	}
+}
