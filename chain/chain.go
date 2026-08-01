@@ -67,6 +67,15 @@ type Chain struct {
 	// da carries op-batcher's backpressure. It is read while building blocks
 	// and written from the RPC, so it is atomic rather than guarded by mu.
 	da daLimits
+	// drive caches the accounts drive's discovered start address. The drive's
+	// geometry is part of the machine template — consensus, immutable for the
+	// life of the deployment — so one discovery per process is enough; it is
+	// resolved lazily on the first AccountAt (see account.go).
+	drive struct {
+		mu    sync.Mutex
+		state int // driveUnresolved, driveFound or driveAbsent
+		base  uint64
+	}
 
 	genesisHash common.Hash
 	head        common.Hash

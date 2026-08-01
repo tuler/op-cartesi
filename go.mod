@@ -1,10 +1,11 @@
 module github.com/tuler/op-cartesi
 
-go 1.24.0
+go 1.25.0
 
-toolchain go1.24.7
-
-require github.com/ethereum/go-ethereum v1.16.3
+require (
+	github.com/ethereum/go-ethereum v1.16.3
+	github.com/tuler/op-cartesi/accounts-drive/go v0.0.0-00010101000000-000000000000
+)
 
 require (
 	github.com/BurntSushi/toml v1.4.0 // indirect
@@ -64,13 +65,17 @@ require (
 	go.opentelemetry.io/otel v1.40.0 // indirect
 	go.opentelemetry.io/otel/metric v1.40.0 // indirect
 	go.opentelemetry.io/otel/trace v1.40.0 // indirect
-	golang.org/x/crypto v0.44.0 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/exp v0.0.0-20230626212559-97b1e661b5df // indirect
-	golang.org/x/sync v0.18.0 // indirect
-	golang.org/x/sys v0.40.0 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/sync v0.22.0 // indirect
+	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
 replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101702.2
+
+// The accounts-drive reference library lives in this repository; the replace
+// keeps host and guest reading the drive from the same commit.
+replace github.com/tuler/op-cartesi/accounts-drive/go => ./accounts-drive/go
