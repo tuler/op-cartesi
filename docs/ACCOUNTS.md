@@ -242,7 +242,7 @@ One 4 KiB page at drive offset 0. All header integers little-endian
 | 0x20 | 8 | `loadLimit`: max live records before the table refuses inserts |
 | 0x28 | 8 | `liveCount`: current live records (informational; a host gauge) |
 | 0x30 | 32 | `seed`: hash key, chosen per chain at genesis |
-| 0x50 | — | reserved (future table directory; see §5.5) |
+| 0x50 | — | token profile fields (§5.5); reserved beyond them |
 
 ### 5.3 The accounts table
 
@@ -319,13 +319,97 @@ feature branch, which is the only reason this spec targets a flash drive
 first. The byte layout above is substrate-independent; when NVRAM tooling
 ships, the same format moves onto it and §5.4 shrinks to one sentence.
 
-### 5.5 Extensions, named but not specified
+### 5.5 Token balances: a registry, then a density question
 
-- **Token balances.** The devnet ledger is keyed `token ‖ account`; a
-  second table of 128-byte slots (token 20 ‖ address 20 ‖ padding ‖
-  balance 32) with the same probing serves it. The header's reserved
-  region becomes a table directory: per table, its offset, capacity, and
-  record-layout id.
+The native-only record of §5.3 is the whole story for apps with one
+asset. The moment there are more, the question is where the token
+*identity* lives, and the naive answer — key a second table by
+`token ‖ account` — pays 20 bytes of token address in every record. The
+design decomposes into two decisions, and the first is not a trade-off
+at all.
+
+**Always: a token registry.** A region of the drive, declared in the
+header, holding an append-only array of 32-byte entries (token address,
+20 bytes; zero padding, 12); a token's **id is its index**, `uint16`, so
+everything else in the drive names tokens in 2 bytes instead of 20. Ids
+are never reused, and registration is deterministic under either policy
+an app might want:
+
+- **Owner-registered** — the whitelist case, and exactly the pattern the
+  devnet guest already uses to learn its portal addresses; or
+- **First-seen on deposit** — the permissionless case: ids assigned in
+  first-deposit order, which is consensus because input order is.
+
+A full registry deterministically rejects the input, the same rule as a
+full table (§5.3), with the same deposit-stuck caveat and the same
+answer: capacity planning and a host gauge.
+
+**Then the layout is a density question.** Let d be the fraction of
+registered tokens a typical account actually holds. Two shapes:
+
+- **Wide records** (the account record carries every registered token).
+  The accounts table's slot grows to a header-declared power of two; the
+  §5.3 layout occupies bytes 0–63 of each slot, and balance columns for
+  ids 0..T−1 follow at `64 + 32·id`. Slot capacities are stepwise: a
+  128-byte slot fits 2 columns, 256 fits 6, 512 fits 14, 1024 fits 30.
+  Marginal cost: 32 bytes per registered token per account, held or not.
+  What it buys: **one read — and one Merkle proof — carries the nonce
+  and every balance**, which is exactly what an exit builder wants; and
+  the column cap doubles as honest whitelist semantics, since a wide app
+  rejects deposits of unregistered tokens by construction. (Larger slots
+  do thin the page-per-read argument: a 4 KiB read covers 16 slots at
+  256 bytes rather than 64 — still past honest probe chains at the
+  recommended load, but a ground chain costs a second page sooner.)
+- **A sparse table** (one record per nonzero holding). A second table
+  with the same probing and **64-byte slots**:
+
+  | Offset | Size | Field |
+  |---|---|---|
+  | 0 | 2 | token id, `uint16` little-endian |
+  | 2 | 2 | zero padding |
+  | 4 | 20 | account address |
+  | 24 | 8 | zero padding |
+  | 32 | 32 | balance, `uint256` big-endian |
+
+  Home slot `LE64(keccak256(seed ‖ id ‖ address)[0..8]) mod C`; a live
+  record has a nonzero address, so token id 0 stays unambiguous. The
+  native balance stays in the account record — this table is ERC-20s
+  only. Marginal cost: 64 bytes (÷ load factor) per nonzero holding,
+  and the token count is unbounded until `uint16` runs out (65,536
+  tokens — a 2 MiB registry), which is "arbitrary" for any real app.
+
+The crossover falls out: wide is smaller when d ≳ ½ — when most accounts
+hold most registered tokens — and sparse below that. The power-of-two
+rounding tilts small sets toward wide harder than the formula suggests:
+an app with native plus one ERC-20 needs a 128-byte slot anyway, and the
+*second* token column in that slot is free. So the guidance is: one or
+two dense app tokens → wide; a long or permissionless tail → sparse plus
+registry; and the header declares which, as a **profile**: 0 native-only
+(§5.3 unchanged), 1 wide, 2 sparse. A hybrid — the first k ids inline in
+the record, a spill table beyond — is expressible under the same header
+fields and is deliberately not specified until an app needs it.
+
+Profile fields, at header offset 0x50 (all zero in profile 0):
+
+| Offset | Size | Field |
+|---|---|---|
+| 0x50 | 4 | profile: 0 native-only, 1 wide, 2 sparse |
+| 0x54 | 4 | account slot size (64 in profiles 0 and 2) |
+| 0x58 | 8 | registry offset |
+| 0x60 | 8 | registry capacity |
+| 0x68 | 8 | token count |
+| 0x70 | 8 | sparse table offset (profile 2) |
+| 0x78 | 8 | sparse table capacity |
+| 0x80 | 8 | sparse table load limit |
+| 0x88 | 8 | sparse table live count |
+
+The devnet bank app is a sparse-profile app in miniature: its ledger is
+already keyed `token ‖ account` with the zero address for ether. The
+migration maps its ether keys onto the account record and its token keys
+into the sparse table.
+
+### 5.6 Other extensions, named but not specified
+
 - **Per-app namespacing.** DESIGN §8's multi-app dimension folds in by
   keying tables per app id, or one table per app in the directory.
 - **A change journal.** A ring buffer of `(table, slot)` touched per
@@ -378,7 +462,7 @@ transactional boundary, and reading happens one of three ways:
 2. **From a mirror, with no machine on the query path.** The shim is the
    one process that knows when each block's machine is parked, so it can
    maintain a local mirror of the drive: read it whole once at startup,
-   then per sealed block re-read only the touched ranges — the §5.5
+   then per sealed block re-read only the touched ranges — the §5.6
    journal, or the touch set the host can largely compute from the
    block's own transactions. Queries then `mmap` the mirror with zero
    emulator involvement, and the mirror can be handed to any number of
@@ -477,7 +561,7 @@ as it is for every other Cartesi app.
   has flags if that ever changes.
 - MPT-compatible `eth_getProof` (impossible; §6 has the replacement).
 - Historical reads past the snapshot window (same policy as inspect; a
-  change journal, §5.5, is the eventual answer if anyone needs deep
+  change journal, §5.6, is the eventual answer if anyone needs deep
   history).
 - The fee mechanism itself. This supplies identity, balance and ordering;
   what to charge is its own design.
@@ -496,7 +580,8 @@ as it is for every other Cartesi app.
    replay-protection gap.
 3. **v2 — the exit.** `OPAccountsDriveValidator` and the output builder,
    ported from the v3 contracts against `DisputeGameFactory` proposals.
-4. **Later.** Token-balance table, NVRAM substrate when guest-tools
+4. **Later.** The token registry and balance profiles of §5.5 in the
+   devnet guest, NVRAM substrate when guest-tools
    ships it, fee market on top.
 
 ## References
