@@ -1,0 +1,11 @@
+{
+  "name": "cartesi-accounts-drive",
+  "version": "1.0.0",
+  "description": "Pure-JavaScript implementation of the Cartesi Accounts Drive Format v1 (docs/ACCOUNTS-DRIVE-SPEC.md). No dependencies.",
+  "type": "module",
+  "main": "index.js",
+  "exports": "./index.js",
+  "scripts": {
+    "test": "node --test test/"
+  }
+}
