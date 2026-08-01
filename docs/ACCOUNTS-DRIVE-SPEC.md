@@ -111,7 +111,7 @@ The first 4096 bytes of the drive. All integers little-endian.
 | 0x30 | 32 | `seed` — hash key (§6.1) | any value; fixed at deployment |
 | 0x50 | 4 | `profile` — 0 single-asset, 1 wide, 2 sparse | |
 | 0x54 | 4 | `slotSize` — accounts-table slot size in bytes | 64 in profiles 0 and 2; a power of two ≥ 128 in profile 1 |
-| 0x58 | 8 | `registryOffset` | profiles 1–2; multiple of 32 |
+| 0x58 | 8 | `registryOffset` | profiles 1–2; multiple of 32; may point into the header page tail (see geometry rules) |
 | 0x60 | 8 | `registryCapacity` — max token entries | profiles 1–2; ≤ 65536 |
 | 0x68 | 8 | `tokenCount` — registered tokens | ≤ registryCapacity |
 | 0x70 | 8 | `sparseOffset` | profile 2; multiple of `sparseSlotSize` |
@@ -119,12 +119,19 @@ The first 4096 bytes of the drive. All integers little-endian.
 | 0x80 | 8 | `sparseLoadLimit` | profile 2; 1 ≤ … ≤ sparseCapacity − 1 |
 | 0x88 | 8 | `sparseLiveCount` | maintained exactly |
 | 0x90 | 4 | `sparseSlotSize` | 64, or 32 iff every registered width is 8 (§9) |
-| 0x94 | — | reserved | zero |
+| 0x94 | — | reserved | zero — up to `registryOffset`, when the registry is in-header |
 
 Geometry rules:
 
 - Every region (registry, accounts table, sparse table) MUST lie wholly
   within the drive and MUST NOT overlap another region or the header
+  page — with one exception: **the registry MAY occupy the tail of the
+  header page**, with `registryOffset ≥ 0x100` and
+  `registryOffset + 32·registryCapacity ≤ 4096` (up to 120 entries at
+  offset 0x100). This placement is RECOMMENDED whenever the capacity
+  fits: the registry then travels with the header in a single cached
+  read, and one header-page proof covers both (§12). A registry in its
+  own region is for sparse deployments whose token ceiling exceeds the
   page.
 - Fields for profiles the drive does not use MUST be zero.
 - `loadLimit` (and `sparseLoadLimit`) MUST be strictly less than the
@@ -261,7 +268,10 @@ bytes of a slot:
 ## 8. The token registry (profiles 1 and 2)
 
 An append-only array at `registryOffset` of 32-byte entries; the id of
-a token is its index, starting at 0:
+a token is its index, starting at 0. The array lives in the tail of the
+header page when its capacity fits there, and in its own region
+otherwise (§5, geometry rules); the entry format and every rule below
+are identical in both placements:
 
 | Offset | Size | Field |
 |---|---|---|
@@ -371,7 +381,8 @@ a trusted machine root:**
    profile, and for token claims the registry prefix up to the claimed
    id) — either as deployment constants known out of band (they are
    committed by the machine template), or by verifying a proof of the
-   header page (and registry range) against the same root.
+   header page (and registry range) against the same root — one proof
+   for both, when the registry is in-header (§5).
 2. Obtain the drive byte range covering slots `home(k) … home(k) + d`
    for the claimed walk length `d`, with its Merkle proof, and verify
    the proof against the root. (The range is contiguous — two ranges if
