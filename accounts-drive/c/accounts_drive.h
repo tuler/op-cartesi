@@ -31,7 +31,9 @@
  * Conventions (spec §2): balances are uint8_t[32], big-endian — a 32-byte
  * balance is byte-identical to an EVM ABI uint256 word. Nonces are uint64_t
  * (stored little-endian). Addresses are 20 raw bytes; the zero address is
- * invalid in every record.
+ * invalid in every record. On a compact-record drive (profile 0 with
+ * 32-byte slots, spec §7) the stored nonce is uint32 and the stored balance
+ * uint64; values past those bounds are refused with ACCTDRV_ERR_OVERFLOW.
  */
 #ifndef ACCOUNTS_DRIVE_H
 #define ACCOUNTS_DRIVE_H
@@ -76,14 +78,17 @@ typedef enum acctdrv_err {
                                      would not fit the slot (spec §7) */
     ACCTDRV_ERR_REGISTRY_FULL,    /* "registryFull": tokenCount == capacity */
     ACCTDRV_ERR_OVERFLOW,         /* "overflow": balance exceeds the token's
-                                     declared width (spec §8) */
+                                     declared width (spec §8), or a compact
+                                     record's uint32 nonce / uint64 balance
+                                     bound (spec §7) */
     ACCTDRV_ERR_NONCE_PROTECTED,  /* "nonceProtected": delete of a nonzero-
                                      nonce record without force (spec §7) */
     ACCTDRV_ERR_DUPLICATE_TOKEN,  /* "duplicateToken": address already in
                                      the registry (spec §8) */
     ACCTDRV_ERR_UNKNOWN_TOKEN,    /* "unknownToken": id >= token count */
     ACCTDRV_ERR_BAD_WIDTH,        /* "badWidth": width not 8/16/32, or not 8
-                                     on a 32-byte-sparse-slot drive (§9) */
+                                     on a 32-byte-sparse-slot drive (§9) or
+                                     a compact-record drive (§7) */
     ACCTDRV_ERR_ZERO_ADDRESS,     /* "zeroAddress": the zero address is
                                      invalid in every record (spec §6) */
     ACCTDRV_ERR_PROFILE,          /* "profile": operation not available in
@@ -162,7 +167,9 @@ typedef struct acctdrv_config {
     uint64_t load_limit;        /* 0 → 7/8 of capacity */
     uint8_t seed[32];           /* hash key (spec §6.1) */
     uint32_t profile;           /* ACCTDRV_PROFILE_* */
-    uint32_t slot_size;         /* 0 → 64; power of two >= 128 in wide */
+    uint32_t slot_size;         /* 0 → 64; 64 or 32 in profile 0 (32 =
+                                   compact record, §7); power of two
+                                   >= 128 in wide */
     uint64_t table_offset;      /* 0 → 4096 */
     uint64_t registry_offset;   /* 0 → no registry (profile 0 only) */
     uint64_t registry_capacity; /* <= 65536; 0 iff no registry */
@@ -174,7 +181,8 @@ typedef struct acctdrv_config {
 
 /* ----------------------------------------------------------------- records */
 
-/* One decoded accounts-table record (spec §7). */
+/* One decoded accounts-table record (spec §7), standard or compact; a
+ * compact record's uint32 nonce and uint64 balance are zero-extended. */
 typedef struct acctdrv_account {
     uint8_t address[20];
     uint64_t nonce;
@@ -247,8 +255,10 @@ acctdrv_err acctdrv_get_account(const acctdrv_drive *d,
 /*
  * Write an account's nonce and 32-byte big-endian balance, inserting the
  * record if the address has none. In the wide profile an update preserves
- * the record's token columns. ACCTDRV_ERR_TABLE_FULL means the input
- * carrying this change must be rejected (spec §6.3).
+ * the record's token columns. On a compact-record drive a nonce past uint32
+ * or a balance past uint64 is ACCTDRV_ERR_OVERFLOW (spec §7).
+ * ACCTDRV_ERR_TABLE_FULL and ACCTDRV_ERR_OVERFLOW mean the input carrying
+ * this change must be rejected (spec §6.3, §7).
  */
 acctdrv_err acctdrv_set_account(acctdrv_drive *d, const uint8_t addr[20],
                                 uint64_t nonce, const uint8_t balance[32]);
@@ -270,9 +280,10 @@ acctdrv_err acctdrv_delete_account(acctdrv_drive *d, const uint8_t addr[20],
  * Append a token to the registry (spec §8); *id (may be NULL) receives its
  * id. width must be 8, 16 or 32. In the wide profile the new column must
  * fit slot_size - 64 (ACCTDRV_ERR_TABLE_FULL otherwise, spec §7); on a
- * 32-byte-sparse-slot drive only width 8 is allowed (ACCTDRV_ERR_BAD_WIDTH,
- * spec §9). ACCTDRV_ERR_REGISTRY_FULL and ACCTDRV_ERR_TABLE_FULL mean
- * rejecting the input.
+ * 32-byte-sparse-slot drive (spec §9) and on a compact-record drive
+ * (spec §7) only width 8 is allowed (ACCTDRV_ERR_BAD_WIDTH).
+ * ACCTDRV_ERR_REGISTRY_FULL and ACCTDRV_ERR_TABLE_FULL mean rejecting the
+ * input.
  */
 acctdrv_err acctdrv_register_token(acctdrv_drive *d, const uint8_t token[20],
                                    int width, uint16_t *id);

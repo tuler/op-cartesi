@@ -589,6 +589,10 @@ static acctdrv_err cfg_validate(const acctdrv_config *c)
     if (c->profile == ACCTDRV_PROFILE_WIDE) {
         if (ss < 128 || !is_pow2(ss))
             return ACCTDRV_ERR_CONFIG;
+    } else if (c->profile == ACCTDRV_PROFILE_SINGLE_ASSET) {
+        /* 64 = standard record, 32 = compact record (spec §5, §7). */
+        if (ss != 64 && ss != 32)
+            return ACCTDRV_ERR_CONFIG;
     } else if (ss != 64) {
         return ACCTDRV_ERR_CONFIG;
     }
@@ -718,6 +722,13 @@ acctdrv_err acctdrv_open(acctdrv_drive *d, const acctdrv_store *store)
         return ACCTDRV_ERR_UNSUPPORTED;
     if (c->capacity == 0)
         return ACCTDRV_ERR_CORRUPT;
+    /* The slot size fixes the record layout (spec §5, §7): 64 or 32 in
+     * profile 0 (32 selects the compact record), 64 in the sparse profile. */
+    if (c->profile == ACCTDRV_PROFILE_SINGLE_ASSET &&
+        c->slot_size != 64 && c->slot_size != 32)
+        return ACCTDRV_ERR_CORRUPT;
+    if (c->profile == ACCTDRV_PROFILE_SPARSE && c->slot_size != 64)
+        return ACCTDRV_ERR_CORRUPT;
     if (c->profile == ACCTDRV_PROFILE_SPARSE) {
         if (c->sparse_slot_size != 32 && c->sparse_slot_size != 64)
             return ACCTDRV_ERR_CORRUPT;
@@ -783,6 +794,55 @@ acctdrv_err acctdrv_token_count(const acctdrv_drive *d, uint64_t *out)
 
 /* ---------------------------------------------------------------- accounts */
 
+/* Whether the drive uses the 32-byte compact profile-0 record (spec §7). */
+static int drive_compact(const acctdrv_drive *d)
+{
+    return d->geo.profile == ACCTDRV_PROFILE_SINGLE_ASSET &&
+           d->geo.slot_size == 32;
+}
+
+/* Decode nonce and balance out of a live account slot (spec §7). */
+static void decode_account(const acctdrv_drive *d, const uint8_t *slot,
+                           acctdrv_account *out)
+{
+    if (drive_compact(d)) {
+        out->nonce = get_le32(slot + 20);
+        memcpy(out->balance + 24, slot + 24, 8);
+    } else {
+        out->nonce = get_le64(slot + 24);
+        memcpy(out->balance, slot + 32, 32);
+    }
+}
+
+/*
+ * Encode a record into rec (rec_len receives 32 or 64 bytes). In the compact
+ * record a nonce past uint32 or a balance past uint64 is
+ * ACCTDRV_ERR_OVERFLOW — the input must be rejected (spec §7).
+ */
+static acctdrv_err encode_account(const acctdrv_drive *d, const uint8_t addr[20],
+                                  uint64_t nonce, const uint8_t balance[32],
+                                  uint8_t rec[64], size_t *rec_len)
+{
+    if (drive_compact(d)) {
+        if (nonce > 0xffffffffull)
+            return ACCTDRV_ERR_OVERFLOW;
+        if (!is_zero(balance, 24))
+            return ACCTDRV_ERR_OVERFLOW;
+        memset(rec, 0, 32);
+        memcpy(rec, addr, 20);
+        put_le32(rec + 20, (uint32_t)nonce);
+        memcpy(rec + 24, balance + 24, 8);
+        *rec_len = 32;
+        return ACCTDRV_OK;
+    }
+    memset(rec, 0, 64);
+    memcpy(rec, addr, 20);
+    put_le64(rec + 24, nonce);
+    memcpy(rec + 32, balance, 32);
+    *rec_len = 64;
+    return ACCTDRV_OK;
+}
+
 acctdrv_err acctdrv_get_account(const acctdrv_drive *d,
                                 const uint8_t addr[20], acctdrv_account *out,
                                 int *found)
@@ -800,8 +860,7 @@ acctdrv_err acctdrv_get_account(const acctdrv_drive *d,
     if (err || !*found)
         return err;
     memcpy(out->address, addr, 20);
-    out->nonce = get_le64(slot + 24);
-    memcpy(out->balance, slot + 32, 32);
+    decode_account(d, slot, out);
     return ACCTDRV_OK;
 }
 
@@ -810,24 +869,26 @@ acctdrv_err acctdrv_set_account(acctdrv_drive *d, const uint8_t addr[20],
 {
     acct_table t;
     uint8_t slot[ACCTDRV_MAX_SLOT_SIZE];
+    uint8_t rec[64];
+    size_t rec_len;
     uint64_t i, n;
     int found;
     acctdrv_err err;
     if (is_zero(addr, 20))
         return ACCTDRV_ERR_ZERO_ADDRESS;
+    err = encode_account(d, addr, nonce, balance, rec, &rec_len);
+    if (err)
+        return err; /* compact overflow: reject the input (spec §7) */
     accounts_table(d, &t);
     err = tbl_lookup(d, &t, addr, 20, &i, slot, &found);
     if (err)
         return err;
     if (found) {
         /*
-         * Update in place, touching only the 64-byte record: in the wide
+         * Update in place, touching only the record bytes: in the wide
          * profile the rest of the slot is token columns (spec §7).
          */
-        memcpy(slot, addr, 20);
-        memset(slot + 20, 0, 4);
-        put_le64(slot + 24, nonce);
-        memcpy(slot + 32, balance, 32);
+        memcpy(slot, rec, rec_len);
         return write_slot(d, &t, i, slot);
     }
     err = read_counter(d, t.count_off, &n);
@@ -836,9 +897,7 @@ acctdrv_err acctdrv_set_account(acctdrv_drive *d, const uint8_t addr[20],
     if (n >= t.limit)
         return ACCTDRV_ERR_TABLE_FULL; /* reject the input (spec §6.3) */
     memset(slot, 0, (size_t)t.slot_size);
-    memcpy(slot, addr, 20);
-    put_le64(slot + 24, nonce);
-    memcpy(slot + 32, balance, 32);
+    memcpy(slot, rec, rec_len);
     return tbl_insert(d, &t, slot);
 }
 
@@ -858,8 +917,13 @@ acctdrv_err acctdrv_delete_account(acctdrv_drive *d, const uint8_t addr[20],
     err = tbl_lookup(d, &t, addr, 20, &i, slot, &found);
     if (err || !found)
         return err; /* absence is not an error */
-    if (!force && !is_zero(slot + 24, 8))
-        return ACCTDRV_ERR_NONCE_PROTECTED; /* spec §7 replay protection */
+    if (!force) {
+        /* Compact records store the nonce as uint32 at offset 20 (spec §7). */
+        int nonzero_nonce = drive_compact(d) ? !is_zero(slot + 20, 4)
+                                             : !is_zero(slot + 24, 8);
+        if (nonzero_nonce)
+            return ACCTDRV_ERR_NONCE_PROTECTED; /* spec §7 replay protection */
+    }
     if (deleted)
         *deleted = 1;
     return tbl_remove(d, &t, i);
@@ -958,6 +1022,8 @@ acctdrv_err acctdrv_register_token(acctdrv_drive *d, const uint8_t token[20],
     if (d->geo.profile == ACCTDRV_PROFILE_SPARSE &&
         d->geo.sparse_slot_size == 32 && width != 8)
         return ACCTDRV_ERR_BAD_WIDTH; /* 32-byte sparse slots (spec §9) */
+    if (drive_compact(d) && width != 8)
+        return ACCTDRV_ERR_BAD_WIDTH; /* compact record: uint64 only (§7) */
     memset(e, 0, sizeof e);
     memcpy(e, token, 20);
     e[20] = (uint8_t)width;
