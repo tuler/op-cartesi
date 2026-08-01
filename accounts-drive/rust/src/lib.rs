@@ -84,7 +84,8 @@ pub enum Error {
     /// The token id is not registered (`unknownToken`).
     UnknownToken,
     /// The balance width is not 8, 16 or 32 — or not 8 on a drive with
-    /// 32-byte sparse slots (`badWidth`, spec §§8–9).
+    /// 32-byte sparse slots or the compact account record (`badWidth`,
+    /// spec §§7–9).
     BadWidth,
     /// The zero address is invalid in every record type (`zeroAddress`).
     ZeroAddress,
