@@ -468,7 +468,8 @@ class Config:
     load_limit: int = 0            # 0 -> 7/8 of capacity
     seed: bytes = _ZERO_ADDR + b"\x00" * 12  # 32 zero bytes
     profile: int = PROFILE_SINGLE_ASSET
-    slot_size: int = 0             # 0 -> 64; must be 64 unless profile is wide
+    slot_size: int = 0             # 0 -> 64; 64 or 32 (compact) in profile 0,
+                                   # 64 in profile 2, pow2 >= 128 in profile 1
     table_offset: int = 0          # 0 -> 4096
 
     registry_offset: int = 0       # 0 -> none (allowed only in profile 0)
@@ -511,9 +512,14 @@ class Config:
             if ss < 128 or ss & (ss - 1) != 0:
                 raise ValueError(
                     f"wide slot size {ss}: want a power of two >= 128")
+        elif self.profile == PROFILE_SINGLE_ASSET:
+            if ss not in (64, 32):
+                raise ValueError(
+                    f"slot size {ss}: profile 0 takes 64 (standard record) "
+                    f"or 32 (compact record)")
         elif ss != 64:
             raise ValueError(
-                f"slot size {ss}: must be 64 outside the wide profile")
+                f"slot size {ss}: must be 64 in the sparse profile")
         if self.capacity < 2:
             raise ValueError(f"capacity {self.capacity} < 2")
         if not (1 <= self.load_limit < self.capacity):
@@ -598,8 +604,8 @@ class Token:
 
 
 class Account:
-    """The fixed 64-byte record of spec section 7, decoded: 20-byte address,
-    ``uint64`` nonce, ``uint256`` balance (a Python int)."""
+    """The account record of spec section 7 -- standard or compact --
+    decoded: 20-byte address, nonce and balance as Python ints."""
 
     __slots__ = ("address", "nonce", "balance")
 
@@ -841,6 +847,38 @@ class Drive:
 
     # ------------------------------------------------------------- accounts
 
+    def _compact(self) -> bool:
+        """Whether the drive uses the 32-byte profile-0 record (spec 7)."""
+        return (self._cfg.profile == PROFILE_SINGLE_ASSET
+                and self._cfg.slot_size == 32)
+
+    def _decode_account(self, slot):
+        """Read ``(nonce, balance)`` out of a live account slot."""
+        if self._compact():
+            return (int.from_bytes(slot[20:24], "little"),
+                    int.from_bytes(slot[24:32], "big"))
+        return (int.from_bytes(slot[24:32], "little"),
+                int.from_bytes(slot[32:64], "big"))
+
+    def _encode_account(self, a: bytes, nonce: int, balance: int) -> bytes:
+        """Build a record. In the compact record a nonce past ``uint32`` or
+        a balance past ``uint64`` is kind ``overflow`` -- the input carrying
+        the change must be rejected."""
+        if self._compact():
+            if nonce > 0xFFFFFFFF:
+                raise AccountsDriveError(
+                    "overflow", "compact record nonce exceeds uint32")
+            rec = bytearray(32)
+            rec[0:20] = a
+            rec[20:24] = _le(nonce, 4)
+            _put_be(rec, 24, 8, balance)
+            return bytes(rec)
+        rec = bytearray(64)
+        rec[0:20] = a
+        rec[24:32] = _le(nonce, 8)
+        _put_be(rec, 32, 32, balance)
+        return bytes(rec)
+
     def get_account(self, addr):
         """Look an account up. Returns an :class:`Account`, or ``None`` when
         the address has no record (a proven statement, not a failure)."""
@@ -851,36 +889,35 @@ class Drive:
         if found is None:
             return None
         _, slot = found
-        return Account(a, int.from_bytes(slot[24:32], "little"),
-                       int.from_bytes(slot[32:64], "big"))
+        nonce, balance = self._decode_account(slot)
+        return Account(a, nonce, balance)
 
     def set_account(self, addr, nonce: int, balance: int) -> None:
         """Write an account's nonce and balance, inserting the record if the
         address has none. Raises kind ``tableFull`` when the insert would
-        pass the load limit -- in a guest, reject the input (spec 6.3)."""
+        pass the load limit, and kind ``overflow`` when a compact record's
+        nonce would pass ``uint32`` or its balance ``uint64`` -- in a guest,
+        reject the input (spec 6.3, 7)."""
         a = _to_addr(addr)
         if a == _ZERO_ADDR:
             raise AccountsDriveError("zeroAddress")
         if not (0 <= nonce < 1 << 64):
             raise ValueError(f"nonce {nonce} outside uint64")
-        rec = bytearray(64)
-        rec[0:20] = a
-        rec[24:32] = _le(nonce, 8)
-        _put_be(rec, 32, 32, balance)
+        rec = self._encode_account(a, nonce, balance)
         t = self._accounts_table()
         found = self._lookup(t, a)
         if found is not None:
-            # Update in place, touching only the 64-byte record: in the wide
+            # Update in place, touching only the record bytes: in the wide
             # profile the rest of the slot is token columns.
             i, slot = found
             full = bytearray(slot)
-            full[:64] = rec
+            full[:len(rec)] = rec
             self._write_slot(t, i, bytes(full))
             return
         if self._counter(t.count_off) >= t.limit:
             raise AccountsDriveError("tableFull")
         full = bytearray(t.slot_size)
-        full[:64] = rec
+        full[:len(rec)] = rec
         self._insert(t, bytes(full))
 
     def delete_account(self, addr, force: bool = False) -> bool:
@@ -897,7 +934,8 @@ class Drive:
         if found is None:
             return False
         i, slot = found
-        if not force and slot[24:32] != bytes(8):
+        nonce, _ = self._decode_account(slot)
+        if not force and nonce != 0:
             raise AccountsDriveError("nonceProtected")
         self._remove(t, i)
         return True
@@ -940,6 +978,9 @@ class Drive:
                 and self._cfg.sparse_slot_size == 32 and width != 8):
             raise AccountsDriveError(
                 "badWidth", "32-byte sparse slots require width 8")
+        if self._compact() and width != 8:
+            raise AccountsDriveError(
+                "badWidth", "the compact account record requires width 8")
         e = bytearray(32)
         e[:20] = a
         e[20] = width

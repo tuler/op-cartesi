@@ -399,8 +399,12 @@ local function validate(c)
     if ss < 128 or (ss & (ss - 1)) ~= 0 then
       return nil, ("wide slot size %d: want a power of two >= 128"):format(ss)
     end
+  elseif c.profile == M.PROFILE_SINGLE_ASSET then
+    if ss ~= 64 and ss ~= 32 then
+      return nil, ("slot size %d: profile 0 takes 64 (standard record) or 32 (compact record)"):format(ss)
+    end
   elseif ss ~= 64 then
-    return nil, ("slot size %d: must be 64 outside the wide profile"):format(ss)
+    return nil, ("slot size %d: must be 64 in the sparse profile"):format(ss)
   end
   if c.capacity < 2 then
     return nil, ("capacity %d < 2"):format(c.capacity)
@@ -630,6 +634,9 @@ function Drive:register_token(addr, width)
       and width ~= 8 then
     return nil, "badWidth" -- 32-byte sparse slots require width 8 (spec §9)
   end
+  if self:compact() and width ~= 8 then
+    return nil, "badWidth" -- the compact account record requires width 8 (spec §7)
+  end
   local e = addr .. string.char(width) .. ("\0"):rep(11)
   self.store:write_at(self.cfg.registry_offset + 32 * n, e)
   self:_set_counter(OFF.token_count, n + 1)
@@ -749,41 +756,72 @@ end
 
 -- ------------------------------------------------------------- accounts
 
+-- compact() reports whether the drive uses the 32-byte profile-0 record
+-- (spec §7): profile 0 with slot_size 32.
+function Drive:compact()
+  return self.cfg.profile == M.PROFILE_SINGLE_ASSET and self.cfg.slot_size == 32
+end
+
+-- decode_account reads nonce and balance out of a live account slot. The
+-- balance always comes back as 32 bytes big-endian, zero-extended from the
+-- compact record's uint64.
+local function decode_account(d, slot)
+  if d:compact() then
+    -- addr 1..20, nonce uint32 LE 21..24, balance uint64 BE 25..32.
+    return string.unpack("<I4", slot, 21), ("\0"):rep(24) .. slot:sub(25, 32)
+  end
+  return string.unpack("<i8", slot, 25), slot:sub(33, 64)
+end
+
+-- encode_account builds a record from a 32-byte-normalized balance. In the
+-- compact record a nonce past uint32 or a balance past uint64 is "overflow"
+-- — the input must be rejected (spec §7). Returns record or nil, kind.
+local function encode_account(d, addr, nonce, bal)
+  if d:compact() then
+    -- nonce is a signed Lua integer; a value >= 2^63 appears negative and
+    -- its unsigned interpretation exceeds uint32 too, so nonce < 0 is the
+    -- unsigned comparison's high half.
+    if nonce < 0 or nonce > 0xffffffff then return nil, "overflow" end
+    if bal:sub(1, 24):find("[^\0]") then return nil, "overflow" end
+    return addr .. string.pack("<I4", nonce) .. bal:sub(25, 32)
+  end
+  return addr .. "\0\0\0\0" .. string.pack("<i8", nonce) .. bal
+end
+
 -- get_account(addr) returns { address, nonce, balance } when the address has
 -- a record, nil when it has none (absence is a result, not an error — the
 -- second value is nil), or nil, kind on error. balance is 32 bytes
--- big-endian; nonce is a Lua integer (see the signedness note up top).
+-- big-endian; nonce is a Lua integer (see the signedness note up top; in the
+-- compact record it is a uint32 and always non-negative).
 function Drive:get_account(addr)
   if not check_addr(addr) then return nil, "zeroAddress" end
   local t = accounts_table(self)
   local i, slot = lookup(self, t, addr)
   if not i then return nil end
-  return {
-    address = addr,
-    nonce = string.unpack("<i8", slot, 25),
-    balance = slot:sub(33, 64),
-  }
+  local nonce, balance = decode_account(self, slot)
+  return { address = addr, nonce = nonce, balance = balance }
 end
 
 -- set_account(addr, nonce, balance) writes an account's nonce and balance,
--- inserting the record if the address has none. "tableFull" means the input
--- carrying this change must be rejected (spec §6.3). Returns true or
--- nil, kind.
+-- inserting the record if the address has none. "tableFull" — and, in the
+-- compact record, "overflow" — means the input carrying this change must be
+-- rejected (spec §6.3, §7). Returns true or nil, kind.
 function Drive:set_account(addr, nonce, balance)
   if not check_addr(addr) then return nil, "zeroAddress" end
   local bal = to32(balance)
   if not bal then return nil, "overflow" end
-  local rec = addr .. "\0\0\0\0" .. string.pack("<i8", nonce or 0) .. bal
+  local rec, e = encode_account(self, addr, nonce or 0, bal)
+  if not rec then return nil, e end
   local t = accounts_table(self)
   local i, slot = lookup(self, t, addr)
   if i then
-    -- Update in place, touching only the 64-byte record: in the wide
+    -- Update in place, touching only the record bytes: in the wide
     -- profile the rest of the slot is token columns.
-    write_slot(self, t, i, rec .. slot:sub(65))
+    write_slot(self, t, i, rec .. slot:sub(#rec + 1))
     return true
   end
   if self:_counter(t.count_off) >= t.limit then return nil, "tableFull" end
-  insert(self, t, rec .. ("\0"):rep(t.slot_size - 64))
+  insert(self, t, rec .. ("\0"):rep(t.slot_size - #rec))
   return true
 end
 
@@ -797,7 +835,8 @@ function Drive:delete_account(addr, force)
   local t = accounts_table(self)
   local i, slot = lookup(self, t, addr)
   if not i then return false end
-  if not force and slot:sub(25, 32):find("[^\0]") then
+  local nonce = decode_account(self, slot)
+  if not force and nonce ~= 0 then
     return nil, "nonceProtected"
   end
   remove(self, t, i)

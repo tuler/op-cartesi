@@ -270,6 +270,48 @@ local function test_account_record_encoding()
   print("ok  account record encoding")
 end
 
+local function test_compact_record_encoding()
+  -- The 32-byte profile-0 record (spec §7, Appendix B): encoding, the uint32
+  -- nonce and uint64 balance bounds, and the registry width rule.
+  local s = ad.mem_store(1 << 16)
+  local d = assert(ad.format(s, {
+    drive_length = 1 << 16, capacity = 8, slot_size = 32,
+    registry_offset = 0x100, registry_capacity = 2,
+  }))
+  assert(d:set_account(rep_addr(0xbb), 7, "\x05"))
+  -- home(bb..) mod 8 = 1
+  local got = s:read_at(4096 + 32 * 1, 32)
+  local want = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb070000000000000000000005"
+  check(bin2hex(got) == want, "compact record encoding:\n got %s\nwant %s",
+    bin2hex(got), want)
+  local a = assert(d:get_account(rep_addr(0xbb)))
+  check(a.nonce == 7 and bin2hex(a.balance) ==
+    "0000000000000000000000000000000000000000000000000000000000000005",
+    "compact record decode mismatch")
+  -- nonce past uint32 (2^32) must overflow
+  local _, e = d:set_account(rep_addr(0xbb), 1 << 32, "\x05")
+  check(e == "overflow", "compact nonce past uint32 kind %s", tostring(e))
+  -- balance past uint64 (2^64: a nonzero byte above the low 8) must overflow
+  _, e = d:set_account(rep_addr(0xbb), 7, "\x01" .. ("\0"):rep(8))
+  check(e == "overflow", "compact balance past uint64 kind %s", tostring(e))
+  -- the registry, if declared, only takes width 8 (checked last, spec §7)
+  _, e = d:register_token(rep_addr(1), 32)
+  check(e == "badWidth", "compact registry width kind %s", tostring(e))
+  check(d:register_token(("\0"):rep(20), 8) == 0, "compact width-8 registration")
+  -- nonce protection reads the uint32
+  _, e = d:delete_account(rep_addr(0xbb), false)
+  check(e == "nonceProtected", "compact delete kind %s", tostring(e))
+  -- 32-byte account slots outside profile 0 must not format
+  local d2 = ad.format(ad.mem_store(1 << 16), {
+    drive_length = 1 << 16, capacity = 8, slot_size = 32,
+    profile = ad.PROFILE_SPARSE,
+    registry_offset = 0x100, registry_capacity = 2,
+    sparse_offset = 8192, sparse_capacity = 8,
+  })
+  check(d2 == nil, "32-byte account slots outside profile 0 must not format")
+  print("ok  compact record encoding")
+end
+
 local function test_sparse32_record_encoding()
   local s = ad.mem_store(1 << 16)
   local d = assert(ad.format(s, {
@@ -494,6 +536,7 @@ end
 test_keccak_vectors()
 test_home_slots()
 test_account_record_encoding()
+test_compact_record_encoding()
 test_sparse32_record_encoding()
 test_error_kinds()
 test_file_store()
