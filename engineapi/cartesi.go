@@ -148,6 +148,162 @@ func (a *CartesiAPI) Inspect(ctx context.Context, query hexutil.Bytes, id *rpc.B
 	return out, nil
 }
 
+// AccountProofResult is cartesi_getAccountProof's answer: the account record
+// (or its provable absence) plus machine Merkle proofs against the block's
+// stateRoot. It is this chain's eth_getProof analogue — there is no MPT and
+// never will be (docs/ACCOUNTS.md §6.2) — and it hands an external verifier
+// everything spec §12 of docs/ACCOUNTS-DRIVE-SPEC.md asks for:
+//
+//   - step 1's header constants: the geometry object (echoed from the drive
+//     header — seed, capacities, offsets, slot sizes, profile) plus the
+//     proven header page itself, so nothing is taken on this node's word;
+//   - step 2's byte ranges with proofs: headerPage and walkPages, each one
+//     4 KiB page (log2Size 12) carried both drive-relative (driveOffset) and
+//     as an absolute machine address, with its raw bytes and its proof of
+//     64 − 12 = 52 siblings against stateRoot;
+//   - step 3's walk: homeSlot and walkLength say which slots the probe
+//     examined; re-running the §6.2 lookup inside the proven pages must
+//     terminate there with this result — found holding the returned record,
+//     or absent (walk ends at an empty slot or an early termination, both
+//     inside the proven range).
+//
+// All integers are hex-quantity encoded; byte fields are hex data.
+type AccountProofResult struct {
+	Address     common.Address `json:"address"`
+	BlockHash   common.Hash    `json:"blockHash"`
+	BlockNumber hexutil.Uint64 `json:"blockNumber"`
+	// StateRoot is the block's stateRoot — the machine root hash every
+	// proof below folds up to.
+	StateRoot common.Hash `json:"stateRoot"`
+
+	// DriveBase is the drive's start address in the machine's address space;
+	// driveOffset + driveBase = address for every page below.
+	DriveBase hexutil.Uint64 `json:"driveBase"`
+	// Geometry echoes the drive header's deployment constants (spec §5).
+	Geometry AccountProofGeometry `json:"geometry"`
+
+	// Found reports whether the address has a record. When false, nonce and
+	// balance are zero — and the walk pages prove the absence.
+	Found   bool           `json:"found"`
+	Nonce   hexutil.Uint64 `json:"nonce"`
+	Balance *hexutil.Big   `json:"balance"`
+	// Record is the raw slot bytes (spec §7 layout), present when found.
+	Record hexutil.Bytes `json:"record,omitempty"`
+	// SlotIndex is the record's slot in the accounts table, when found.
+	SlotIndex *hexutil.Uint64 `json:"slotIndex,omitempty"`
+
+	// HomeSlot and WalkLength describe the probe walk: slots
+	// homeSlot … homeSlot+walkLength−1 (cyclic) were examined.
+	HomeSlot   hexutil.Uint64 `json:"homeSlot"`
+	WalkLength hexutil.Uint64 `json:"walkLength"`
+
+	HeaderPage AccountProofPage `json:"headerPage"`
+	// WalkPages cover every examined slot, ascending by driveOffset; a walk
+	// wrapping the table end contributes pages from both ends.
+	WalkPages []AccountProofPage `json:"walkPages"`
+}
+
+// AccountProofGeometry is the drive header's deployment constants, the
+// spec §12 step-1 inputs a verifier replays the walk with.
+type AccountProofGeometry struct {
+	Capacity    hexutil.Uint64 `json:"capacity"`
+	TableOffset hexutil.Uint64 `json:"tableOffset"`
+	SlotSize    hexutil.Uint64 `json:"slotSize"`
+	LoadLimit   hexutil.Uint64 `json:"loadLimit"`
+	Seed        hexutil.Bytes  `json:"seed"`
+	Profile     hexutil.Uint64 `json:"profile"`
+}
+
+// AccountProofPage is one proven 4 KiB drive page.
+type AccountProofPage struct {
+	DriveOffset hexutil.Uint64 `json:"driveOffset"`
+	Address     hexutil.Uint64 `json:"address"`
+	Log2Size    hexutil.Uint64 `json:"log2Size"`
+	Data        hexutil.Bytes  `json:"data"`
+	Proof       MachineProof   `json:"proof"`
+}
+
+// MachineProof is a machine.get_proof result, hex-encoded: TargetHash folded
+// with the SiblingHashes (in the emulator's order) reproduces RootHash.
+type MachineProof struct {
+	TargetAddress  hexutil.Uint64 `json:"targetAddress"`
+	Log2TargetSize hexutil.Uint64 `json:"log2TargetSize"`
+	TargetHash     common.Hash    `json:"targetHash"`
+	Log2RootSize   hexutil.Uint64 `json:"log2RootSize"`
+	RootHash       common.Hash    `json:"rootHash"`
+	SiblingHashes  []common.Hash  `json:"siblingHashes"`
+}
+
+// GetAccountProof serves the account record for addr with machine Merkle
+// proofs against the block's stateRoot (see AccountProofResult for the
+// shape and the verification recipe). The block tag defaults to the head.
+// It requires a machine that can prove — a real emulator; against the mock
+// this errors rather than serving proofless "proofs".
+func (a *CartesiAPI) GetAccountProof(ctx context.Context, addr common.Address, id *rpc.BlockNumberOrHash) (*AccountProofResult, error) {
+	b, err := blockFromChainOptional(a.chain, id)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, fmt.Errorf("unknown block")
+	}
+	proof, err := a.chain.AccountProofAt(ctx, b.Hash(), addr, true)
+	if err != nil {
+		return nil, err
+	}
+	out := &AccountProofResult{
+		Address:     addr,
+		BlockHash:   b.Hash(),
+		BlockNumber: hexutil.Uint64(b.NumberU64()),
+		StateRoot:   b.Header.Root,
+		DriveBase:   hexutil.Uint64(proof.DriveBase),
+		Geometry: AccountProofGeometry{
+			Capacity:    hexutil.Uint64(proof.Config.Capacity),
+			TableOffset: hexutil.Uint64(proof.Config.TableOffset),
+			SlotSize:    hexutil.Uint64(proof.Config.SlotSize),
+			LoadLimit:   hexutil.Uint64(proof.Config.LoadLimit),
+			Seed:        proof.Config.Seed[:],
+			Profile:     hexutil.Uint64(proof.Config.Profile),
+		},
+		Found:      proof.Found,
+		Nonce:      hexutil.Uint64(proof.Nonce),
+		Balance:    (*hexutil.Big)(proof.Balance),
+		HomeSlot:   hexutil.Uint64(proof.HomeSlot),
+		WalkLength: hexutil.Uint64(proof.WalkLength),
+		HeaderPage: marshalProvenPage(proof.HeaderPage),
+		WalkPages:  make([]AccountProofPage, 0, len(proof.WalkPages)),
+	}
+	if proof.Found {
+		out.Record = proof.Record
+		slot := hexutil.Uint64(proof.SlotIndex)
+		out.SlotIndex = &slot
+	}
+	for _, p := range proof.WalkPages {
+		out.WalkPages = append(out.WalkPages, marshalProvenPage(p))
+	}
+	return out, nil
+}
+
+func marshalProvenPage(p chain.ProvenPage) AccountProofPage {
+	out := AccountProofPage{
+		DriveOffset: hexutil.Uint64(p.DriveOffset),
+		Address:     hexutil.Uint64(p.Address),
+		Log2Size:    12,
+		Data:        p.Data,
+	}
+	if p.Proof != nil {
+		out.Proof = MachineProof{
+			TargetAddress:  hexutil.Uint64(p.Proof.TargetAddress),
+			Log2TargetSize: hexutil.Uint64(p.Proof.Log2TargetSize),
+			TargetHash:     p.Proof.TargetHash,
+			Log2RootSize:   hexutil.Uint64(p.Proof.Log2RootSize),
+			RootHash:       p.Proof.RootHash,
+			SiblingHashes:  p.Proof.SiblingHashes,
+		}
+	}
+	return out
+}
+
 // OutputProof is what Cartesi's Application.executeOutput needs, plus enough
 // context to find the output again.
 type OutputProof struct {

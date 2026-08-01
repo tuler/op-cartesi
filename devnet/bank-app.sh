@@ -14,6 +14,15 @@
 # machine memory (eth_getBalance, eth_getTransactionCount) with one
 # machine.read_memory each — no inspect fork. See docs/ACCOUNTS.md §10, v0.
 #
+# Since roadmap v1 the drive's nonces are also *enforced* here: an ordinary L2
+# transaction (anything that is not an OP deposit) must be a signed legacy
+# Ethereum transaction whose recovered sender's account nonce matches, or the
+# input is rejected. Acceptance bumps the nonce — this guest is the only
+# writer of nonces — and debits a flat per-transaction fee (owner-settable,
+# zero at genesis; see the fee section below and ACCOUNTS.md §5.7). Deposits
+# are exempt: they are authenticated by their L1 origin, not a signature, and
+# keep the paths described next.
+#
 # Three ways in, and the difference between them is who holds the asset on L1:
 #
 #   OptimismPortal.depositTransaction with a value   ether, held by OP's lockbox
@@ -40,6 +49,380 @@
 #
 # Written in Lua because the guest-tools rootfs ships lua5.4, and RLP wants
 # real arithmetic rather than shell.
+
+# Sender recovery is its own module, written next to the app the same way
+# the accounts-drive library is: as guest bytes in the snapshot, pinned by
+# the genesis state root. A separate file (rather than inlining it into
+# bank.lua) lets devnet/test-guest.lua load and pin the ecrecover in
+# isolation, against vectors generated with go-ethereum.
+cat > /var/lib/secp256k1.lua <<'SECPEOF'
+-- secp256k1.lua — ECDSA public-key recovery (ecrecover) in pure Lua 5.4.
+--
+-- The one consumer is the guest's transaction-sender recovery (bank.lua):
+-- given a message hash and an Ethereum-style signature (r, s, recovery id),
+-- return the signer's 20-byte address. Standard recovery: lift R from r
+-- using the recovery id's parity, then Q = r⁻¹(sR − zG), and the address is
+-- the low 20 bytes of keccak256 of Q's uncompressed coordinates.
+--
+-- Written against Lua 5.4's native 64-bit integers, standard library only —
+-- the same deployment story as accounts_drive.lua, and it borrows that
+-- module's keccak256. Field and scalar elements are 256-bit numbers held as
+-- eight 32-bit limbs (tables, least-significant limb first), so every limb
+-- product fits a 64-bit integer with room for a carry: a·b ≤ (2³²−1)² and
+-- adding a limb plus a carry stays below 2⁶⁴. Lua's integers are signed, but
+-- `&`, `|` and the logical `>>` operate on the raw two's-complement bits, so
+-- values past 2⁶³ still shift and mask correctly.
+--
+-- Modular reduction uses the primes' sparseness: for m ∈ {p, n} the constant
+-- k = 2²⁵⁶ − m is small (33 bits for p, 129 for n), so a wide value folds by
+-- value = lo₂₅₆ + hi·k until it fits 256 bits, then subtracts m at most a
+-- few times. Inverses and the square root are Fermat exponentiations (p ≡ 3
+-- mod 4, so √a = a^((p+1)/4)). The group operation runs in Jacobian
+-- coordinates — one inversion at the very end — and u₁G + u₂R is a shared
+-- (Shamir) double-and-add ladder.
+--
+-- PERFORMANCE: this is real arithmetic in an interpreted language — one
+-- recovery costs on the order of 10⁴ modular multiplications (tens of
+-- milliseconds of host CPU; devnet/test-guest.lua measures and prints it).
+-- Inside the machine the guest pays that again through an emulated RISC-V
+-- CPU, so sender recovery dominates an L2 transaction's cycle cost. That is
+-- the honest price of guest-side enforcement (ACCOUNTS.md §6.2) until a
+-- native-code guest takes over; MaxCyclesPerInput bounds it per input.
+--
+-- Correctness is pinned by devnet/test-guest.lua's self-test vectors, which
+-- were generated with go-ethereum and verified against crypto.Ecrecover
+-- before being trusted.
+
+local M = {}
+
+local keccak256 = require("accounts_drive").keccak256
+
+-- ====================================================================
+-- 256-bit arithmetic on 32-bit limbs
+-- ====================================================================
+
+local function fromhex(s) -- 64 hex chars, big-endian → limbs
+  assert(#s == 64, "fromhex wants exactly 64 hex chars")
+  local a = {}
+  for i = 1, 8 do
+    a[i] = tonumber(s:sub(64 - 8 * i + 1, 64 - 8 * i + 8), 16)
+  end
+  return a
+end
+
+local function frombytes(b) -- 32-byte big-endian string → limbs
+  local a = {}
+  for i = 1, 8 do
+    a[i] = string.unpack(">I4", b, 32 - 4 * i + 1)
+  end
+  return a
+end
+
+local function tobytes(a) -- limbs → 32-byte big-endian string
+  local parts = {}
+  for i = 8, 1, -1 do
+    parts[#parts + 1] = string.pack(">I4", a[i])
+  end
+  return table.concat(parts)
+end
+
+local function iszero(a)
+  for i = 1, 8 do
+    if a[i] ~= 0 then return false end
+  end
+  return true
+end
+
+local function cmp(a, b)
+  for i = 8, 1, -1 do
+    if a[i] ~= b[i] then return a[i] < b[i] and -1 or 1 end
+  end
+  return 0
+end
+
+-- usub computes a − b mod 2²⁵⁶ (the wrap is exactly what the callers that
+-- subtract from an implicit 2²⁵⁶ rely on).
+local function usub(a, b)
+  local r, borrow = {}, 0
+  for i = 1, 8 do
+    local d = a[i] - b[i] - borrow
+    if d < 0 then d = d + 0x100000000; borrow = 1 else borrow = 0 end
+    r[i] = d
+  end
+  return r
+end
+
+-- mulvar multiplies two little-endian limb arrays of any length
+-- (schoolbook, carries propagated per product so nothing overflows 64 bits).
+local function mulvar(a, b)
+  local r = {}
+  for i = 1, #a + #b do r[i] = 0 end
+  for i = 1, #a do
+    local ai = a[i]
+    if ai ~= 0 then
+      local carry = 0
+      for j = 1, #b do
+        local t = r[i + j - 1] + ai * b[j] + carry
+        r[i + j - 1] = t & 0xffffffff
+        carry = t >> 32
+      end
+      local k = i + #b
+      while carry ~= 0 do
+        local t = r[k] + carry
+        r[k] = t & 0xffffffff
+        carry = t >> 32
+        k = k + 1
+      end
+    end
+  end
+  return r
+end
+
+-- A modulus context: m = the modulus (8 limbs), k = 2²⁵⁶ mod m, trimmed of
+-- leading zero limbs so the fold multiplies by as little as possible.
+local function context(m)
+  local k = usub({ 0, 0, 0, 0, 0, 0, 0, 0 }, m) -- 2²⁵⁶ − m, via the wrap
+  local n = 8
+  while n > 1 and k[n] == 0 do n = n - 1 end
+  local kt = {}
+  for i = 1, n do kt[i] = k[i] end
+  return { m = m, k = kt }
+end
+
+-- reduce folds a wide little-endian limb array below the modulus:
+-- repeatedly value = lo₂₅⁶ + hi·(2²⁵⁶ mod m), then subtract m while needed.
+local function reduce(t, ctx)
+  while true do
+    local wide = false
+    for i = 9, #t do
+      if t[i] ~= 0 then wide = true; break end
+    end
+    if not wide then break end
+    local hi = {}
+    for i = 9, #t do hi[i - 8] = t[i] end
+    local folded = mulvar(hi, ctx.k)
+    -- add the low 256 bits back in
+    local carry = 0
+    for i = 1, 8 do
+      local s = (folded[i] or 0) + t[i] + carry
+      folded[i] = s & 0xffffffff
+      carry = s >> 32
+    end
+    local k = 9
+    while carry ~= 0 do
+      local s = (folded[k] or 0) + carry
+      folded[k] = s & 0xffffffff
+      carry = s >> 32
+      k = k + 1
+    end
+    t = folded
+  end
+  local r = {}
+  for i = 1, 8 do r[i] = t[i] or 0 end
+  while cmp(r, ctx.m) >= 0 do r = usub(r, ctx.m) end
+  return r
+end
+
+local function mulmod(a, b, ctx)
+  return reduce(mulvar(a, b), ctx)
+end
+
+local function addmod(a, b, ctx)
+  local r, carry = {}, 0
+  for i = 1, 8 do
+    local s = a[i] + b[i] + carry
+    r[i] = s & 0xffffffff
+    carry = s >> 32
+  end
+  if carry ~= 0 or cmp(r, ctx.m) >= 0 then r = usub(r, ctx.m) end
+  return r
+end
+
+local function submod(a, b, ctx)
+  if cmp(a, b) >= 0 then return usub(a, b) end
+  -- a − b + m, computed mod 2²⁵⁶: the two wraps cancel.
+  local t = usub(a, b)
+  local r, carry = {}, 0
+  for i = 1, 8 do
+    local s = t[i] + ctx.m[i] + carry
+    r[i] = s & 0xffffffff
+    carry = s >> 32
+  end
+  return r
+end
+
+-- powmod is square-and-multiply over the exponent's 256 bits, MSB first.
+local function powmod(a, e, ctx)
+  local r, started = nil, false
+  for i = 8, 1, -1 do
+    local w = e[i]
+    for bit = 31, 0, -1 do
+      if started then r = mulmod(r, r, ctx) end
+      if (w >> bit) & 1 == 1 then
+        if started then r = mulmod(r, a, ctx) else r = a; started = true end
+      end
+    end
+  end
+  return r or { 1, 0, 0, 0, 0, 0, 0, 0 } -- a⁰ = 1
+end
+
+-- ====================================================================
+-- The curve: y² = x³ + 7 over F_p, group order n, generator G
+-- ====================================================================
+
+local P = fromhex("fffffffffffffffffffffffffffffffffffffffffffffffffffffffefffffc2f")
+local N = fromhex("fffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141")
+local Pctx = context(P)
+local Nctx = context(N)
+
+local GX = fromhex("79be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798")
+local GY = fromhex("483ada7726a3c4655da4fbfc0e1108a8fd17b448a68554199c47d08ffb10d4b8")
+
+local SEVEN = { 7, 0, 0, 0, 0, 0, 0, 0 }
+local TWO = { 2, 0, 0, 0, 0, 0, 0, 0 }
+local P_MINUS_2 = usub(P, TWO) -- Fermat inverse exponent mod p
+local N_MINUS_2 = usub(N, TWO) -- Fermat inverse exponent mod n
+
+-- (p+1)/4: p ≡ 3 (mod 4), so a^((p+1)/4) is a square root when one exists.
+local SQRT_EXP = (function()
+  local t = { P[1] + 1 } -- p is odd, no carry past the first limb
+  for i = 2, 8 do t[i] = P[i] end
+  local r = {}
+  for i = 1, 8 do
+    r[i] = ((t[i] >> 2) | ((t[i + 1] or 0) << 30)) & 0xffffffff
+  end
+  return r
+end)()
+
+-- Points are Jacobian {x, y, z} (affine x = x/z², y = y/z³); the point at
+-- infinity is nil, which the ladder's accumulator starts as.
+
+-- pdouble: dbl-2009-l, specialized to a = 0.
+local function pdouble(pt)
+  if not pt or iszero(pt.y) then return nil end
+  local A = mulmod(pt.x, pt.x, Pctx)
+  local B = mulmod(pt.y, pt.y, Pctx)
+  local C = mulmod(B, B, Pctx)
+  local t = addmod(pt.x, B, Pctx)
+  t = mulmod(t, t, Pctx)
+  t = submod(submod(t, A, Pctx), C, Pctx)
+  local D = addmod(t, t, Pctx)
+  local E = addmod(addmod(A, A, Pctx), A, Pctx)
+  local F = mulmod(E, E, Pctx)
+  local X3 = submod(F, addmod(D, D, Pctx), Pctx)
+  local C8 = addmod(C, C, Pctx)
+  C8 = addmod(C8, C8, Pctx)
+  C8 = addmod(C8, C8, Pctx)
+  local Y3 = submod(mulmod(E, submod(D, X3, Pctx), Pctx), C8, Pctx)
+  local YZ = mulmod(pt.y, pt.z, Pctx)
+  return { x = X3, y = Y3, z = addmod(YZ, YZ, Pctx) }
+end
+
+-- madd: madd-2007-bl, Jacobian + affine (x2, y2).
+local function madd(pt, x2, y2)
+  if not pt then
+    return { x = x2, y = y2, z = { 1, 0, 0, 0, 0, 0, 0, 0 } }
+  end
+  local Z1Z1 = mulmod(pt.z, pt.z, Pctx)
+  local U2 = mulmod(x2, Z1Z1, Pctx)
+  local S2 = mulmod(y2, mulmod(pt.z, Z1Z1, Pctx), Pctx)
+  local H = submod(U2, pt.x, Pctx)
+  local rr = submod(S2, pt.y, Pctx)
+  if iszero(H) then
+    if iszero(rr) then return pdouble(pt) end
+    return nil -- P + (−P) = ∞
+  end
+  rr = addmod(rr, rr, Pctx)
+  local HH = mulmod(H, H, Pctx)
+  local I = addmod(HH, HH, Pctx)
+  I = addmod(I, I, Pctx)
+  local J = mulmod(H, I, Pctx)
+  local V = mulmod(pt.x, I, Pctx)
+  local X3 = submod(submod(mulmod(rr, rr, Pctx), J, Pctx), addmod(V, V, Pctx), Pctx)
+  local YJ = mulmod(pt.y, J, Pctx)
+  local Y3 = submod(mulmod(rr, submod(V, X3, Pctx), Pctx), addmod(YJ, YJ, Pctx), Pctx)
+  local Z3 = addmod(pt.z, H, Pctx) -- (Z1+H)² − Z1Z1 − HH = 2·Z1·H
+  Z3 = mulmod(Z3, Z3, Pctx)
+  Z3 = submod(submod(Z3, Z1Z1, Pctx), HH, Pctx)
+  return { x = X3, y = Y3, z = Z3 }
+end
+
+-- shamir computes u1·G + u2·R with one shared double-and-add ladder.
+local function shamir(u1, u2, rx, ry)
+  local acc = nil
+  for i = 8, 1, -1 do
+    local w1, w2 = u1[i], u2[i]
+    for bit = 31, 0, -1 do
+      acc = pdouble(acc)
+      if (w1 >> bit) & 1 == 1 then acc = madd(acc, GX, GY) end
+      if (w2 >> bit) & 1 == 1 then acc = madd(acc, rx, ry) end
+    end
+  end
+  return acc
+end
+
+-- ====================================================================
+-- Recovery
+-- ====================================================================
+
+-- recover(hash, recid, r, s) returns the signer's 20-byte address, or nil
+-- when the signature does not recover: r or s outside [1, n−1], a recovery
+-- id other than 0 or 1, an r that is not the x-coordinate of a curve point,
+-- or a recovery that lands on the point at infinity. hash, r and s are
+-- 32-byte big-endian strings. Ethereum's recid is v − 27 for legacy
+-- signatures (the EIP-155 normalization is the caller's, since v encodes
+-- the chain id there); ids 2 and 3 — r taken from an x beyond n — are not
+-- produced by Ethereum tooling and are rejected here.
+--
+-- The low-s rule (EIP-2) is deliberately NOT enforced here: it is Ethereum
+-- transaction policy, not ECDSA, and the caller owns it.
+function M.recover(hash, recid, r, s)
+  if type(hash) ~= "string" or #hash ~= 32
+      or type(r) ~= "string" or #r ~= 32
+      or type(s) ~= "string" or #s ~= 32 then
+    error("recover: hash, r and s must be 32-byte strings", 2)
+  end
+  if recid ~= 0 and recid ~= 1 then return nil end
+  local rn = frombytes(r)
+  local sn = frombytes(s)
+  if iszero(rn) or cmp(rn, N) >= 0 then return nil end
+  if iszero(sn) or cmp(sn, N) >= 0 then return nil end
+
+  -- Lift R = (x, y): x = r (valid since r < n < p), y the root with the
+  -- recovery id's parity.
+  local x = rn
+  local y2 = addmod(mulmod(mulmod(x, x, Pctx), x, Pctx), SEVEN, Pctx)
+  local y = powmod(y2, SQRT_EXP, Pctx)
+  if cmp(mulmod(y, y, Pctx), y2) ~= 0 then
+    return nil -- x³ + 7 is not a square: r is not a curve x-coordinate
+  end
+  if y[1] & 1 ~= recid then
+    if iszero(y) then return nil end -- no root of the requested parity
+    y = usub(P, y)
+  end
+
+  -- z = the hash as an integer mod n (hash < 2²⁵⁶ < 2n, so one subtract).
+  local z = frombytes(hash)
+  if cmp(z, N) >= 0 then z = usub(z, N) end
+
+  -- Q = r⁻¹(sR − zG) = u1·G + u2·R with u1 = −z·r⁻¹, u2 = s·r⁻¹ (mod n).
+  local rinv = powmod(rn, N_MINUS_2, Nctx)
+  local u1 = mulmod(z, rinv, Nctx)
+  if not iszero(u1) then u1 = usub(N, u1) end
+  local u2 = mulmod(sn, rinv, Nctx)
+
+  local q = shamir(u1, u2, x, y)
+  if not q then return nil end
+
+  local zinv = powmod(q.z, P_MINUS_2, Pctx)
+  local zinv2 = mulmod(zinv, zinv, Pctx)
+  local qx = mulmod(q.x, zinv2, Pctx)
+  local qy = mulmod(q.y, mulmod(zinv2, zinv, Pctx), Pctx)
+  return keccak256(tobytes(qx) .. tobytes(qy)):sub(13, 32)
+end
+
+return M
+SECPEOF
 
 cat > /var/lib/bank.lua <<'LUAEOF'
 -- ---------------------------------------------------------------- rollup I/O
@@ -186,6 +569,11 @@ end
 -- build-snapshot.sh writes the library to /var/lib next to this app.
 package.path = "/var/lib/?.lua;" .. package.path
 local ad = require("accounts_drive")
+-- Pure-Lua ECDSA recovery (see the module's header for what it costs): the
+-- guest must recover a transaction's sender itself — trusting anything the
+-- host says about the sender would put the nonce check outside the proven
+-- state transition, which is the whole reason enforcement lives here.
+local secp = require("secp256k1")
 
 local ETHER = string.rep("0", 40)
 
@@ -274,8 +662,9 @@ local function setBalance(addr, token, value, register)
   if token == ETHER then
     local a = hexdecode(addr)
     local acct = drive:get_account(a)
-    -- The nonce rides along unchanged. This guest does not bump nonces yet:
-    -- enforcement (and with it sender recovery) is ACCOUNTS.md roadmap v1.
+    -- The nonce rides along unchanged: balance writes never touch it. The
+    -- one writer of nonces is the enforcement commit in advance(), which
+    -- bumps the sender's nonce exactly when their transaction is accepted.
     return drive:set_account(a, acct and acct.nonce or 0, hexdecode(pad(value)))
   end
   local id = tokenId(token, register)
@@ -364,6 +753,128 @@ local function parsePortalDeposit(data, from)
   return nil
 end
 
+-- --------------------------------------------------------- L2 transactions
+-- An ordinary L2 transaction reaches the guest as the whole signed legacy
+-- transaction,
+--   rlp[nonce, gasPrice, gasLimit, to, value, data, v, r, s]
+-- and since ACCOUNTS.md roadmap v1 the guest takes all of it seriously, not
+-- just the calldata: the sender is recovered from the signature, the nonce
+-- must equal the sender's account record's nonce, and acceptance bumps that
+-- nonce and debits the flat fee below. That check is what closes the README's
+-- replay gap, and it has to live here — the drive is proven state, and a
+-- nonce check outside the state transition would be a courtesy, not a rule
+-- (the shim's mempool gate is exactly that courtesy).
+
+-- parseLegacyTx takes the transaction apart, keeping the values enforcement
+-- needs and the *encoded* bytes of items 1..6 — the sighash reuses them
+-- byte-for-byte, so no re-encoding here can disagree with what was signed.
+-- Anything structurally wrong comes back nil (same doctrine as decode: the
+-- caller decides, and a malformed input must never halt the machine).
+local function parseLegacyTx(raw)
+  local from, last, _, isList = decode(raw, 1)
+  if not from or not isList or last ~= #raw then return nil end
+  local spans, encEnd, i = {}, {}, from
+  for f = 1, 9 do
+    if i > last then return nil end
+    local a, b, nxt, nested = decode(raw, i)
+    if not a or nested then return nil end
+    spans[f] = { a, b }
+    encEnd[f] = nxt - 1
+    i = nxt
+  end
+  if i ~= last + 1 then return nil end
+  local function int(f, maxlen)
+    local a, b = spans[f][1], spans[f][2]
+    if b - a + 1 > maxlen then return nil end
+    local v = 0
+    for k = a, b do v = v * 256 + raw:byte(k) end
+    return v
+  end
+  local function word(f)
+    local a, b = spans[f][1], spans[f][2]
+    if b - a + 1 > 32 then return nil end
+    return ("\0"):rep(32 - (b - a + 1)) .. raw:sub(a, b)
+  end
+  return {
+    nonce = int(1, 8),
+    data = raw:sub(spans[6][1], spans[6][2]),
+    v = int(7, 8),
+    r = word(8),
+    s = word(9),
+    sigItems = raw:sub(from, encEnd[6]),
+  }
+end
+
+-- The two scraps of RLP *encoding* the sighash needs beyond the
+-- transaction's own bytes: a list length prefix and a minimal integer.
+local function rlpLen(n, offset)
+  if n < 56 then return string.char(offset + n) end
+  local bytes = ""
+  while n > 0 do
+    bytes = string.char(n % 256) .. bytes
+    n = n // 256
+  end
+  return string.char(offset + 55 + #bytes) .. bytes
+end
+
+local function rlpInt(n)
+  if n == 0 then return "\x80" end
+  local bytes = ""
+  while n > 0 do
+    bytes = string.char(n % 256) .. bytes
+    n = n // 256
+  end
+  if #bytes == 1 and bytes:byte(1) < 0x80 then return bytes end
+  return string.char(0x80 + #bytes) .. bytes
+end
+
+-- EIP-2's upper bound on s (n ÷ 2): a signature with a higher s has a valid
+-- twin with the same r, and admitting both would give every transaction two
+-- hashes. 32-byte big-endian strings compare correctly as strings.
+local HALF_N = hexdecode("7fffffffffffffffffffffffffffffff5d576e7357a4501ddfe92f46681b20a0")
+
+-- recoverSender returns the 20-byte sender, or nil for anything that does
+-- not verify. Both signature forms are accepted: pre-EIP-155 (v 27/28,
+-- sighash over items 1..6) and EIP-155 (v = chainId·2 + 35 + parity,
+-- sighash over items 1..6 ‖ chainId ‖ 0 ‖ 0). The chain id used is the one
+-- the transaction itself names — recovery is only valid under that id, so a
+-- signature can never be transplanted to another sender; pinning inputs to
+-- *this* chain's id happens at ingress (the mempool's chain-id signer), and
+-- a production guest would take the chain id as a genesis parameter exactly
+-- like OWNER.
+local function recoverSender(tx)
+  if not (tx.nonce and tx.v and tx.r and tx.s) then return nil end
+  if tx.s > HALF_N then return nil end
+  local rid, payload
+  if tx.v == 27 or tx.v == 28 then
+    rid = tx.v - 27
+    payload = tx.sigItems
+  elseif tx.v >= 35 then
+    rid = (tx.v - 35) % 2
+    payload = tx.sigItems .. rlpInt((tx.v - 35) // 2) .. "\x80\x80"
+  else
+    return nil
+  end
+  return secp.recover(ad.keccak256(rlpLen(#payload, 0xc0) .. payload), rid, tx.r, tx.s)
+end
+
+-- ----------------------------------------------------------------- flat fee
+-- The flat per-transaction charge of ACCOUNTS.md §5.7. Nonce records are
+-- permanent — deleting one would re-arm replay of every past transaction —
+-- so the first transaction from a fresh sender mints 64 bytes of drive
+-- forever, and that must not be free. The fee is owner configuration, tag
+-- "f" ‖ uint256 wei, the same trust root as the portal registrations.
+--
+-- THE GENESIS DEFAULT IS ZERO, DELIBERATELY AND LOUDLY (ACCOUNTS.md §5.7):
+-- devnet senders hold no ether until someone deposits, so a nonzero fee at
+-- genesis would reject every first transaction on a fresh devnet and break
+-- every script that sends one. Zero keeps the §5.7 machinery wired but
+-- unpriced — record-minting stays free until the owner sets a real fee,
+-- which a production deployment must do as soon as it cares about table
+-- exhaustion.
+local FEE = ZERO
+local SET_FEE = 0x66 -- "f", followed by fee(32)
+
 -- -------------------------------------------------------------- withdrawals
 -- A withdrawal request is carried in the calldata of an ordinary L2
 -- transaction:
@@ -371,31 +882,15 @@ end
 --   "w" ‖ recipient(20) ‖ amount(32)              ether
 --   "t" ‖ token(20) ‖ recipient(20) ‖ amount(32)  tokens
 --
--- It is not an Ethereum call: this guest has no account model, so there is
--- nothing to authorise against beyond the balance itself, which is enough to
--- exercise the path end to end.
+-- The request still names its payee in the calldata and debits that account,
+-- not the sender's: tying withdrawals to the authenticated sender is app
+-- policy, deliberately unchanged in v1. What v1 adds is that the carrier
+-- transaction must be validly signed, correctly nonced and fee-paid before
+-- any of this runs.
 local WITHDRAW, WITHDRAW_TOKEN = 0x77, 0x74
 
 -- ERC20.transfer(address,uint256).
 local TRANSFER = "a9059cbb"
-
--- callData pulls the data field out of a legacy transaction, which is
---   rlp[nonce, gasPrice, gasLimit, to, value, data, v, r, s]
--- The envelope hands the guest the whole signed transaction, not its calldata:
--- deciding what the bytes mean is the execution layer's job, and here that is
--- the guest.
-local function callData(raw)
-  local from, _, _, isList = decode(raw, 1)
-  if not from or not isList then return nil end
-  local i = from
-  for f = 1, 6 do
-    local a, b, nxt = decode(raw, i)
-    if not a then return nil end
-    if f == 6 then return raw:sub(a, b) end
-    i = nxt
-  end
-  return nil
-end
 
 -- A voucher is one call made from the application contract on L1. Paying ether
 -- is a call to the recipient with a value and no payload; paying a token is a
@@ -419,12 +914,10 @@ local function inspect(raw)
   end
 end
 
--- advance handles one input and returns the status to finish it with.
--- Rejecting rolls the machine back, so a rejected input leaves no balance
--- changed and no output behind.
-local function advance(raw)
-  local deposit = parseDeposit(raw)
-  local data = deposit and deposit.data or callData(raw)
+-- dispatch is the input's application semantics — deposits, withdrawals,
+-- configuration — separated from the transaction-level enforcement that
+-- advance() runs first. It returns the status the input should finish with.
+local function dispatch(raw, deposit, data)
   local tag = data and #data > 0 and data:byte(1) or nil
   local portalDeposit = deposit and data and parsePortalDeposit(data, deposit.from)
 
@@ -437,6 +930,15 @@ local function advance(raw)
     -- be proven rather than in a diagnostic nobody commits to.
     rollup("notice", '{"payload":"0x' .. pad(portal) .. pad(aliased) .. '"}')
     rollup("report", '{"payload":"0x' .. pad(portal) .. pad(aliased) .. '"}')
+
+  elseif deposit and deposit.from == OWNER and tag == SET_FEE and #data == 33 then
+    -- The flat fee (see the fee section above): owner configuration, like
+    -- the portal registrations. The fee is consensus state — every node
+    -- must charge identically — so the change is a notice, provable in the
+    -- outputs tree, not just a diagnostic.
+    FEE = hex(data, 2, 33)
+    rollup("notice", '{"payload":"0x' .. FEE .. '"}')
+    rollup("report", '{"payload":"0x' .. FEE .. '"}')
 
   elseif portalDeposit then
     -- A Cartesi portal deposit. The asset is escrowed in the application
@@ -502,6 +1004,63 @@ local function advance(raw)
     rollup("report", '{"payload":"0x' .. hex(raw, 1, #raw) .. '"}')
   end
   return "accept"
+end
+
+-- advance handles one input and returns the status to finish it with.
+-- Rejecting rolls the machine back, so a rejected input leaves no balance
+-- changed, no nonce bumped and no output behind.
+--
+-- The shape is enforcement around dispatch: for an ordinary L2 transaction
+-- the guest first checks everything it can without writing — signature,
+-- nonce, fee cover — and rejects on any failure; then runs the application
+-- semantics; and only on acceptance commits the account effects (nonce bump
+-- and fee debit). The two commit-time failures (balance dipped below the
+-- fee mid-input, accounts table at its load limit) reject after dispatch
+-- may have written, which is safe exactly because rejection reverts the
+-- whole machine, drive included (spec §10).
+local function advance(raw)
+  local deposit = parseDeposit(raw)
+  local tx, sender, current
+  if not deposit then
+    local first = #raw > 0 and raw:byte(1) or nil
+    if first and first >= 0x01 and first <= 0x04 then
+      -- A typed-transaction envelope (EIP-2718). It carries a nonce this
+      -- guest cannot verify — only the legacy sighash is implemented — and
+      -- recording it unverified would exempt a whole transaction class
+      -- from replay protection. Rejection is the conservative answer.
+      return "reject"
+    end
+    tx = parseLegacyTx(raw)
+    if tx then
+      sender = recoverSender(tx)
+      if not sender then return "reject" end -- signature does not verify
+      local acct = drive:get_account(sender)
+      current = acct and acct.nonce or 0
+      -- Exact match, exactly Ethereum's rule: below is a replay, above is
+      -- a gap nothing here would ever fill.
+      if tx.nonce ~= current then return "reject" end
+      -- The sender must be able to pay for the transaction before it runs.
+      if not sub(balanceOf(hex(sender, 1, 20)), FEE) then return "reject" end
+    end
+    -- Anything else — bytes that do not parse as a transaction at all —
+    -- falls through unenforced to the record-and-accept arm: it carries no
+    -- nonce to check and cannot be meaningfully replayed, and rejecting it
+    -- would roll the machine back over what may be a well-formed message
+    -- for a later version of this app.
+  end
+
+  local status = dispatch(raw, deposit, deposit and deposit.data or (tx and tx.data) or nil)
+
+  if status == "accept" and sender then
+    -- Commit the accepted transaction's account effects. This is the only
+    -- place nonces are ever written. The balance is re-read because
+    -- dispatch may have moved it (a withdrawal naming the sender as payee).
+    local left = sub(balanceOf(hex(sender, 1, 20)), FEE)
+    if not left or not drive:set_account(sender, current + 1, hexdecode(pad(left))) then
+      return "reject" -- fee no longer covered, or table full (spec §6.3)
+    end
+  end
+  return status
 end
 
 -- ---------------------------------------------------------------- main loop

@@ -3,15 +3,20 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 
+	"github.com/ethereum/go-ethereum/common"
+
+	"github.com/tuler/op-cartesi/chain"
 	"github.com/tuler/op-cartesi/engineapi"
 	"github.com/tuler/op-cartesi/mempool"
 )
@@ -45,6 +50,18 @@ func runCommand(args []string) error {
 		return err
 	}
 	defer c.Close(ctx)
+	// Nonce-gate the mempool against the guest's accounts drive at the head
+	// block. This is a courtesy filter at ingress — the guest is the enforcer
+	// (docs/ACCOUNTS.md §6.2) — so a machine without a drive (the mock, or a
+	// pre-drive guest) simply reports nonce 0 and the gate degrades to
+	// duplicate-(sender,nonce) filtering.
+	pool.SetNonceGate(new(big.Int).SetUint64(cf.chainID), func(addr common.Address) (uint64, error) {
+		nonce, _, err := c.AccountAt(ctx, c.HeadBlock().Hash(), addr)
+		if errors.Is(err, chain.ErrNoAccountsDrive) {
+			return 0, nil
+		}
+		return nonce, err
+	})
 	head := c.HeadBlock()
 	slog.Info("chain initialized",
 		"chainId", cf.chainID,
