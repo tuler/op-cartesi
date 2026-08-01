@@ -258,7 +258,7 @@ Record layout:
 | 0 | 20 | account address |
 | 20 | 4 | zero padding |
 | 24 | 8 | nonce, `uint64` little-endian |
-| 32 | 32 | balance in wei, `uint256` **big-endian** |
+| 32 | 32 | balance, `uint256` **big-endian** |
 
 An empty slot is 64 zero bytes; a live record must not have the zero
 address, so the two are unambiguous. The balance is big-endian —
@@ -321,8 +321,22 @@ ships, the same format moves onto it and §5.4 shrinks to one sentence.
 
 ### 5.5 Token balances: a registry, then a density question
 
-The native-only record of §5.3 is the whole story for apps with one
-asset. The moment there are more, the question is where the token
+The record of §5.3 is the whole story for apps with one asset — and
+"one asset" does not mean ether. A chain denominated entirely in a
+single ERC-20 (a USDC app that never touches the native token) uses the
+same record, with the balance field holding that asset; which asset it
+is lives in the app and its exit builder, not in the record. That is
+exactly the ewtools model — the v3 drive record carries no token
+identity at all, and `LibUsdAccount` is a single-implicit-asset profile
+— and it has an OP-side cousin in custom-gas-token chains, where "the"
+balance is simply not ether either. A profile-0 app *should* still
+declare its denomination discoverably: one entry in the registry
+described next, with the zero address standing for ether as it already
+does in the devnet ledger. `eth_getBalance` then serves the drive's balance
+whatever denominates it, which for such a chain is the answer wallets
+mean to ask for. In profiles 1 and 2 the base record's balance column
+is the native asset by convention, and an app without one keeps it
+zero. The moment there are more, the question is where the token
 *identity* lives, and the naive answer — key a second table by
 `token ‖ account` — pays 20 bytes of token address in every record. The
 design decomposes into two decisions, and the first is not a trade-off
@@ -384,8 +398,9 @@ rounding tilts small sets toward wide harder than the formula suggests:
 an app with native plus one ERC-20 needs a 128-byte slot anyway, and the
 *second* token column in that slot is free. So the guidance is: one or
 two dense app tokens → wide; a long or permissionless tail → sparse plus
-registry; and the header declares which, as a **profile**: 0 native-only
-(§5.3 unchanged), 1 wide, 2 sparse. A hybrid — the first k ids inline in
+registry; and the header declares which, as a **profile**: 0
+single-asset (§5.3 unchanged, the asset being whatever the app
+denominates in), 1 wide, 2 sparse. A hybrid — the first k ids inline in
 the record, a spill table beyond — is expressible under the same header
 fields and is deliberately not specified until an app needs it.
 
@@ -393,7 +408,7 @@ Profile fields, at header offset 0x50 (all zero in profile 0):
 
 | Offset | Size | Field |
 |---|---|---|
-| 0x50 | 4 | profile: 0 native-only, 1 wide, 2 sparse |
+| 0x50 | 4 | profile: 0 single-asset, 1 wide, 2 sparse |
 | 0x54 | 4 | account slot size (64 in profiles 0 and 2) |
 | 0x58 | 8 | registry offset |
 | 0x60 | 8 | registry capacity |
