@@ -212,6 +212,15 @@ scattered reads per lookup and an order of magnitude more code.
 
 ## 5. The proposed standard, v1
 
+The format itself lives in
+**[ACCOUNTS-DRIVE-SPEC.md](ACCOUNTS-DRIVE-SPEC.md)** — a standalone,
+normative specification written for implementers on either side of the
+drive and deliberately independent of this chain, so a Cartesi Rollups
+application or an emergency-withdrawal scheme can adopt it without
+inheriting op-cartesi. This section stays at the level of decisions and
+their reasons, plus the choices that are op-cartesi's own; where the
+two documents describe the same detail, the spec is authoritative.
+
 ### 5.1 The drive
 
 - **Label `accounts`**, declared in the machine config with an **explicit
@@ -228,67 +237,43 @@ scattered reads per lookup and an order of magnitude more code.
   Geometry is consensus: it is part of the machine template, so it is
   covered by the genesis state root like every other chain parameter.
 
-### 5.2 The header page
+### 5.2 The header
 
-One 4 KiB page at drive offset 0. All header integers little-endian
-(RISC-V native, matching the ewtools precedent):
-
-| Offset | Size | Field |
-|---|---|---|
-| 0x00 | 8 | magic: ASCII `ctsiacct` |
-| 0x08 | 4 | version, `uint32` = 1 |
-| 0x0c | 4 | flags, `uint32` = 0 |
-| 0x10 | 8 | `capacity` C: slot count of the accounts table |
-| 0x18 | 8 | `tableOffset`: byte offset of slot 0 from drive start (= 4096) |
-| 0x20 | 8 | `loadLimit`: max live records before the table refuses inserts |
-| 0x28 | 8 | `liveCount`: current live records (informational; a host gauge) |
-| 0x30 | 32 | `seed`: hash key, chosen per chain at genesis |
-| 0x50 | — | token profile fields (§5.5); reserved beyond them |
+One 4 KiB page at drive offset 0 declares everything a reader needs: a
+magic and version, the geometry — table offsets, capacities, slot
+sizes, load limits, all deployment constants frozen by the template —
+the hash seed, the profile (§5.5), and the live counters that are the
+one mutable part: kept exact by the guest, and serving the host as the
+fullness gauge §5.3 and §5.7 lean on. Field-by-field layout: spec §5.
+One convention worth its sentence of rationale: header integers are
+little-endian, RISC-V-native, matching the ewtools precedent.
 
 ### 5.3 The accounts table
 
-`capacity` slots of **64 bytes** (two machine tree leaves), at
-`tableOffset`, so slot i sits at `driveStart + tableOffset + 64·i` — every
-slot 64-byte aligned, provable as one `get_proof` at `log2_target_size=6`
-(58 siblings against the machine root).
+A robin-hood hash table of **64-byte records** — two machine tree
+leaves, so one record is one aligned `get_proof` of 58 siblings — each
+holding the account address, a `uint64` nonce, and a `uint256` balance
+(exact layout and algorithms: spec §6–§7). The decisions behind the
+bytes:
 
-Record layout:
-
-| Offset | Size | Field |
-|---|---|---|
-| 0 | 20 | account address |
-| 20 | 4 | zero padding |
-| 24 | 8 | nonce, `uint64` little-endian |
-| 32 | 32 | balance, `uint256` **big-endian** |
-
-An empty slot is 64 zero bytes; a live record must not have the zero
-address, so the two are unambiguous. The balance is big-endian —
-byte-for-byte the EVM ABI word — because the one reader that cannot
-cheaply flip bytes is an L1 contract forwarding it into a transfer; the
-guest is a full CPU and flips for free. The nonce stays guest-native.
-
-Placement and probing:
-
-- Home slot: `home(addr) = LE64(keccak256(seed ‖ addr)[0..8]) mod C`.
-  Keccak because the stack already speaks it everywhere (the machine tree,
-  L1), and a guest enforcing nonces needs keccak anyway for transaction
-  hashing. The seed makes pre-genesis grinding pointless; post-genesis
-  grinding degrades probe length, nothing else.
-- Linear probing with the robin-hood rule: displacement of a record is its
-  distance from home (mod C); on insert, a candidate that has probed
-  further than the resident record swaps with it. Lookup probes from home
-  and stops at a match, an empty slot, or a resident whose displacement is
-  smaller than the probe distance. Deletion — when policy allows it at
-  all, which §5.7 constrains sharply — is backward-shift: each following
-  record is pulled back one slot until one sits at home or a slot is
-  empty. No tombstones, so an empty slot stays all-zero and exclusion
-  proofs stay one contiguous range.
-- **Fullness is consensus.** An insert that would push `liveCount` past
-  `loadLimit` (recommended 7C/8) must deterministically **reject the
-  input**. This has the failure mode DESIGN §7d already names — a portal
-  deposit's L1 escrow happens whether or not the guest credits it — so the
-  answer is capacity planning plus monitoring, not cleverness at the
-  brink: the host watches `liveCount` and alarms long before the cliff.
+- **The balance is big-endian** — byte-for-byte the EVM ABI word —
+  because the one reader that cannot cheaply flip bytes is an L1
+  contract forwarding it into a transfer; the guest is a full CPU and
+  flips for free. The nonce stays guest-native little-endian.
+- **The hash is seeded keccak** — keccak because the stack already
+  speaks it everywhere (the machine tree, L1), and a guest enforcing
+  nonces needs it anyway for transaction hashing. The seed makes
+  pre-genesis grinding pointless; post-genesis grinding degrades probe
+  length, nothing else.
+- **Deletion is backward-shift, no tombstones** — empty slots stay
+  all-zero and exclusion proofs stay one contiguous range. When
+  deletion is allowed at all is policy, and §5.7 constrains it sharply.
+- **Fullness is consensus.** An insert past the load limit (recommended
+  ⅞ of capacity) must deterministically **reject the input**. This has
+  the failure mode DESIGN §7d already names — a portal deposit's L1
+  escrow happens whether or not the guest credits it — so the answer is
+  capacity planning plus monitoring, not cleverness at the brink: the
+  host watches the live counter and alarms long before the cliff.
 
 The host's read path: compute the home slot, `read_memory` the 4 KiB page
 containing it (64 slots — beyond any honest probe chain), walk the probe
@@ -347,13 +332,11 @@ zero. The moment there are more, the question is where the token
 design decomposes into two decisions, and the first is not a trade-off
 at all.
 
-**Always: a token registry.** A region of the drive, declared in the
-header, holding an append-only array of 32-byte entries (token address,
-20 bytes; balance width in bytes, 1 — one of 8, 16 or 32, see below;
-zero padding, 11); a token's **id is its index**, `uint16`, so
-everything else in the drive names tokens in 2 bytes instead of 20. Ids
-are never reused, and registration is deterministic under either policy
-an app might want:
+**Always: a token registry.** An append-only region of the drive whose
+entries carry a token's address and its declared balance width (spec
+§8); a token's **id is its index**, `uint16`, so everything else in the
+drive names tokens in 2 bytes instead of 20. Ids are never reused, and
+registration is deterministic under either policy an app might want:
 
 - **Owner-registered** — the whitelist case, and exactly the pattern the
   devnet guest already uses to learn its portal addresses; or
@@ -385,20 +368,10 @@ registered tokens a typical account actually holds. Two shapes:
   256 bytes rather than 64 — still past honest probe chains at the
   recommended load, but a ground chain costs a second page sooner.)
 - **A sparse table** (one record per nonzero holding). A second table
-  with the same probing and **64-byte slots**:
-
-  | Offset | Size | Field |
-  |---|---|---|
-  | 0 | 2 | token id, `uint16` little-endian |
-  | 2 | 2 | zero padding |
-  | 4 | 20 | account address |
-  | 24 | 8 | zero padding |
-  | 32 | 32 | balance, `uint256` big-endian |
-
-  Home slot `LE64(keccak256(seed ‖ id ‖ address)[0..8]) mod C`; a live
-  record has a nonzero address, so token id 0 stays unambiguous. The
-  native balance stays in the account record — this table is ERC-20s
-  only. Marginal cost: 64 bytes (÷ load factor) per nonzero holding,
+  with the same probing, keyed by token id ‖ address, in **64-byte
+  slots** (spec §9). The native balance stays in the account record —
+  this table is ERC-20s only, and a balance reaching zero deletes its
+  record. Marginal cost: 64 bytes (÷ load factor) per nonzero holding,
   and the token count is unbounded until `uint16` runs out (65,536
   tokens — a 2 MiB registry), which is "arbitrary" for any real app.
 
@@ -417,20 +390,7 @@ denominates in), 1 wide, 2 sparse. A hybrid — the first k ids inline in
 the record, a spill table beyond — is expressible under the same header
 fields and is deliberately not specified until an app needs it.
 
-Profile fields, at header offset 0x50 (all zero in profile 0):
-
-| Offset | Size | Field |
-|---|---|---|
-| 0x50 | 4 | profile: 0 single-asset, 1 wide, 2 sparse |
-| 0x54 | 4 | account slot size (64 in profiles 0 and 2) |
-| 0x58 | 8 | registry offset |
-| 0x60 | 8 | registry capacity |
-| 0x68 | 8 | token count |
-| 0x70 | 8 | sparse table offset (profile 2) |
-| 0x78 | 8 | sparse table capacity |
-| 0x80 | 8 | sparse table load limit |
-| 0x88 | 8 | sparse table live count |
-| 0x90 | 4 | sparse slot size (64, or 32 when every registered width ≤ 8) |
+The header declares the profile and each region's geometry (spec §5).
 
 **Balance widths, and why not RLP.** A `uint256` balance is an EVM
 convention, not a need: USDC's entire supply fits a `uint64` with room
@@ -438,9 +398,8 @@ to spare, and `uint128` covers anything real (2^128 wei is ~3.4×10^20
 ether). ewtools itself carries balances as `uint64`. That is what the
 registry's width field is for: a token registers the width its supply
 justifies, wide records pack to it, and a sparse table whose registered
-tokens all declare width ≤ 8 may use **32-byte slots** — token id
-(`uint16`), 2 bytes padding, address, `uint64` balance big-endian —
-exactly one machine tree leaf. A credit that would overflow a declared
+tokens all declare width 8 may use **32-byte slots** — exactly one
+machine tree leaf per holding (spec §9). A credit that would overflow a declared
 width **deterministically rejects the input**, the same rule as a full
 table; choosing a width no honest supply can overflow is the
 registrar's job, and a mint-happy token gets 32. Two boundaries of this
@@ -685,6 +644,7 @@ as it is for every other Cartesi app.
 
 ## References
 
+- The normative format: [ACCOUNTS-DRIVE-SPEC.md](ACCOUNTS-DRIVE-SPEC.md).
 - Rollups v3 accounts drive: `cartesi/rollups-contracts` branch
   `next/3.0` (`Application.sol`, `WithdrawalConfig.sol`,
   `LibUsdAccount.sol`, `IWithdrawalOutputBuilder.sol`);
