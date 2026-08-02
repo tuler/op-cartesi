@@ -9,7 +9,9 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	"github.com/ethereum/go-ethereum/common/math"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/ethereum/go-ethereum/params"
 	"github.com/ethereum/go-ethereum/rpc"
 
 	"github.com/tuler/op-cartesi/chain"
@@ -86,10 +88,10 @@ func (e *EthAPI) GetBlockReceipts(_ context.Context, id rpc.BlockNumberOrHash) (
 	return out, nil
 }
 
-// CallArgs is the subset of eth_call's argument object this chain can act on.
-// The machine has no notion of caller, value or gas, so only the payload is
-// meaningful; the other fields are accepted and ignored so that standard
-// tooling can call without special-casing.
+// CallArgs is the subset of the eth_call / eth_estimateGas argument object
+// this chain can act on. The machine has no notion of caller, value or gas, so
+// only the payload is meaningful; the other fields are accepted and ignored so
+// that standard tooling can call without special-casing.
 type CallArgs struct {
 	To    *common.Address `json:"to"`
 	Data  *hexutil.Bytes  `json:"data"`
@@ -181,6 +183,165 @@ func (e *EthAPI) accountAt(ctx context.Context, addr common.Address, id *rpc.Blo
 		return 0, nil, err
 	}
 	return nonce, balance, nil
+}
+
+// GasPrice suggests what a transaction should offer per gas: the head block's
+// base fee plus a zero tip. There is no fee market — every header carries the
+// constant base fee chain.Config.BaseFee stamps on it, and nobody is paid a
+// priority fee — so the head's base fee is the honest suggestion, and serving
+// it is what lets `cast send` run without a --gas-price flag. The value is
+// read from the header rather than the config so the answer always matches
+// what the chain actually committed to.
+func (e *EthAPI) GasPrice() *hexutil.Big {
+	return headerBaseFee(e.chain.HeadBlock().Header)
+}
+
+// MaxPriorityFeePerGas suggests a tip of zero, honestly: with no fee market
+// nothing charges or pays priority fees, so any nonzero tip would be burned
+// for no ordering benefit.
+func (e *EthAPI) MaxPriorityFeePerGas() *hexutil.Big {
+	return (*hexutil.Big)(new(big.Int))
+}
+
+// maxFeeHistoryBlocks caps one eth_feeHistory answer, matching geth's default
+// fee-history depth.
+const maxFeeHistoryBlocks = 1024
+
+// feeHistoryResult is go-ethereum's eth_feeHistory wire shape, field for
+// field — cast and wallets parse it strictly. The blob-fee fields geth may
+// append are omitted (they are omitempty there too): this chain accepts no
+// blob transactions, so there is no blob fee to describe.
+type feeHistoryResult struct {
+	OldestBlock  *hexutil.Big     `json:"oldestBlock"`
+	Reward       [][]*hexutil.Big `json:"reward,omitempty"`
+	BaseFee      []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
+	GasUsedRatio []float64        `json:"gasUsedRatio"`
+}
+
+// FeeHistory synthesizes the fee history from headers, which hold everything
+// there is to know here: the base fee is the constant every header carries,
+// gasUsedRatio is the header's metered mcycles over its limit, and priority
+// fees do not exist. Shape and clamping mirror geth's oracle — blockCount
+// entries ending at lastBlock, clamped to the blocks this node still holds;
+// baseFeePerGas carries one extra entry for the block after the window; and
+// reward, present only when percentiles are requested, is a matrix of zeros,
+// which with no fee market is the true tip distribution rather than a stub.
+func (e *EthAPI) FeeHistory(_ context.Context, blockCount math.HexOrDecimal64, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
+	// Zero blocks requested means no retrievable data, answered with an empty
+	// result rather than an error, exactly as geth answers it.
+	if blockCount < 1 {
+		return &feeHistoryResult{OldestBlock: (*hexutil.Big)(new(big.Int))}, nil
+	}
+	for i, p := range rewardPercentiles {
+		if p < 0 || p > 100 {
+			return nil, fmt.Errorf("invalid reward percentile: %f", p)
+		}
+		if i > 0 && p <= rewardPercentiles[i-1] {
+			return nil, fmt.Errorf("invalid reward percentile: #%d:%f >= #%d:%f", i-1, rewardPercentiles[i-1], i, p)
+		}
+	}
+	last, err := e.blockFrom(rpc.BlockNumberOrHashWithNumber(lastBlock))
+	if err != nil {
+		return nil, err
+	}
+	if last == nil {
+		return nil, fmt.Errorf("request beyond head block: requested %d, head %d", lastBlock, e.chain.HeadBlock().NumberU64())
+	}
+	lastNum := last.NumberU64()
+	count := min(uint64(blockCount), maxFeeHistoryBlocks, lastNum+1)
+	oldest := lastNum + 1 - count
+	// Clamp to what this node still holds: after a restart only the blocks
+	// from the newest checkpoint onward are in memory, so a window reaching
+	// below that serves its available suffix, the way geth serves the
+	// retrievable part of a range instead of erroring.
+	for oldest < lastNum && e.chain.BlockByNumber(oldest) == nil {
+		oldest++
+	}
+	count = lastNum + 1 - oldest
+
+	res := &feeHistoryResult{
+		OldestBlock:  (*hexutil.Big)(new(big.Int).SetUint64(oldest)),
+		BaseFee:      make([]*hexutil.Big, 0, count+1),
+		GasUsedRatio: make([]float64, 0, count),
+	}
+	for n := oldest; n <= lastNum; n++ {
+		b := e.chain.BlockByNumber(n)
+		if b == nil {
+			return nil, fmt.Errorf("no canonical block at height %d", n)
+		}
+		res.BaseFee = append(res.BaseFee, headerBaseFee(b.Header))
+		res.GasUsedRatio = append(res.GasUsedRatio, gasUsedRatio(b.Header))
+		if len(rewardPercentiles) > 0 {
+			row := make([]*hexutil.Big, len(rewardPercentiles))
+			for j := range row {
+				row[j] = (*hexutil.Big)(new(big.Int))
+			}
+			res.Reward = append(res.Reward, row)
+		}
+	}
+	// The extra baseFeePerGas entry describes the block after the window.
+	// When that block already exists its header is served; when the window
+	// ends at the head, the next block will be stamped with the configured
+	// constant, so that is the truthful projection.
+	if next := e.chain.BlockByNumber(lastNum + 1); next != nil {
+		res.BaseFee = append(res.BaseFee, headerBaseFee(next.Header))
+	} else {
+		res.BaseFee = append(res.BaseFee, (*hexutil.Big)(new(big.Int).Set(e.chain.Config().BaseFee)))
+	}
+	return res, nil
+}
+
+func headerBaseFee(h *types.Header) *hexutil.Big {
+	if h.BaseFee == nil {
+		return (*hexutil.Big)(new(big.Int))
+	}
+	return (*hexutil.Big)(new(big.Int).Set(h.BaseFee))
+}
+
+func gasUsedRatio(h *types.Header) float64 {
+	if h.GasLimit == 0 {
+		return 0 // avoid NaN, which cannot be JSON-encoded
+	}
+	return float64(h.GasUsed) / float64(h.GasLimit)
+}
+
+// EstimateGas returns the chain's per-input execution budget expressed as
+// gas — an upper bound the chain will accept, which is what a gas limit means
+// here, rather than a measurement of this particular call.
+//
+// A true estimate would run the payload on a discarded fork and report its
+// cycle count, the way Call runs inspect. But an estimate arrives unsigned —
+// CallArgs carry no signature — and since ACCOUNTS.md roadmap v1 the guest
+// recovers the sender and enforces the nonce on every ordinary transaction,
+// so an unsigned replay cannot follow the enforced path: wrapping the args in
+// a synthetic EvmAdvance would be rejected at the signature check and the
+// cycles measured would be the rejection's. Until the guest offers a
+// signature-less simulation entry point (or estimation folds into the inspect
+// protocol), the defensible answer is MaxCyclesPerInput converted at
+// CyclesPerGas — with the defaults, 1,000,000 gas. An input never gets more
+// than that budget, so a wallet sending the bound can never be cut short.
+//
+// The bound is clamped to the block gas limit, which tools refuse to exceed,
+// and floored at the intrinsic-gas minimum (21000), which tools refuse to go
+// below; the chain itself reads neither from the transaction. The args and
+// block tag are accepted for wire compatibility; the block is resolved (so an
+// unknown tag errors like everywhere else) and the args are ignored.
+func (e *EthAPI) EstimateGas(_ context.Context, args CallArgs, id *rpc.BlockNumberOrHash) (hexutil.Uint64, error) {
+	b, err := e.blockFromOptional(id)
+	if err != nil {
+		return 0, err
+	}
+	if b == nil {
+		return 0, fmt.Errorf("unknown block")
+	}
+	bound := e.chain.Config().MaxCyclesPerInput / chain.CyclesPerGas
+	if limit := b.Header.GasLimit; bound > limit {
+		bound = limit
+	}
+	if bound < params.TxGas {
+		bound = params.TxGas
+	}
+	return hexutil.Uint64(bound), nil
 }
 
 // MinerAPI serves the miner namespace op-batcher requires.
