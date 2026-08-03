@@ -7,7 +7,6 @@
 // for its notices).
 
 import {
-    decodeFunctionData,
     encodeAbiParameters,
     encodeFunctionResult,
     keccak256,
@@ -17,6 +16,7 @@ import {
     type Address,
     type Hex,
 } from "viem";
+import { tryDecodeCalldata } from "../abi.ts";
 import { applyL1ToL2Alias, sameAddress } from "../addresses.ts";
 import { errorRevert } from "../evmcall.ts";
 import { AccountsDriveError, type Ledger } from "../ledger.ts";
@@ -50,21 +50,17 @@ export class Config implements Handler {
         if (!sameAddress(ctx.sender, this.owner)) {
             return { kind: "revert", data: errorRevert("not the owner") };
         }
-        let decoded: { functionName: string; args: readonly unknown[] };
-        try {
-            decoded = decodeFunctionData({ abi: configAbi, data: toHex(ctx.data) }) as typeof decoded;
-        } catch {
-            return { kind: "revert", data: errorRevert("unknown function") };
-        }
+        const decoded = tryDecodeCalldata(configAbi, ctx.data);
+        if (!decoded) return { kind: "revert", data: errorRevert("unknown function") };
         switch (decoded.functionName) {
             case "setFee": {
-                const [fee] = decoded.args as readonly [bigint];
+                const [fee] = decoded.args;
                 ledger.setFee(fee);
                 out.log(this.configAddress, [FEE_SET_TOPIC], toHex(fee, { size: 32 }));
                 return { kind: "accept" };
             }
             case "registerPortal": {
-                const [kind, portal] = decoded.args as readonly [number, Address];
+                const [kind, portal] = decoded.args;
                 if (kind !== PORTAL_ETHER && kind !== PORTAL_ERC20) {
                     return { kind: "revert", data: errorRevert("unknown portal kind") };
                 }
@@ -81,13 +77,7 @@ export class Config implements Handler {
                 return { kind: "accept" };
             }
             case "registerToken": {
-                const [l1Token, , name, symbol, decimals] = decoded.args as readonly [
-                    Address,
-                    number,
-                    string,
-                    string,
-                    number,
-                ];
+                const [l1Token, , name, symbol, decimals] = decoded.args;
                 try {
                     const { id, l2Token } = await ledger.registerToken(l1Token, { name, symbol, decimals });
                     out.log(
@@ -104,7 +94,7 @@ export class Config implements Handler {
                 }
             }
             case "setTokenMetadata": {
-                const [l1Token, name, symbol, decimals] = decoded.args as readonly [Address, string, string, number];
+                const [l1Token, name, symbol, decimals] = decoded.args;
                 const token = ledger.tokenByL1Address(l1Token);
                 if (!token) return { kind: "revert", data: errorRevert("unknown token") };
                 ledger.setMetadata(token.id, { name, symbol, decimals });
@@ -116,12 +106,8 @@ export class Config implements Handler {
     }
 
     async view(call: CallContext, ledger: Ledger): Promise<ViewOutcome> {
-        let decoded: { functionName: string };
-        try {
-            decoded = decodeFunctionData({ abi: configAbi, data: toHex(call.data) }) as typeof decoded;
-        } catch {
-            return { kind: "revert", data: errorRevert("unknown function") };
-        }
+        const decoded = tryDecodeCalldata(configAbi, call.data);
+        if (!decoded) return { kind: "revert", data: errorRevert("unknown function") };
         switch (decoded.functionName) {
             case "fee":
                 return {

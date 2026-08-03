@@ -12,7 +12,7 @@
 // reads deposit senders itself).
 
 import { Rollup, type AdvanceRequest } from "@deroll/cmio";
-import { getAddress, numberToHex, type Address } from "viem";
+import { getAddress, numberToHex } from "viem";
 import { Ledger } from "./ledger.ts";
 import { Router } from "./router.ts";
 import type { BlockContext } from "./types.ts";
@@ -28,7 +28,7 @@ const ACCOUNTS_DRIVE = process.env.ACCOUNTS_DRIVE ?? "/dev/pmem1";
 function blockContext(req: AdvanceRequest): BlockContext {
     return {
         chainId: req.chainId,
-        appContract: getAddress(req.appContract) as Address,
+        appContract: getAddress(req.appContract),
         blockNumber: req.blockNumber,
         timestamp: req.blockTimestamp,
         prevRandao: req.prevRandao,

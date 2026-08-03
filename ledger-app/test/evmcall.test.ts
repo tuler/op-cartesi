@@ -8,10 +8,10 @@ import { encodeEvmCall } from "../src/evmcall.ts";
 import { l1BlockAbi } from "../src/handlers/l1block.ts";
 import { block, CHAIN_ID, depositTx, driveBytes, makeRouter, user } from "./helpers.ts";
 
-const EOA = "0x00000000000000000000000000000000000000aa" as const;
+const EOA = "0x00000000000000000000000000000000000000aa";
 
 // op-node's canonical L1-attributes depositor.
-const L1_INFO_DEPOSITOR = "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001" as const;
+const L1_INFO_DEPOSITOR = "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001";
 
 function call(to: `0x${string}`, data: Uint8Array, simulate = false, value = 0n): Uint8Array {
     return toBytes(encodeEvmCall({ chainId: CHAIN_ID, from: user.address, to, value, data, simulate }));

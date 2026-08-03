@@ -159,7 +159,7 @@ export class Ledger {
     private rebuildFacades(): void {
         this.facades.clear();
         this.drive.tokens().forEach((t, id) => {
-            const l1 = getAddress(`0x${Buffer.from(t.address).toString("hex")}`) as Address;
+            const l1 = getAddress(`0x${Buffer.from(t.address).toString("hex")}`);
             this.facades.set(addrKey(l2TokenAddress(l1)), id);
         });
     }

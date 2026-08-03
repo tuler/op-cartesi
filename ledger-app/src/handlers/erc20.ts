@@ -3,7 +3,8 @@
 // sparse table. approve/allowance/transferFrom are deferred — every v1 money
 // path debits msg.sender, which the signature already authorizes.
 
-import { decodeFunctionData, encodeFunctionResult, parseAbi, toHex, type Address } from "viem";
+import { encodeFunctionResult, parseAbi } from "viem";
+import { tryDecodeCalldata } from "../abi.ts";
 import { transferLog } from "../events.ts";
 import { errorRevert } from "../evmcall.ts";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
@@ -18,26 +19,18 @@ export const erc20Abi = parseAbi([
     "function transfer(address to, uint256 value) returns (bool)",
 ]);
 
-function facadeOf(ledger: Ledger, to: Address) {
-    return ledger.tokenByL2Address(to);
-}
-
 export class Erc20Facade implements Handler {
     payable = false;
 
     async advance(ctx: TxContext, out: OutputsSink, ledger: Ledger): Promise<AdvanceOutcome> {
-        const token = facadeOf(ledger, ctx.to);
+        const token = ledger.tokenByL2Address(ctx.to);
         if (!token) return { kind: "revert", data: errorRevert("unknown token") };
-        let decoded: { functionName: string; args: readonly unknown[] };
-        try {
-            decoded = decodeFunctionData({ abi: erc20Abi, data: toHex(ctx.data) }) as typeof decoded;
-        } catch {
-            return { kind: "revert", data: errorRevert("unknown function") };
-        }
+        const decoded = tryDecodeCalldata(erc20Abi, ctx.data);
+        if (!decoded) return { kind: "revert", data: errorRevert("unknown function") };
         if (decoded.functionName !== "transfer") {
             return { kind: "revert", data: errorRevert(`${decoded.functionName} is not a transaction`) };
         }
-        const [to, value] = decoded.args as readonly [Address, bigint];
+        const [to, value] = decoded.args;
         try {
             await ledger.debitToken(ctx.sender, token.id, value);
             await ledger.creditToken(to, token.id, value);
@@ -53,31 +46,58 @@ export class Erc20Facade implements Handler {
     }
 
     async view(call: CallContext, ledger: Ledger): Promise<ViewOutcome> {
-        const token = facadeOf(ledger, call.to);
+        const token = ledger.tokenByL2Address(call.to);
         if (!token) return { kind: "revert", data: errorRevert("unknown token") };
-        let decoded: { functionName: string; args: readonly unknown[] };
-        try {
-            decoded = decodeFunctionData({ abi: erc20Abi, data: toHex(call.data) }) as typeof decoded;
-        } catch {
-            return { kind: "revert", data: errorRevert("unknown function") };
-        }
-        const ret = (name: string, result: unknown): ViewOutcome => ({
-            kind: "return",
-            data: encodeFunctionResult({ abi: erc20Abi, functionName: name as never, result: result as never }),
-        });
+        const decoded = tryDecodeCalldata(erc20Abi, call.data);
+        if (!decoded) return { kind: "revert", data: errorRevert("unknown function") };
         switch (decoded.functionName) {
             case "balanceOf": {
-                const [owner] = decoded.args as readonly [Address];
-                return ret("balanceOf", await ledger.tokenBalance(owner, token.id));
+                const [owner] = decoded.args;
+                return {
+                    kind: "return",
+                    data: encodeFunctionResult({
+                        abi: erc20Abi,
+                        functionName: "balanceOf",
+                        result: await ledger.tokenBalance(owner, token.id),
+                    }),
+                };
             }
             case "totalSupply":
-                return ret("totalSupply", ledger.totalSupply(token.id));
+                return {
+                    kind: "return",
+                    data: encodeFunctionResult({
+                        abi: erc20Abi,
+                        functionName: "totalSupply",
+                        result: ledger.totalSupply(token.id),
+                    }),
+                };
             case "decimals":
-                return ret("decimals", ledger.metadataOf(token.id).decimals);
+                return {
+                    kind: "return",
+                    data: encodeFunctionResult({
+                        abi: erc20Abi,
+                        functionName: "decimals",
+                        result: ledger.metadataOf(token.id).decimals,
+                    }),
+                };
             case "name":
-                return ret("name", ledger.metadataOf(token.id).name);
+                return {
+                    kind: "return",
+                    data: encodeFunctionResult({
+                        abi: erc20Abi,
+                        functionName: "name",
+                        result: ledger.metadataOf(token.id).name,
+                    }),
+                };
             case "symbol":
-                return ret("symbol", ledger.metadataOf(token.id).symbol);
+                return {
+                    kind: "return",
+                    data: encodeFunctionResult({
+                        abi: erc20Abi,
+                        functionName: "symbol",
+                        result: ledger.metadataOf(token.id).symbol,
+                    }),
+                };
             default:
                 return { kind: "revert", data: errorRevert(`${decoded.functionName} is not a view`) };
         }

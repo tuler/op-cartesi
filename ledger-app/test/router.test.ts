@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { parseTransaction, serializeTransaction, toBytes, toHex } from "viem";
 import { block, depositTx, makeRouter, signedLegacyTx, signedTx, user, owner } from "./helpers.ts";
 
-const EOA = "0x00000000000000000000000000000000000000aa" as const;
+const EOA = "0x00000000000000000000000000000000000000aa";
 
 describe("deposits", () => {
     it("credits an OP-path ether deposit: mint to from, value to to", async () => {

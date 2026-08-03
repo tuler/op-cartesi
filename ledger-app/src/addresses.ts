@@ -44,9 +44,10 @@ export function sameAddress(a: Address, b: Address): boolean {
     return a.toLowerCase() === b.toLowerCase();
 }
 
-/** Lowercased key form, for Map keys. */
+/** Lowercased key form, for Map keys. The template literal keeps the
+ * `0x`-prefixed type without a cast. */
 export function addrKey(a: Address): Address {
-    return a.toLowerCase() as Address;
+    return `0x${a.slice(2).toLowerCase()}`;
 }
 
 export type { Address, Hex };

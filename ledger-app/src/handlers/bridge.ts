@@ -8,7 +8,8 @@
 // façade address, and the voucher tells the L1 token to move itself from the
 // application contract that has escrowed it since the deposit.
 
-import { decodeFunctionData, encodeFunctionData, parseAbi, toHex, type Address } from "viem";
+import { encodeFunctionData, parseAbi, type Address } from "viem";
+import { tryDecodeCalldata } from "../abi.ts";
 import { transferLog } from "../events.ts";
 import { errorRevert } from "../evmcall.ts";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
@@ -27,15 +28,11 @@ export class Bridge implements Handler {
     payable = true;
 
     async advance(ctx: TxContext, out: OutputsSink, ledger: Ledger): Promise<AdvanceOutcome> {
-        let decoded: { functionName: string; args: readonly unknown[] };
-        try {
-            decoded = decodeFunctionData({ abi: bridgeAbi, data: toHex(ctx.data) }) as typeof decoded;
-        } catch {
-            return { kind: "revert", data: errorRevert("unknown function") };
-        }
+        const decoded = tryDecodeCalldata(bridgeAbi, ctx.data);
+        if (!decoded) return { kind: "revert", data: errorRevert("unknown function") };
         switch (decoded.functionName) {
             case "withdrawEther": {
-                const [to] = decoded.args as readonly [Address];
+                const [to] = decoded.args;
                 if (ctx.value === 0n) {
                     return { kind: "revert", data: errorRevert("withdrawEther: no value") };
                 }
@@ -46,7 +43,7 @@ export class Bridge implements Handler {
                 return { kind: "accept" };
             }
             case "withdrawERC20": {
-                const [l2Token, to, amount] = decoded.args as readonly [Address, Address, bigint];
+                const [l2Token, to, amount] = decoded.args;
                 const token = ledger.tokenByL2Address(l2Token);
                 if (!token) return { kind: "revert", data: errorRevert("unknown token") };
                 try {

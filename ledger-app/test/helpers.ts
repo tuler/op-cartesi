@@ -2,10 +2,11 @@
 // Keys are the anvil dev accounts the devnet already uses (env.sh: the guest
 // owner defaults to anvil #3).
 
-import { keccak256, toBytes, toHex, type Address, type Hex, type TransactionSerializable } from "viem";
-import { privateKeyToAccount } from "viem/accounts";
+import { keccak256, toBytes, toHex, type Address, type Hex, type TransactionSerializableLegacy } from "viem";
+import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { serializeTransaction as serializeOpStack } from "viem/op-stack";
 import { Ledger } from "../src/ledger.ts";
+import { MemStore } from "../src/accounts/index.ts";
 import { Router } from "../src/router.ts";
 import type { BlockContext, Emission } from "../src/types.ts";
 
@@ -40,37 +41,48 @@ export function block(overrides: Partial<BlockContext> = {}): BlockContext {
     };
 }
 
+/** The fields a test names on a transaction; everything else is defaulted. */
+interface TxFields {
+    to: Address;
+    nonce: number;
+    value?: bigint;
+    data?: Hex;
+}
+
 /** A signed transaction as input bytes. Defaults to EIP-1559 — what wallets
  * actually send on a chain whose headers carry a base fee. */
-export async function signedTx(
-    account: ReturnType<typeof privateKeyToAccount>,
-    tx: Partial<TransactionSerializable> & { to: Address; nonce: number },
-): Promise<Uint8Array> {
+export async function signedTx(account: PrivateKeyAccount, tx: TxFields): Promise<Uint8Array> {
     const serialized = await account.signTransaction({
         type: "eip1559",
         chainId: Number(CHAIN_ID),
         gas: 1_000_000n,
         maxFeePerGas: 1n,
         maxPriorityFeePerGas: 0n,
-        value: 0n,
-        ...tx,
-    } as TransactionSerializable);
+        to: tx.to,
+        nonce: tx.nonce,
+        value: tx.value ?? 0n,
+        data: tx.data,
+    });
     return toBytes(serialized);
 }
 
 export async function signedLegacyTx(
-    account: ReturnType<typeof privateKeyToAccount>,
-    tx: Partial<TransactionSerializable> & { to: Address; nonce: number },
+    account: PrivateKeyAccount,
+    tx: TxFields,
     withChainId = true,
 ): Promise<Uint8Array> {
-    const serialized = await account.signTransaction({
+    const legacy: TransactionSerializableLegacy = {
         type: "legacy",
-        ...(withChainId ? { chainId: Number(CHAIN_ID) } : {}),
         gas: 1_000_000n,
         gasPrice: 1n,
-        value: 0n,
-        ...tx,
-    } as TransactionSerializable);
+        to: tx.to,
+        nonce: tx.nonce,
+        value: tx.value ?? 0n,
+        data: tx.data,
+    };
+    const serialized = await account.signTransaction(
+        withChainId ? { ...legacy, chainId: Number(CHAIN_ID) } : legacy,
+    );
     return toBytes(serialized);
 }
 
@@ -114,5 +126,6 @@ export function reports(emissions: Emission[]): Extract<Emission, { kind: "repor
 
 /** The drive image, for byte-identity assertions. */
 export function driveBytes(ledger: Ledger): Uint8Array {
-    return (ledger.backing as { bytes: Uint8Array }).bytes.slice();
+    if (!(ledger.backing instanceof MemStore)) throw new Error("driveBytes wants an in-memory ledger");
+    return ledger.backing.bytes.slice();
 }

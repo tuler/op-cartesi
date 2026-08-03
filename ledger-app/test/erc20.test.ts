@@ -36,7 +36,7 @@ import {
 const L1_TOKEN: Address = "0x59b670e9fa9d0a427751af201d676719a970857b";
 const ERC20_PORTAL: Address = "0x36c02da8a0983159322a80ffe9f24b1acff8b570";
 const RECIPIENT: Address = "0x00000000000000000000000000000000000000bb";
-const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000000" as const;
+const ZERO32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 
 function decodeEvmLog(payload: Hex) {
     expect(payload.slice(0, 10)).toBe(EVM_LOG_SELECTOR);
@@ -111,7 +111,7 @@ describe("the token path", () => {
         expect(bal.accept).toBe(true);
         // Reports carry the one-byte framing tag; 0x01 is return data.
         expect(bal.reports[0]!.slice(0, 4)).toBe("0x01");
-        const returned = `0x${bal.reports[0]!.slice(4)}` as Hex;
+        const returned = `0x${bal.reports[0]!.slice(4)}`;
         expect(decodeFunctionResult({ abi: erc20Abi, functionName: "balanceOf", data: returned })).toBe(1000n);
 
         const derived = await callView(
@@ -122,9 +122,9 @@ describe("the token path", () => {
         const derivedAddr = decodeFunctionResult({
             abi: registryAbi,
             functionName: "l2TokenOf",
-            data: `0x${derived.reports[0]!.slice(4)}` as Hex,
+            data: `0x${derived.reports[0]!.slice(4)}`,
         });
-        expect((derivedAddr as string).toLowerCase()).toBe(facade.toLowerCase());
+        expect(derivedAddr.toLowerCase()).toBe(facade.toLowerCase());
     });
 
     it("transfer() moves balances and emits Transfer", async () => {

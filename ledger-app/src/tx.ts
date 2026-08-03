@@ -6,7 +6,7 @@
 // id pin, the low-s rule, and sender recovery from the signature — never from
 // the envelope's msgSender.
 
-import { recoverTransactionAddress, toHex, type Address, type Hex } from "viem";
+import { recoverTransactionAddress, toHex, type Address, type Hex, type TransactionSerialized } from "viem";
 import { parseTransaction } from "viem/op-stack";
 
 /** EIP-2's upper bound on s (secp256k1 n ÷ 2): the twin signature with the
@@ -30,7 +30,9 @@ export type ParsedInput =
           to: Address | undefined;
           value: bigint;
           data: Uint8Array;
-          raw: Hex;
+          /** The signature's s, kept from parse time for the low-s rule. */
+          s: Hex;
+          raw: TransactionSerialized;
       }
     | {
           /** Not a transaction at all. Record-and-accept: a malformed input
@@ -50,9 +52,20 @@ function dataBytes(data: Hex | undefined): Uint8Array {
     return Buffer.from(data.slice(2), "hex");
 }
 
+/** viem brands its serialized-transaction types, so the brand has to be
+ * earned rather than asserted: this guard performs the structural check the
+ * brand stands for — a legacy transaction is an RLP list (first byte
+ * 0xc0–0xff), a typed one carries its envelope byte. Callers only reach it
+ * for bytes parseTransaction already vouched for. */
+function isSerializedTransaction(value: Hex): value is TransactionSerialized {
+    const first = Number.parseInt(value.slice(2, 4), 16);
+    return Number.isInteger(first) && (first >= 0xc0 || (first >= 0x01 && first <= 0x04));
+}
+
 /** The fields this router reads, across every shape op-stack parseTransaction
- * returns. Typed by hand because the generic's conditional return type
- * collapses on a non-literal Hex and loses the deposit arm. */
+ * returns. An explicit assignment target (checked by the compiler, unlike a
+ * cast) because the generic's conditional return type collapses on a
+ * non-literal Hex and loses the deposit arm. */
 interface AnyParsedTx {
     type?: string;
     from?: Address;
@@ -70,7 +83,7 @@ export function parseInput(raw: Uint8Array): ParsedInput {
     const hex = toHex(raw);
     let tx: AnyParsedTx;
     try {
-        tx = parseTransaction(hex) as AnyParsedTx;
+        tx = parseTransaction(hex);
     } catch {
         return { kind: "opaque" };
     }
@@ -94,6 +107,7 @@ export function parseInput(raw: Uint8Array): ParsedInput {
         // as the Lua guest: opaque bytes record-and-accept.
         return { kind: "opaque" };
     }
+    if (!isSerializedTransaction(hex)) return { kind: "opaque" }; // unreachable: parseTransaction vouched
     return {
         kind: "signed",
         type: tx.type,
@@ -102,6 +116,7 @@ export function parseInput(raw: Uint8Array): ParsedInput {
         to: tx.to ?? undefined,
         value: tx.value ?? 0n,
         data: dataBytes(tx.data),
+        s: tx.s,
         raw: hex,
     };
 }
@@ -109,12 +124,9 @@ export function parseInput(raw: Uint8Array): ParsedInput {
 /** Recovers the signer, enforcing low-s first. Returns null for anything
  * that does not verify. */
 export async function recoverSender(parsed: Extract<ParsedInput, { kind: "signed" }>): Promise<Address | null> {
-    const tx = parseTransaction(parsed.raw);
-    if (tx.s === undefined || BigInt(tx.s) > HALF_N) return null;
+    if (BigInt(parsed.s) > HALF_N) return null;
     try {
-        return await recoverTransactionAddress({
-            serializedTransaction: parsed.raw as never,
-        });
+        return await recoverTransactionAddress({ serializedTransaction: parsed.raw });
     } catch {
         return null;
     }

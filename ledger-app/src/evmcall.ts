@@ -8,6 +8,7 @@ import {
     decodeAbiParameters,
     encodeAbiParameters,
     encodeErrorResult,
+    parseAbiParameters,
     toFunctionSelector,
     type Address,
     type Hex,
@@ -16,13 +17,9 @@ import {
 export const EVM_CALL_SELECTOR: Hex = toFunctionSelector("EvmCall(uint256,address,address,uint256,bytes)");
 export const EVM_SIMULATE_SELECTOR: Hex = toFunctionSelector("EvmSimulate(uint256,address,address,uint256,bytes)");
 
-const PARAMS = [
-    { type: "uint256" }, // chainId
-    { type: "address" }, // from
-    { type: "address" }, // to
-    { type: "uint256" }, // value
-    { type: "bytes" }, // data
-] as const;
+// parseAbiParameters keeps the tuple precisely typed (decode returns
+// [bigint, Address, Address, bigint, Hex]) with no const assertion.
+const PARAMS = parseAbiParameters("uint256 chainId, address from, address to, uint256 value, bytes data");
 
 export interface DecodedCall {
     simulate: boolean;
@@ -35,11 +32,11 @@ export interface DecodedCall {
 
 export function decodeEvmCall(payload: Uint8Array): DecodedCall | null {
     if (payload.length < 4) return null;
-    const selector = `0x${Buffer.from(payload.slice(0, 4)).toString("hex")}` as Hex;
+    const selector = `0x${Buffer.from(payload.slice(0, 4)).toString("hex")}`;
     const simulate = selector === EVM_SIMULATE_SELECTOR;
     if (!simulate && selector !== EVM_CALL_SELECTOR) return null;
     try {
-        const body = `0x${Buffer.from(payload.slice(4)).toString("hex")}` as Hex;
+        const body: Hex = `0x${Buffer.from(payload.slice(4)).toString("hex")}`;
         const [chainId, from, to, value, data] = decodeAbiParameters(PARAMS, body);
         return {
             simulate,
