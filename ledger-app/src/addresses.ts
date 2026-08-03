@@ -2,10 +2,15 @@
 
 import { concat, getAddress, keccak256, stringToBytes, toBytes, type Address, type Hex } from "viem";
 
-/** The system namespace: ASCII "Cartesi" (7 bytes) ‖ 11 zero bytes ‖ index. */
-export const REGISTRY_ADDRESS: Address = "0x4361727465736900000000000000000000000000";
-export const BRIDGE_ADDRESS: Address = "0x4361727465736900000000000000000000000001";
-export const CONFIG_ADDRESS: Address = "0x4361727465736900000000000000000000000002";
+/** The system namespace: 0xC751 (leet CTSI) ‖ 16 zero bytes ‖ uint16 index —
+ * 65,536 slots, mirroring OP's 0x4200…xxxx shape. The reservation is the
+ * FULL pattern: the 16-byte zero run is the forgery barrier (grinding an
+ * address into it is ~2^144), the two brand bytes are legibility only.
+ * Nothing may treat a bare 0xC751 prefix match as authority or as a badge —
+ * authority is exact membership in the manifest. */
+export const REGISTRY_ADDRESS: Address = "0xc751000000000000000000000000000000000000";
+export const BRIDGE_ADDRESS: Address = "0xc751000000000000000000000000000000000001";
+export const CONFIG_ADDRESS: Address = "0xc751000000000000000000000000000000000002";
 
 /** The one adopted OP predeploy: L1Block, which already receives the
  * attributes deposit every block (EVM-COMPAT §6). */
