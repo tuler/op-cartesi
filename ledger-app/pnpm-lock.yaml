@@ -8,12 +8,12 @@ importers:
 
   .:
     dependencies:
-      '@deroll/app':
-        specifier: ^2.0.0-alpha.9
-        version: 2.0.0-alpha.9(typescript@7.0.2)
       '@deroll/cmio':
         specifier: alpha
         version: 0.2.0-alpha.2
+      '@noble/hashes':
+        specifier: ^2.2.0
+        version: 2.2.0
       viem:
         specifier: ^2.55.10
         version: 2.55.10(typescript@7.0.2)
@@ -36,15 +36,9 @@ packages:
   '@adraffy/ens-normalize@1.11.1':
     resolution: {integrity: sha512-nhCBV3quEgesuf7c7KYfperqSS14T8bYuvJ8PcLJp6znkZpFc0AuW4qBtr8eKVyPPe/8RSr7sglCWPU5eaxwKQ==}
 
-  '@deroll/app@2.0.0-alpha.9':
-    resolution: {integrity: sha512-TgEfdT5ggVoVsWrhhjjkcAYgqSbUjEtjeM5+dAxE3VYuleR5eUniPLgFV9FK3Ptbi0vkKyTI/d1V0Rsn8puUoQ==}
-
   '@deroll/cmio@0.2.0-alpha.2':
     resolution: {integrity: sha512-Vi8g9rq63Afp2mYNUJbk/Xai3UvczWH5ut72sDc4GVYLlLsRttTLpE9E8XrKyt+ae7o9e6sGUWWIgV0ZXQN39Q==}
     engines: {node: '>=18'}
-
-  '@deroll/core@2.0.0-alpha.4':
-    resolution: {integrity: sha512-fiRWXqHTgELAsik2A2dDacpQFncJCoMm0S+I2CgaClGof35+GtufZTZNWWG1kcSctyCjFrNb2M3hr+UJS9DJ2Q==}
 
   '@emnapi/core@2.0.0-alpha.3':
     resolution: {integrity: sha512-AZypUeJ/yByuxyS7BlSNRDOMLMlROYtjYdIAuBmJssVz1UJDSeYxLrdizhXCFYhedC5bqd/ASy8EuNXbVVXp9g==}
@@ -232,6 +226,10 @@ packages:
   '@noble/hashes@1.8.0':
     resolution: {integrity: sha512-jCs9ldd7NwzpgXDIf6P3+NrHh9/sD6CQdxHyjQI+h/6rDNo88ypBxxz45UDuZHz9r3tNz7N/VInSVoVdtXEI4A==}
     engines: {node: ^14.21.3 || >=16}
+
+  '@noble/hashes@2.2.0':
+    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+    engines: {node: '>= 20.19.0'}
 
   '@oxc-project/types@0.142.0':
     resolution: {integrity: sha512-7W+2q5AKQVU36fkaryontrHn3YDt1RyUYXatw9i5H8ocYe2sPKSFB6eS8WNPeRKiN1qAWWZUPm7gwFzJGrccqQ==}
@@ -845,30 +843,10 @@ snapshots:
 
   '@adraffy/ens-normalize@1.11.1': {}
 
-  '@deroll/app@2.0.0-alpha.9(typescript@7.0.2)':
-    dependencies:
-      '@deroll/cmio': 0.2.0-alpha.2
-      '@deroll/core': 2.0.0-alpha.4(typescript@7.0.2)
-      viem: 2.55.10(typescript@7.0.2)
-    transitivePeerDependencies:
-      - bufferutil
-      - typescript
-      - utf-8-validate
-      - zod
-
   '@deroll/cmio@0.2.0-alpha.2':
     dependencies:
       node-addon-api: 8.9.1
       node-gyp-build: 4.8.4
-
-  '@deroll/core@2.0.0-alpha.4(typescript@7.0.2)':
-    dependencies:
-      viem: 2.55.10(typescript@7.0.2)
-    transitivePeerDependencies:
-      - bufferutil
-      - typescript
-      - utf-8-validate
-      - zod
 
   '@emnapi/core@2.0.0-alpha.3':
     dependencies:
@@ -980,6 +958,8 @@ snapshots:
       '@noble/hashes': 1.8.0
 
   '@noble/hashes@1.8.0': {}
+
+  '@noble/hashes@2.2.0': {}
 
   '@oxc-project/types@0.142.0': {}
 

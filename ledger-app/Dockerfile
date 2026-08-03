@@ -74,6 +74,16 @@ EOF
 
 ENV PATH="/opt/cartesi/bin:${PATH}"
 
+# Genesis parameters of the routed guest (docs/EVM-COMPAT.md): baked into the
+# image environment, which `cartesi build` passes to the machine
+# (use_docker_env defaults to true), so they are covered by the genesis state
+# root like every other consensus parameter. Defaults match devnet/env.sh.
+ARG CHAIN_ID=901
+ARG OWNER=0x90F79bf6EB2c4f870365E785982E1f101E93b906
+ENV CHAIN_ID=${CHAIN_ID}
+ENV OWNER=${OWNER}
+ENV ACCOUNTS_DRIVE=/dev/pmem1
+
 WORKDIR /opt/cartesi/dapp
 COPY --from=build-stage /opt/cartesi/dapp/rootfs .
 
