@@ -350,7 +350,7 @@ deposit traffic actually matters.
 
 | Address | Contract | Role |
 |---|---|---|
-| `0x4361727465736900…00` | Router registry | `handlerAt(address)`, `handlers()` — discovery, and the source for `eth_getCode` |
+| `0x4361727465736900…00` | Router registry | `handlerAt(address)`, `handlers()`, `l2TokenOf(address)` — discovery, and the source for `eth_getCode` |
 | `0x4361727465736900…01` | Bridge | `withdrawEther(address to)` payable; `withdrawERC20(address token, address to, uint256 amount)` |
 | `0x4361727465736900…02` | Config | owner-gated: `setFee(uint256)`, `registerPortal(uint8,address)`, `registerToken(address,uint8,string,string,uint8)`, `setTokenMetadata(…)` |
 
@@ -360,12 +360,75 @@ prefix is legibility, not security.
 
 **Token façades, at derived addresses.** Each registered token is served
 at `address = last20(keccak256("ctsi.erc20.v1" ‖ l1Token))` —
-deterministic from the L1 token address alone, so a wallet can be
-configured before the first deposit and two chains bridging the same token
-agree on the address. The router keeps the reverse map (derived address →
-registry id) in memory, rebuilt from the registry at boot and extended on
-registration. Calls to the derived address of a token never registered
-find no handler and return empty — the same answer an EOA gives.
+computable from the L1 token address alone, before the first deposit.
+The router keeps the reverse map (derived address → registry id) in
+memory, rebuilt from the registry at boot and extended on registration.
+Calls to the derived address of a token never registered find no handler
+and return empty — the same answer an EOA gives.
+
+The obvious alternative — serve the façade at the *same* address the
+token has on L1 — deserves an honest burial, because it would work
+today: this chain has no deployment mechanism, so no one can claim any
+address; a collision with the manifest is a 2^160 preimage; and the
+router would not even need the reverse map, since the registry already
+keys tokens by their L1 address. The case against it is forward-looking,
+and it carries weight because the façade address is consensus-sticky —
+it is the token's wallet-visible identity, baked into the state
+transition, so changing it later means migrating every holder.
+
+- **The L1 address is the deployer's claim.** On EVM chains a contract
+  address belongs to whoever can replay its deployment — CREATE and
+  CREATE2 make it a cross-chain claim, which is how Permit2, Safe and
+  Multicall3 sit at one address everywhere. The most predictable event
+  in a bridged token's life is the bridged→native migration (every
+  ecosystem's USDC.e story): the issuer eventually arrives wanting to
+  issue natively, at the address their replay rights name. A façade
+  squatting it forecloses the one clean outcome, and relocating a
+  façade breaks every wallet holding it.
+- **This chain's own roadmap revives claimability.** "No deployment" is
+  a v1 statement, not an architectural one: §13 keeps DESIGN §8's
+  Level 1 (code as a transaction) and Level 2 (an EVM interpreter as
+  one handler, owning a sub-space of addresses) open. The moment either
+  lands — CREATE2 replay inside an EVM handler, or manifest-governed
+  native issuance — L1 contract addresses become claimable here, and
+  every same-address façade is a pre-existing squatter whose holders
+  cannot be cheaply moved.
+- **The façade is not that contract.** It serves a subset ABI over the
+  drive (v1 defers even `approve`), and for a fee-on-transfer or
+  rebasing token its semantics diverge outright. A distinct address is
+  the honest signal that this is a bridged representation with the
+  bridge's semantics — the same design language as OP's sender
+  aliasing: the same twenty bytes on two chains are different
+  principals unless a key or a replay right spans both, and the
+  façade's controller is this chain, not the L1 deployer.
+- **An invariant by construction, not by probability.** First-seen
+  registration lets user input mint routes: a deposit makes a new
+  address live in the routing table. Same-address mapping would place
+  those routes at depositor-chosen locations — any L1 address they can
+  deploy a contract to — while derivation confines them to the
+  unforgeable image of a tagged keccak. "A registration can never
+  collide with the manifest, an adopted predeploy, or a future system
+  address" then holds by construction, and reviewers stop re-running
+  the probability argument every time the address map grows.
+- **Precedent.** No major bridge mirrors L1 addresses for its
+  representations — OP's factory tokens, Arbitrum's gateway tokens,
+  Polygon's mappings all mint fresh addresses. The same-address club is
+  issuer-side deterministic deployment: exactly the party not to
+  collide with.
+
+What derivation costs is discovery — a user cannot paste an L1 address
+into a wallet — and the mitigations are cheap enough to be
+requirements: the router registry serves `l2TokenOf(address l1Token)`
+over `eth_call`, the derivation is one keccak any client computes
+offline, and since transfers emit real `Transfer` logs from the façade
+address (§8), log-scanning token detection finds it with nothing pasted
+at all. One refinement, because registration is owner-gated anyway: an
+owner registration MAY name an explicit façade address (an overload of
+`registerToken`), with derivation the default and the only option for
+first-seen registration. That is the operator's escape hatch — for an
+issuer who someday wants a particular address honored — recorded
+on-chain and provable like every other owner configuration, without
+weakening the namespace invariant for permissionless registrations.
 
 **Genesis-parameter addresses.** The Cartesi-portal receiver is registered
 at the application contract address (a config value, like `OWNER`), because
@@ -604,9 +667,11 @@ guest did.
 - **Failed transactions stop being free** (§5): REVERT consumes nonce and
   fee, closing the re-inclusion loop that flat-fee enforcement would
   otherwise leave open.
-- **Address collisions**: derived façade addresses and the system
-  namespace are unreachable by keyed accounts short of a 2^160 preimage;
-  the registry view makes the routed set auditable.
+- **Address collisions**: the system namespace is unreachable by keyed
+  accounts short of a 2^160 preimage, and façade derivation confines
+  registration-minted routes to a namespace that cannot collide with
+  the manifest at all (§6); the registry view makes the routed set
+  auditable.
 - **Handler blast radius**: out-of-process by default; crash → REJECT;
   in-process reserved for the platform's own code and explicit operator
   grants (§10). `MaxCyclesPerInput` bounds every input regardless of what
