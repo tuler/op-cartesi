@@ -1,8 +1,12 @@
 # EVM compatibility at the ABI boundary: contract addresses, routed to native guest code
 
-**Status: proposed design.** This document is the research and the design it
-leads to; a normative companion spec (the routing standard's byte-level
-contract, in the mold of ACCOUNTS-DRIVE-SPEC.md) follows on adoption. It
+**Status: proposed design; guest half prototyped.** This document is the
+research and the design it leads to; a normative companion spec (the routing
+standard's byte-level contract, in the mold of ACCOUNTS-DRIVE-SPEC.md)
+follows on adoption. The router, the journal, and the built-in contract
+family of §5–§10 are implemented and tested in
+[`ledger-app/`](../ledger-app/README.md) — TypeScript on `@deroll/cmio`,
+with viem supplying transaction parsing, recovery and ABI plumbing. It
 addresses the gap between what the chain's transport already is — ordinary
 signed Ethereum transactions, addressed to twenty-byte addresses — and what
 the guest does with it: a private dialect no EVM tool can speak.

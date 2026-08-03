@@ -1,0 +1,20 @@
+# Machine configuration for `cartesi build` (@cartesi/cli 2.0 alpha).
+#
+# The root drive comes from the Dockerfile as usual. The accounts drive
+# (docs/ACCOUNTS-DRIVE-SPEC.md) is a second flash drive: raw, zero-filled,
+# never mounted — the guest formats it at boot, before the first yield, so
+# the header lands inside the stored snapshot and the genesis state root
+# covers it. 1 MiB (2^20): a power of two, so the drive is a single aligned
+# subtree of the machine's hash tree.
+#
+# Note the CLI auto-places drives (no `start:` control), unlike
+# devnet/build-snapshot.sh which pins the spec's recommended 2^55. The shim
+# discovers the drive by its label via the machine config (ACCOUNTS.md §5.1),
+# so auto-placement works; pinning the start in the CLI is a wanted upstream
+# knob.
+
+[drives.accounts]
+builder = "empty"
+format = "raw"
+size = 1048576
+mount = false
