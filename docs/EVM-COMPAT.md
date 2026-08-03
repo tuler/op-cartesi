@@ -349,18 +349,26 @@ deposit halves are implementable, their withdrawal halves are not, and
 DESIGN §7d already chose Cartesi portals. Revisit only if standard-bridge
 deposit traffic actually matters.
 
-**The system namespace.** Reserved prefix `0x43617274657369` (ASCII
-`"Cartesi"`, seven bytes) + eleven zero bytes + index:
+**The system namespace.** `0xC751` (leet CTSI) ‖ 16 zero bytes ‖ `uint16`
+index — 65,536 slots, mirroring OP's `0x4200…xxxx` shape:
 
 | Address | Contract | Role |
 |---|---|---|
-| `0x4361727465736900…00` | Router registry | `handlerAt(address)`, `handlers()`, `l2TokenOf(address)` — discovery, and the source for `eth_getCode` |
-| `0x4361727465736900…01` | Bridge | `withdrawEther(address to)` payable; `withdrawERC20(address token, address to, uint256 amount)` |
-| `0x4361727465736900…02` | Config | owner-gated: `setFee(uint256)`, `registerPortal(uint8,address)`, `registerToken(address,uint8,string,string,uint8)`, `setTokenMetadata(…)` |
+| `0xC75100…0000` | Router registry | `handlerAt(address)`, `handlers()`, `l2TokenOf(address)` — discovery, and the source for `eth_getCode` |
+| `0xC75100…0001` | Bridge | `withdrawEther(address to)` payable; `withdrawERC20(address token, address to, uint256 amount)` |
+| `0xC75100…0002` | Config | owner-gated: `setFee(uint256)`, `registerPortal(uint8,address)`, `registerToken(address,uint8,string,string,uint8)`, `setTokenMetadata(…)` |
 
-No one can sign for these addresses (a private key with a chosen 20-byte
-address is a 2^160 preimage search), so squatting is not a concern; the
-prefix is legibility, not security.
+The namespace rule, stated once and normatively: **the reservation is the
+full pattern, and the zero run is what carries it.** No one can sign for a
+specific system address (a 2^160 preimage), and grinding any address into
+the `prefix ‖ zero-run` shape is ~2^144 — that is the forgery barrier, the
+same way `0x42` plus sixteen zero bytes is OP's. The two brand bytes are
+legibility only: prefix-grinding alone is 2^16, so nothing — no UI badge,
+no spec rule, no router logic — may treat a bare `0xC751` prefix match as
+meaning anything. Authority is exact membership in the manifest. (A short
+brand prefix also pays its way where it is actually seen: wallets truncate
+addresses to roughly `0xC75100…0001`, so the brand survives truncation,
+which the ASCII-`"Cartesi"` alternative did not.)
 
 **Token façades, at derived addresses.** Each registered token is served
 at `address = last20(keccak256("ctsi.erc20.v1" ‖ l1Token))` —
@@ -671,11 +679,13 @@ guest did.
 - **Failed transactions stop being free** (§5): REVERT consumes nonce and
   fee, closing the re-inclusion loop that flat-fee enforcement would
   otherwise leave open.
-- **Address collisions**: the system namespace is unreachable by keyed
-  accounts short of a 2^160 preimage, and façade derivation confines
-  registration-minted routes to a namespace that cannot collide with
-  the manifest at all (§6); the registry view makes the routed set
-  auditable.
+- **Address collisions**: a specific system address is unreachable by
+  keyed accounts short of a 2^160 preimage, the `prefix ‖ zero-run`
+  namespace pattern costs ~2^144 to grind into, and façade derivation
+  confines registration-minted routes to a namespace that cannot collide
+  with the manifest at all (§6). The brand prefix alone is 2^16 and
+  carries no authority — the rule §6 states normatively. The registry
+  view makes the routed set auditable.
 - **Handler blast radius**: out-of-process by default; crash → REJECT;
   in-process reserved for the platform's own code and explicit operator
   grants (§10). `MaxCyclesPerInput` bounds every input regardless of what
