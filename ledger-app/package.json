@@ -1,0 +1,31 @@
+{
+    "name": "ledger-app",
+    "version": "0.0.0",
+    "description": "Deroll application template",
+    "main": "src/index.ts",
+    "dependencies": {
+        "@deroll/app": "^2.0.0-alpha.9",
+        "viem": "^2.55.10",
+        "@deroll/cmio": "alpha"
+    },
+    "devDependencies": {
+        "@types/node": "^26.1.2",
+        "esbuild": "^0.28.1",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    },
+    "scripts": {
+        "build": "node esbuild.mts",
+        "clean": "rm -rf node_modules && rm -rf dist",
+        "test": "vitest"
+    },
+    "keywords": [
+        "cartesi",
+        "deroll"
+    ],
+    "packageManager": "pnpm@11.20.0",
+    "trustedDependencies": [
+        "@deroll/cmio",
+        "esbuild"
+    ]
+}
