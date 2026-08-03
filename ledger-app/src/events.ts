@@ -9,6 +9,7 @@ import {
     encodeAbiParameters,
     keccak256,
     padHex,
+    parseAbiParameters,
     toFunctionSelector,
     toHex,
     type Address,
@@ -18,11 +19,7 @@ import {
 export const EVM_LOG_SIGNATURE = "EvmLog(address,bytes32[],bytes)";
 export const EVM_LOG_SELECTOR: Hex = toFunctionSelector(EVM_LOG_SIGNATURE);
 
-const EVM_LOG_PARAMS = [
-    { type: "address" },
-    { type: "bytes32[]" },
-    { type: "bytes" },
-] as const;
+const EVM_LOG_PARAMS = parseAbiParameters("address emitter, bytes32[] topics, bytes data");
 
 export function encodeEvmLog(emitter: Address, topics: Hex[], data: Hex): Hex {
     return concat([EVM_LOG_SELECTOR, encodeAbiParameters(EVM_LOG_PARAMS, [emitter, topics, data])]);

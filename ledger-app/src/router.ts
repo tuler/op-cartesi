@@ -271,7 +271,10 @@ export class Router {
                 this.ledger.journal.commit();
                 // Outputs are dropped — nothing provable came of this input —
                 // but diagnostic reports survive, plus the revert data.
-                const emissions = [...sink.reportsOnly(), { kind: "report", payload: tagged(TAG_REVERT, outcome.data) } as Emission];
+                const emissions: Emission[] = [
+                    ...sink.reportsOnly(),
+                    { kind: "report", payload: tagged(TAG_REVERT, outcome.data) },
+                ];
                 return { accept: true, outcome: "revert", emissions };
             }
             case "reject": {

@@ -1,7 +1,8 @@
 // The router registry (EVM-COMPAT §6): discovery views over the manifest,
 // and the source the shim reads eth_getCode markers from.
 
-import { decodeFunctionData, encodeFunctionResult, parseAbi, toHex, type Address } from "viem";
+import { encodeFunctionResult, parseAbi, type Address } from "viem";
+import { tryDecodeCalldata } from "../abi.ts";
 import { l2TokenAddress } from "../addresses.ts";
 import { errorRevert } from "../evmcall.ts";
 import type { Ledger } from "../ledger.ts";
@@ -21,15 +22,11 @@ export class Registry implements Handler {
     list: () => Address[] = () => [];
 
     async view(call: CallContext, ledger: Ledger): Promise<ViewOutcome> {
-        let decoded: { functionName: string; args?: readonly unknown[] };
-        try {
-            decoded = decodeFunctionData({ abi: registryAbi, data: toHex(call.data) }) as typeof decoded;
-        } catch {
-            return { kind: "revert", data: errorRevert("unknown function") };
-        }
+        const decoded = tryDecodeCalldata(registryAbi, call.data);
+        if (!decoded) return { kind: "revert", data: errorRevert("unknown function") };
         switch (decoded.functionName) {
             case "handlerAt": {
-                const [target] = decoded.args as readonly [Address];
+                const [target] = decoded.args;
                 const h = this.lookup(target) ?? (ledger.tokenByL2Address(target) ? { payable: false } : undefined);
                 return {
                     kind: "return",
@@ -41,17 +38,17 @@ export class Registry implements Handler {
                 };
             }
             case "handlers": {
-                const all = [...this.list(), ...ledger.drive.tokens().map((t) => {
-                    const l1 = `0x${Buffer.from(t.address).toString("hex")}` as Address;
-                    return l2TokenAddress(l1);
-                })];
+                const all = [
+                    ...this.list(),
+                    ...ledger.drive.tokens().map((t) => l2TokenAddress(`0x${Buffer.from(t.address).toString("hex")}`)),
+                ];
                 return {
                     kind: "return",
                     data: encodeFunctionResult({ abi: registryAbi, functionName: "handlers", result: all }),
                 };
             }
             case "l2TokenOf": {
-                const [l1Token] = decoded.args as readonly [Address];
+                const [l1Token] = decoded.args;
                 return {
                     kind: "return",
                     data: encodeFunctionResult({

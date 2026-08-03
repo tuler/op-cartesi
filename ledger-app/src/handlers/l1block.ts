@@ -14,7 +14,8 @@
 // 128  bytes32 batcherHash
 // Isthmus appends: 160 uint32 operatorFeeScalar, 164 uint64 operatorFeeConstant.
 
-import { decodeFunctionData, encodeFunctionResult, parseAbi, toFunctionSelector, toHex, type Hex } from "viem";
+import { encodeFunctionResult, parseAbi, toFunctionSelector, toHex, type Hex } from "viem";
+import { tryDecodeCalldata } from "../abi.ts";
 import { errorRevert } from "../evmcall.ts";
 import type { Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, CallContext, Handler, OutputsSink, TxContext, ViewOutcome } from "../types.ts";
@@ -80,30 +81,48 @@ export class L1Block implements Handler {
     }
 
     async view(call: CallContext, _ledger: Ledger): Promise<ViewOutcome> {
-        let decoded: { functionName: string };
-        try {
-            decoded = decodeFunctionData({ abi: l1BlockAbi, data: toHex(call.data) }) as typeof decoded;
-        } catch {
-            return { kind: "revert", data: errorRevert("unknown function") };
-        }
+        const decoded = tryDecodeCalldata(l1BlockAbi, call.data);
+        if (!decoded) return { kind: "revert", data: errorRevert("unknown function") };
         const a = this.attributes;
         if (!a) return { kind: "revert", data: errorRevert("no L1 attributes yet") };
-        const values: Record<string, unknown> = {
-            number: a.number,
-            timestamp: a.timestamp,
-            basefee: a.basefee,
-            blobBaseFee: a.blobBaseFee,
-            hash: a.hash,
-            sequenceNumber: a.sequenceNumber,
-            batcherHash: a.batcherHash,
-            baseFeeScalar: a.baseFeeScalar,
-            blobBaseFeeScalar: a.blobBaseFeeScalar,
-        };
-        const fn = decoded.functionName;
-        if (!(fn in values)) return { kind: "revert", data: errorRevert(`${fn} is not served`) };
-        return {
-            kind: "return",
-            data: encodeFunctionResult({ abi: l1BlockAbi, functionName: fn as never, result: values[fn] as never }),
-        };
+        const ok = (data: Hex): ViewOutcome => ({ kind: "return", data });
+        switch (decoded.functionName) {
+            case "number":
+                return ok(encodeFunctionResult({ abi: l1BlockAbi, functionName: "number", result: a.number }));
+            case "timestamp":
+                return ok(encodeFunctionResult({ abi: l1BlockAbi, functionName: "timestamp", result: a.timestamp }));
+            case "basefee":
+                return ok(encodeFunctionResult({ abi: l1BlockAbi, functionName: "basefee", result: a.basefee }));
+            case "blobBaseFee":
+                return ok(
+                    encodeFunctionResult({ abi: l1BlockAbi, functionName: "blobBaseFee", result: a.blobBaseFee }),
+                );
+            case "hash":
+                return ok(encodeFunctionResult({ abi: l1BlockAbi, functionName: "hash", result: a.hash }));
+            case "sequenceNumber":
+                return ok(
+                    encodeFunctionResult({
+                        abi: l1BlockAbi,
+                        functionName: "sequenceNumber",
+                        result: a.sequenceNumber,
+                    }),
+                );
+            case "batcherHash":
+                return ok(
+                    encodeFunctionResult({ abi: l1BlockAbi, functionName: "batcherHash", result: a.batcherHash }),
+                );
+            case "baseFeeScalar":
+                return ok(
+                    encodeFunctionResult({ abi: l1BlockAbi, functionName: "baseFeeScalar", result: a.baseFeeScalar }),
+                );
+            case "blobBaseFeeScalar":
+                return ok(
+                    encodeFunctionResult({
+                        abi: l1BlockAbi,
+                        functionName: "blobBaseFeeScalar",
+                        result: a.blobBaseFeeScalar,
+                    }),
+                );
+        }
     }
 }
