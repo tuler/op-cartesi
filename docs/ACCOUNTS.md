@@ -309,10 +309,12 @@ range (or `fsync` the device fd) **before finishing each input**.
 Emulator 0.21 added the better substrate: **NVRAM ranges**, exposed to the
 guest as UIO devices whose `mmap` maps the physical range directly — no
 page cache, stores land in machine state immediately, no sync step. The
-guest-tools support (`memoryrange`, `readmmap`/`writemmap`) is still on a
-feature branch, which is the only reason this spec targets a flash drive
-first. The byte layout above is substrate-independent; when NVRAM tooling
-ships, the same format moves onto it and §5.4 shrinks to one sentence.
+guest-tools support shipped in **0.18.0** (`memoryrange`, `nvram`,
+`readmmap`/`writemmap`, `flashdrive`), so the tooling gap that made this
+spec target a flash drive first is closed; the flash drive remains v1's
+substrate only because the deployed guests already run on it. The byte
+layout above is substrate-independent: moving the same format onto an
+NVRAM range shrinks §5.4 to one sentence, and is roadmap work (§10).
 
 ### 5.5 Token balances: a registry, then a density question
 
@@ -652,8 +654,8 @@ as it is for every other Cartesi app.
 3. **v2 — the exit.** `OPAccountsDriveValidator` and the output builder,
    ported from the v3 contracts against `DisputeGameFactory` proposals.
 4. **Later.** The token registry and balance profiles of §5.5 in the
-   devnet guest, NVRAM substrate when guest-tools
-   ships it, fee market on top.
+   devnet guest, the NVRAM substrate (tooling shipped in guest-tools
+   0.18.0 — §5.4), fee market on top.
 
 ## References
 
@@ -664,10 +666,10 @@ as it is for every other Cartesi app.
   `cartesi/rollups-node` v2.0.0-alpha.12
   (`cmd/cartesi-rollups-machine-tool/accountdrive/`, whose tests pin the
   ewtools record layout).
-- Emulator mechanics: `cartesi/machine-emulator` v0.21
+- Emulator mechanics: `cartesi/machine-emulator` v0.21.0
   (`machine.read_memory`, `machine.get_proof`, address-range configs and
-  labels, NVRAM/UIO ranges); `cartesi/machine-guest-tools`
-  (`libcmt` outputs-root write; `feature/nvram` branch tooling);
+  labels, NVRAM/UIO ranges); `cartesi/machine-guest-tools` v0.18.0
+  (`libcmt` outputs-root write; NVRAM/UIO tooling);
   `cartesi/image-kernel` + `cartesi/linux` (pmem without DAX).
 - Well-known-address precedent: `cartesi/dave`
   (`DaveConsensus._validateOutputTree` against the CMIO TX buffer).

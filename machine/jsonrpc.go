@@ -15,13 +15,17 @@ import (
 )
 
 // Remote drives a cartesi-jsonrpc-machine server (the emulator's remote
-// machine protocol), pinned to the protocol of machine-emulator 0.21
-// (JSON-RPC "get_version" reports 0.6.x).
+// machine protocol), pinned to the protocol of machine-emulator 0.21.0
+// (JSON-RPC "get_version" reports 0.7.0; the 0.21.0-test prereleases this
+// client was developed against reported 0.6.x, and every method used here is
+// unchanged between them).
 //
 // The wire format was established by probing a running server, not by reading
-// its rpc.discover schema: in 0.21.0-test7 the schema advertises methods the
-// build does not implement (machine.read_register, is_empty), so it cannot be
-// trusted on its own. Byte buffers and hashes are base64, registers are read
+// its rpc.discover schema: in the test prereleases the schema advertised
+// methods the build did not implement (machine.read_register, is_empty). The
+// 0.21.0 release reconciled the two — the schema now says machine.read_reg
+// and machine.is_empty exists — so the probed surface and the published one
+// finally agree. Byte buffers and hashes are base64, registers are read
 // through machine.read_reg, cmio requests are fetched with an explicit length,
 // and responses carry the root hash to revert to on rejection.
 //
@@ -77,10 +81,12 @@ func (r *Remote) Load(ctx context.Context, directory string) error {
 
 // Loaded reports whether the server currently holds a machine.
 //
-// The natural method for this is is_empty, which the server advertises in its
-// rpc.discover schema but does not implement in 0.21.0-test7 (it answers
-// method-not-found). So the check probes with a harmless machine read
-// instead: a server with no machine answers a distinct "no machine" error.
+// The natural method is machine.is_empty, implemented since the 0.21.0
+// release (the test prereleases advertised it but answered method-not-found).
+// The probe below is kept anyway: it works on every 0.21 build, and asking
+// for the root hash verifies the machine actually answers a real read rather
+// than merely existing. A server with no machine answers a distinct
+// "no machine" error.
 func (r *Remote) Loaded(ctx context.Context) (bool, error) {
 	var hash binary
 	err := r.call(ctx, "machine.get_root_hash", nil, &hash)
@@ -186,10 +192,11 @@ func (r *Remote) run(ctx context.Context, mcycleEnd uint64) (breakReason, error)
 
 // readReg reads one machine register.
 //
-// The method is machine.read_reg. The server's rpc.discover schema advertises
-// machine.read_register instead, but 0.21.0-test7 does not implement that name
-// — the schema is ahead of the build in a few places, so every method here was
-// probed against a running server rather than taken from the schema.
+// The method is machine.read_reg — the name the 0.21.0 release both
+// implements and advertises. (The test prereleases' schema said
+// machine.read_register while implementing only this name, which is why
+// every method here was probed against a running server rather than taken
+// from the schema.)
 func (r *Remote) readReg(ctx context.Context, reg string) (uint64, error) {
 	var v uint64
 	err := r.call(ctx, "machine.read_reg", map[string]any{"reg": reg}, &v)

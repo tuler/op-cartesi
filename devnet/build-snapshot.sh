@@ -9,7 +9,8 @@
 #
 # Images are not vendored. Fetch them once with:
 #   curl -L -o "$IMAGES_DIR/linux.bin"   <machine-linux-image release asset>
-#   curl -L -o "$IMAGES_DIR/rootfs.ext2" <machine-guest-tools rootfs-tools.ext2>
+#   curl -L -o "$IMAGES_DIR/rootfs.ext2" \
+#     https://github.com/cartesi/machine-guest-tools/releases/download/v0.18.0/rootfs-tools.ext2
 
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
