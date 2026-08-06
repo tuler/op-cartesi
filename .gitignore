@@ -9,3 +9,4 @@ devnet/deployment/
 devnet/l1-addresses.env
 devnet/outputs-addresses.env
 devnet/token.env
+node_modules/

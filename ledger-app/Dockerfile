@@ -24,27 +24,35 @@ EOF
 ################################################################################
 # build stage: includes resources necessary for installing dependencies
 
-# Here the image's platform does not necessarily have to be riscv64.
-# If any needed dependencies rely on native binaries, you must use
-# a riscv64 image such as cartesi/node:20-jammy for the build stage,
-# to ensure that the appropriate binaries will be generated.
-FROM --platform=$BUILDPLATFORM node:24.17.0-trixie AS build-stage
+# Here the image's platform does not necessarily have to be riscv64: the
+# native addon ships prebuilds and node-gyp-build picks the riscv64 one at
+# runtime. The build context is the REPO ROOT (cartesi.toml sets
+# context = ".."), because the app is a bun workspace member whose
+# @cartesi/accounts dependency lives in accounts-drive/js.
+FROM --platform=$BUILDPLATFORM oven/bun:1.3 AS build-stage
 
-WORKDIR /opt/cartesi/dapp
+WORKDIR /opt/cartesi
 
-RUN corepack enable pnpm
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile
-COPY . .
-RUN pnpm run build
+# Manifests first, for layer caching; bun resolves the whole workspace.
+COPY package.json bun.lock ./
+COPY accounts-drive/js/package.json accounts-drive/js/
+COPY ledger-app/package.json ledger-app/
+COPY devnet/package.json devnet/
+RUN bun install --frozen-lockfile
+
+COPY accounts-drive/ accounts-drive/
+COPY ledger-app/ ledger-app/
+RUN cd ledger-app && bun run build
 
 # Stage the runtime files: the JS bundle plus @deroll/cmio's native addon,
-# which esbuild cannot inline and must be required at runtime. `cp -RL` flattens
-# pnpm's self-contained store dir for the addon into a real node_modules (the
-# addon, its node-gyp-build loader, and node-addon-api).
-RUN mkdir -p rootfs \
- && cp dist/index.js rootfs/index.js \
- && cp -RL node_modules/.pnpm/@deroll+cmio@*/node_modules rootfs/node_modules
+# which esbuild cannot inline and must be required at runtime — the addon,
+# its node-gyp-build loader, and node-addon-api, out of bun's hoisted
+# node_modules.
+RUN mkdir -p rootfs/node_modules/@deroll \
+ && cp ledger-app/dist/index.js rootfs/index.js \
+ && cp -RL node_modules/@deroll/cmio rootfs/node_modules/@deroll/cmio \
+ && cp -RL node_modules/node-gyp-build rootfs/node_modules/node-gyp-build \
+ && cp -RL node_modules/node-addon-api rootfs/node_modules/node-addon-api
 
 
 ################################################################################
@@ -85,7 +93,7 @@ ENV OWNER=${OWNER}
 ENV ACCOUNTS_DRIVE=/dev/pmem1
 
 WORKDIR /opt/cartesi/dapp
-COPY --from=build-stage /opt/cartesi/dapp/rootfs .
+COPY --from=build-stage /opt/cartesi/rootfs .
 
 ENTRYPOINT ["node"]
 CMD ["index.js"]

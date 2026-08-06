@@ -7,7 +7,7 @@ TypeScript: a router that dispatches every transaction and every call on its
 transaction parsing (legacy, EIP-2930, EIP-1559, OP deposits), sender
 recovery, ABI encode/decode.
 
-What works, exercised by the vitest suite (`pnpm test`, host-side, no
+What works, exercised by the vitest suite (`bun run test`, host-side, no
 machine needed):
 
 - **Enforcement in the router**: signature recovery, the EIP-2 low-s rule,
@@ -32,9 +32,10 @@ machine needed):
   ABI words and surface `Error(string)` reverts.
 
 The ledger is the **accounts drive** (docs/ACCOUNTS-DRIVE-SPEC.md), via the
-TypeScript library vendored verbatim from `accounts-drive/js/src` into
-`src/accounts/` — the docker build context ends at this directory and the
-package is unpublished; `test/vendored.test.ts` is the drift guard.
+TypeScript library at `accounts-drive/js` — a bun workspace dependency
+(`@cartesi/accounts`), consumed as source. The snapshot build makes this
+work by using the repo root as its docker context (`cartesi.toml` sets
+`context = ".."`), so the workspace resolves inside the build too.
 
 ## On @deroll/cmio vs @deroll/app
 
@@ -50,10 +51,10 @@ seed of a `@deroll/op` package, if it grows up.
 ## Build and run
 
 ```sh
-pnpm install
-pnpm test          # vitest, host-side, in-memory drive
-pnpm typecheck
-pnpm build         # esbuild bundle (dist/index.js)
+bun install        # once, at the repo root (bun workspace)
+bun run test       # vitest, host-side, in-memory drive
+bun run typecheck
+bun run build      # esbuild bundle (dist/index.js)
 
 cartesi build      # @cartesi/cli 2.0 alpha → snapshot under .cartesi/image
 ```

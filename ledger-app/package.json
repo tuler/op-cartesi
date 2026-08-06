@@ -1,11 +1,22 @@
 {
     "name": "ledger-app",
     "version": "0.0.0",
-    "description": "Deroll application template",
-    "main": "src/index.ts",
+    "description": "The routed guest of docs/EVM-COMPAT.md, on @deroll/cmio",
+    "type": "module",
+    "exports": {
+        "./addresses": "./src/addresses.ts",
+        "./evmcall": "./src/evmcall.ts",
+        "./events": "./src/events.ts",
+        "./types": "./src/types.ts",
+        "./handlers/bridge": "./src/handlers/bridge.ts",
+        "./handlers/config": "./src/handlers/config.ts",
+        "./handlers/erc20": "./src/handlers/erc20.ts",
+        "./handlers/l1block": "./src/handlers/l1block.ts",
+        "./handlers/registry": "./src/handlers/registry.ts"
+    },
     "dependencies": {
+        "@cartesi/accounts": "workspace:*",
         "@deroll/cmio": "alpha",
-        "@noble/hashes": "^2.2.0",
         "viem": "^2.55.10"
     },
     "devDependencies": {
@@ -24,7 +35,6 @@
         "cartesi",
         "deroll"
     ],
-    "packageManager": "pnpm@11.20.0",
     "trustedDependencies": [
         "@deroll/cmio",
         "esbuild"

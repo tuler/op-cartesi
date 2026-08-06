@@ -1,6 +1,0 @@
-allowBuilds:
-  '@deroll/cmio': true
-  esbuild: true
-minimumReleaseAgeExclude:
-  - "@deroll/*"
-  - "@deroll/cmio"

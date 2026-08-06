@@ -118,12 +118,34 @@ L2ToL1MessagePasser account against the L2 state root, and ours is a Cartesi
 hash tree. Withdrawals go through Cartesi vouchers instead — see below and
 [DESIGN.md §4 and §7c](../docs/DESIGN.md).
 
+### Client scripts: TypeScript on bun
+
+The transactional scripts are TypeScript (viem, run with `bun`), part of the
+repo's bun workspace — `bun install` at the repo root once, then invoke them
+directly. The Ethereum plumbing the shell versions did with `cast` and hex
+string surgery (ABI encoding, receipt polling, deposit payload packing) is
+what viem is for. Orchestration — `start-devnet.sh`, `deploy-l1.sh`,
+`deploy-outputs.sh`, `build-snapshot.sh`, `start-shim.sh`,
+`generate-config.sh` — stays shell: it is process supervision around
+external binaries, and it still sources `env.sh`, which `lib/env.ts` mirrors
+variable for variable (same names, same address files, same defaults).
+
+One seam to know about: `withdraw.ts`, `withdraw-erc20.ts` and the token
+path of `balance.ts` speak the **routed guest**
+([ledger-app](../ledger-app/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md))
+— bridge predeploy calls and ERC-20 façades — while `build-snapshot.sh`
+still builds the Lua bank app and its private dialect by default. Deposits,
+`execute-voucher.ts` and the ether path of `balance.ts` work against either
+guest; the Lua dialect can still be driven by hand through `send-l2-tx.ts`
+with a raw payload. Pointing the devnet at the ledger-app snapshot
+(`cartesi build` → `.cartesi/image`) is the step that closes the seam.
+
 ### Deposits
 
-`deposit.sh` sends an L1 deposit and lets op-node derive it into the L2 chain:
+`deposit.ts` sends an L1 deposit and lets op-node derive it into the L2 chain:
 
 ```sh
-./devnet/deposit.sh 0x00000000000000000000000000000000000a11ce 1000000000000000000
+bun devnet/deposit.ts 0x00000000000000000000000000000000000a11ce 1000000000000000000
 
 # a few L2 blocks later, on either node:
 cast rpc eth_call \
@@ -143,7 +165,7 @@ way (the nonce is 0 until the guest starts enforcing nonces).
 
 With the contracts deployed, this calls `OptimismPortal.depositTransaction` —
 the path a real user takes. With `WITH_CONTRACTS=0` there is no portal, so
-`deposit.sh` installs a minimal `TransactionDeposited` emitter at the
+`deposit.ts` installs a minimal `TransactionDeposited` emitter at the
 configured address with `anvil_setCode` instead. Derivation reads the log
 rather than the contract that produced it, so as far as the chain is concerned
 the two are the same, and the guest is credited either way.
@@ -156,13 +178,14 @@ portals. It also funds the executor and registers the portals with the guest.
 
 ```sh
 ./devnet/deploy-outputs.sh
-./devnet/withdraw.sh 0x00000000000000000000000000000000000a11ce 500000000000000000
+bun devnet/withdraw.ts 0x00000000000000000000000000000000000a11ce 500000000000000000
 ```
 
-`withdraw.sh` asks the guest for a withdrawal and `execute-voucher.sh` does the
-rest: wait for a proposal covering the voucher's block, open that proposal's
-root claim on L1, and prove the voucher against the outputs root inside it with
-Cartesi's own libraries. Nothing about op-node, op-batcher or op-proposer is
+`withdraw.ts` asks the guest for a withdrawal — a `withdrawEther` call on the
+routed guest's bridge predeploy, carrying the wei as `msg.value` — and
+`lib/voucher.ts` does the rest: wait for a proposal covering the voucher's
+block, open that proposal's root claim on L1, and prove the voucher against
+the outputs root inside it with Cartesi's own libraries. Nothing about op-node, op-batcher or op-proposer is
 modified or aware of any of this — the root claim they already publish is the
 commitment the proof runs against.
 
@@ -176,9 +199,9 @@ output index and the block to prove it as of.
 ERC-20 goes through a Cartesi-style portal, not `L1StandardBridge`:
 
 ```sh
-./devnet/deposit-erc20.sh 1000000000000000000        # deploys a test token first time
-./devnet/balance.sh 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 $TEST_TOKEN_ADDRESS
-./devnet/withdraw-erc20.sh 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 500000000000000000
+bun devnet/deposit-erc20.ts 1000000000000000000      # deploys a test token first time
+bun devnet/balance.ts 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 $TEST_TOKEN_ADDRESS
+bun devnet/withdraw-erc20.ts 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 500000000000000000
 ```
 
 The portal escrows the tokens in the application contract and hands the guest
