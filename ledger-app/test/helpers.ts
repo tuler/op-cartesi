@@ -5,8 +5,8 @@
 import { keccak256, toBytes, toHex, type Address, type Hex, type TransactionSerializableLegacy } from "viem";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { serializeTransaction as serializeOpStack } from "viem/op-stack";
+import { MemStore } from "@cartesi/accounts";
 import { Ledger } from "../src/ledger.ts";
-import { MemStore } from "../src/accounts/index.ts";
 import { Router } from "../src/router.ts";
 import type { BlockContext, Emission } from "../src/types.ts";
 

@@ -1,0 +1,22 @@
+{
+    "$schema": "https://json.schemastore.org/tsconfig",
+    "compilerOptions": {
+        "allowImportingTsExtensions": true,
+        "esModuleInterop": true,
+        "forceConsistentCasingInFileNames": true,
+        "isolatedModules": true,
+        "module": "nodenext",
+        "moduleResolution": "nodenext",
+        "noEmit": true,
+        "skipLibCheck": true,
+        "strict": true,
+        "target": "ES2022",
+        "types": [
+            "bun"
+        ]
+    },
+    "include": [
+        "*.ts",
+        "lib"
+    ]
+}

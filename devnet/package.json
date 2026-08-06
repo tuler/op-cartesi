@@ -1,0 +1,18 @@
+{
+    "name": "devnet",
+    "version": "0.0.0",
+    "private": true,
+    "description": "Devnet client scripts: viem on bun, replacing the cast/curl shell scripts",
+    "type": "module",
+    "dependencies": {
+        "ledger-app": "workspace:*",
+        "viem": "^2.55.10"
+    },
+    "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^7.0.2"
+    },
+    "scripts": {
+        "typecheck": "tsc --noEmit"
+    }
+}

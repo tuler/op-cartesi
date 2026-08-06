@@ -103,6 +103,13 @@ go build ./...
 go test ./...
 (cd integration && go test ./...)   # op-node compatibility suite
 
+# The TypeScript side is a bun workspace: the accounts-drive library
+# (accounts-drive/js), the routed guest prototype (ledger-app), and the
+# devnet client scripts (devnet/*.ts).
+bun install
+bun run test
+bun run typecheck
+
 # Run with the in-memory mock machine (no emulator needed):
 go run ./cmd/op-cartesi run
 

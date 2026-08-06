@@ -19,7 +19,7 @@ import {
     format as formatDrive,
     open as openDrive,
     type Store,
-} from "./accounts/index.ts";
+} from "@cartesi/accounts";
 import { addrKey, l2TokenAddress, type Address } from "./addresses.ts";
 import { getAddress, toBytes } from "viem";
 

@@ -1,0 +1,18 @@
+{
+    "name": "op-cartesi",
+    "private": true,
+    "workspaces": [
+        "accounts-drive/js",
+        "ledger-app",
+        "devnet"
+    ],
+    "trustedDependencies": [
+        "@deroll/cmio",
+        "esbuild"
+    ],
+    "scripts": {
+        "build": "bun run --filter ledger-app build",
+        "test": "bun run --filter '*' test",
+        "typecheck": "bun run --filter '*' typecheck"
+    }
+}

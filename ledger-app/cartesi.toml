@@ -1,7 +1,12 @@
 # Machine configuration for `cartesi build` (@cartesi/cli 2.0 alpha).
 #
-# The root drive comes from the Dockerfile as usual. The accounts drive
-# (docs/ACCOUNTS-DRIVE-SPEC.md) is a second flash drive: raw, zero-filled,
+# The root drive builds from this directory's Dockerfile with the REPO ROOT
+# as its docker context: the app is a bun workspace member, and its
+# @cartesi/accounts dependency lives in ../accounts-drive/js — outside this
+# directory, inside the context. (docker resolves --file against the CLI's
+# working directory, so the dockerfile path stays the default.)
+#
+# The accounts drive (docs/ACCOUNTS-DRIVE-SPEC.md) is a second flash drive: raw, zero-filled,
 # never mounted — the guest formats it at boot, before the first yield, so
 # the header lands inside the stored snapshot and the genesis state root
 # covers it. 1 MiB (2^20): a power of two, so the drive is a single aligned
@@ -18,3 +23,7 @@ builder = "empty"
 format = "raw"
 size = 1048576
 mount = false
+
+[drives.root]
+builder = "docker"
+context = ".."
