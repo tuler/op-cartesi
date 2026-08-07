@@ -179,9 +179,12 @@ func (e *EthAPI) Call(ctx context.Context, args CallArgs, id *rpc.BlockNumberOrH
 		return nil, err
 	}
 	if !res.Accepted {
-		// The revert data rides the last revert-tagged report.
+		// The error data rides the last error-tagged report. A simulation
+		// that FAILs rather than REVERTs still reverts the eth_call — the
+		// answer to "would this succeed" is no either way — but it is tagged
+		// apart on the wire so a caller that cares can tell them apart.
 		for i := len(res.Reports) - 1; i >= 0; i-- {
-			if r := res.Reports[i]; len(r) >= 1 && r[0] == chain.ReportTagRevert {
+			if r := res.Reports[i]; len(r) >= 1 && chain.IsErrorTag(r[0]) {
 				return nil, newRevertError(r[1:])
 			}
 		}

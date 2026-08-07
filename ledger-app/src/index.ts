@@ -17,30 +17,26 @@ async function main(): Promise<void> {
 
     // The devnet's one application contract: a counter — the smallest honest
     // demonstration of the fall-through. An address outside every reserved
-    // namespace, ABI-driven dispatch, and revert-safe state in a journaled
-    // store. Recorded in the ABI drive, so `cast call` and viem can discover
-    // and speak to it from the snapshot alone.
+    // namespace, ABI-driven dispatch, and state that is simply a variable:
+    // RAM belongs to the application, is machine state like any other, and
+    // does not roll back (EVM-COMPAT §10a). Recorded in the ABI drive, so
+    // `cast call` and viem can discover and speak to it from the snapshot
+    // alone.
     const counterAbi = parseAbi([
         "function increment()",
         "function count() view returns (uint256)",
     ]);
-    const state = guest.store(8);
-    const read = async () => {
-        const b = await state.readAt(0, 8);
-        return new DataView(b.buffer, b.byteOffset, b.byteLength).getBigUint64(0, true);
-    };
+    let count = 0n;
     await guest.contract({
         address: "0xc0de000000000000000000000000000000000001",
         abi: counterAbi,
         transactions: {
-            increment: async () => {
-                const b = new Uint8Array(8);
-                new DataView(b.buffer).setBigUint64(0, (await read()) + 1n, true);
-                await state.writeAt(0, b);
+            increment: () => {
+                count += 1n;
             },
         },
         views: {
-            count: () => read(),
+            count: () => count,
         },
     });
 

@@ -76,7 +76,7 @@ export class Config implements Handler {
                     if (e instanceof AccountsDriveError && e.kind === "duplicateToken") {
                         return { kind: "revert", data: errorRevert("token already registered") };
                     }
-                    throw e; // registryFull → the router escalates to reject (spec §8)
+                    throw e; // registryFull → the router turns it into a revert
                 }
             }
             case "setTokenMetadata": {

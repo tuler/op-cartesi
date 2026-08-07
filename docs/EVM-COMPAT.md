@@ -129,7 +129,7 @@ raw tx ──parse──▶ {sender, to, value, calldata, nonce, …}
    ├─ value transfer: debit sender, credit `to`   (native ether, the drive)
    │
    └─ dispatch on `to`:
-        handler registered  → handler.advance(ctx)   → ACCEPT | REVERT | REJECT
+        handler registered  → handler.advance(ctx)   → ACCEPT | REVERT | FAIL
         no handler          → plain transfer; calldata ignored (Ethereum's rule)
 ```
 
@@ -285,7 +285,7 @@ OP's guarantee that a deposit's mint survives even when its call fails
 (§ below). The lockbox caveat of DESIGN §7c/§7d is untouched: crediting
 OP-path ether does not make it voucher-reachable.
 
-### Three outcomes, not two
+### Outcomes: applications never roll the machine back
 
 Today an input either accepts or rejects, and rejection rolls back the
 machine — including the nonce bump and the fee. That has a consequence
@@ -293,43 +293,82 @@ worth naming before it is load-bearing: **a transaction that fails is
 free**, and can be re-included forever (its nonce was never consumed, its
 fee never charged). Harmless while the fee is zero; a block-space DoS the
 moment it is not. Ethereum's answer is that a reverted transaction still
-consumes its nonce and pays for its gas. The router adopts it with a
-three-outcome model:
+consumes its nonce and pays for its gas.
 
-- **ACCEPT** — handler succeeded. Commit everything: handler's ledger
-  writes, value transfer, nonce bump, fee debit, outputs.
-- **REVERT(data)** — application-level failure, Ethereum-shaped. The
-  router rolls back the handler's ledger writes and the value transfer,
-  but **keeps the nonce bump and the fee debit**, finishes the input as
-  *accepted* (the machine must not roll back — the nonce write is state),
-  emits no outputs from the handler, and reports the revert data. The
-  receipt gets `status: 0` and the shim surfaces the revert data on
-  `eth_call` and simulation paths.
-- **REJECT** — consensus-mandated refusal: the accounts drive is at its
-  load limit, a balance would overflow its declared width, the registry is
-  full (the exact conditions ACCOUNTS-DRIVE-SPEC §6.3/§8 requires answered
-  by rejecting the input), or the transaction failed enforcement in the
-  first place. The input finishes rejected and the machine rolls back
-  wholesale, as today. Deposits keep REJECT-only semantics — they have no
-  nonce or fee to charge, and their failure mode (the deposit-stuck
-  caveat) is unchanged.
+The router adopts it, and pushes it one step further than Ethereum needs
+to: **an input that passed enforcement always advances the machine.** What
+the application did decides only how much of the input is kept, never
+whether the machine rolls back. Four outcomes, and an application may
+choose any of the first three:
 
-REVERT requires the router to be able to undo a handler's ledger effects
-without a machine rollback. That is a small write-journal over the ledger
-API: handlers mutate the drive only through the router (§10), the router
-records each op's before-image within the input, and REVERT replays them
-backwards. The journal covers the drive; it does not cover a handler's
-*private* state (its own files), so the handler contract is explicit: a
-handler that has mutated private state may not return REVERT — it either
-completes (ACCEPT) or escalates (REJECT, which rolls back everything). The
-built-in handlers (§9) keep no private state that outlives an input except
-counters written at ACCEPT, so they satisfy this trivially.
+| Outcome | Ledger + value transfer | Outputs | Nonce + fee | Machine |
+|---|---|---|---|---|
+| **ACCEPT** | kept | emitted | charged | advances |
+| **REVERT**(data) | rolled back | dropped | charged | advances |
+| **FAIL**(data) | kept | emitted | charged | advances |
+| **REJECT** | — | — | — | **rolls back** |
 
-A handler that crashes, exceeds its manifest bounds, or breaks the
-handler protocol (§10) is treated as REJECT — deterministic, and the
-machine's rollback contains whatever mess it made. It never halts the
-machine: a halted machine is a halted chain, the doctrine the Lua guest
+REVERT and FAIL both report their data and both charge the sender; they
+differ only in whether the ledger is undone underneath the handler. The
+report tag tells them apart on the wire (`0x02` revert, `0x03` fail),
+because they mean opposite things to whoever reads the receipt: a revert
+is safe to treat as "nothing happened", a fail is not.
+
+**REJECT is the router's alone, and it means one thing: the charge cannot
+be recorded.** That is either enforcement failure (bad signature, wrong
+nonce, insufficient balance — nothing ran), or a deposit (no nonce or fee
+to keep; the deposit-stuck caveat is unchanged), or the nonce bump and fee
+debit themselves being refused by the drive. Nothing a handler does
+reaches it: a handler that throws reverts, and a handler that *crashes*
+reverts, so a broken application costs its sender a nonce and a fee
+instead of handing them a free retry. It still never halts the machine —
+a halted machine is a halted chain, the doctrine the Lua guest
 established and this design keeps.
+
+*Deviation, flagged deliberately:* ACCOUNTS-DRIVE-SPEC §6.3, and the
+width rules of §7–§8, say a guest MUST **reject the input** when a table
+is at its load limit or a balance would overflow its declared width. The router reverts instead whenever
+there is a sender to charge. The clause's mechanism is honored — the
+insert does not happen, and the rollback leaves the drive bit-identical to
+before the input; only the remedy differs, and what is committed is the
+charge alone, an in-place update to a record that already exists. Where no
+such record exists the charge genuinely cannot be written, and that is the
+REJECT above. The drive spec needs amending to match.
+
+### What rolls back, and who does it
+
+REVERT requires the router to undo a handler's ledger effects without a
+machine rollback. That is a small write-journal over the ledger API:
+handlers mutate the drive only through the router (§10), the router
+records each op's before-image within the input, and REVERT replays them
+backwards.
+
+The journal's remit is the **ledger** — the accounts drive and the in-RAM
+state that shadows it. It does not reach an application's own RAM, and
+does not need to, because the machine already covers the other two cases:
+
+| | What undoes it |
+|---|---|
+| Ledger, on REVERT | the journal |
+| Application RAM, on REJECT | the machine — builder and verifier alike run each input on a fork and discard it unless it accepted (`chain/chain.go`) |
+| Application RAM, during inspect | the machine — queries run on a fork that is thrown away (`chain/inspect.go`) |
+| Application RAM, on REVERT | **nothing** |
+
+So there is exactly one case where an application's own state outlives a
+failure, and it is the one the application controls: it chose to throw.
+Hence the rule, which replaces the older "a handler that has mutated
+private state may not REVERT":
+
+> A handler that has written nothing of its own returns **REVERT**. One
+> that has already written returns **FAIL**.
+
+Ordering a handler so that every fallible step precedes its first private
+write keeps it in REVERT territory, which is the safer half — and unlike
+Ethereum this costs nothing to arrange, because there are no
+cross-contract calls: one input is one handler is one function body, with
+no untrusted callee that can revert underneath it. The built-in handlers
+(§9) keep no private state that outlives an input, so they only ever
+ACCEPT or REVERT.
 
 ## 6. The address map
 
@@ -595,7 +634,7 @@ linkage models:
    response protocol that mirrors the C ABI. The default for application
    code: an in-process handler's segfault kills the guest, and a dead
    guest is a halted chain — process isolation turns "handler crashed"
-   into "input rejected, deterministically" (§5). The cost is IPC and
+   into "input reverted, deterministically" (§5). The cost is IPC and
    spawn cycles inside an emulated CPU, which is real but bounded, and an
    app can graduate to kind 2 when it has earned the trust.
 
@@ -646,15 +685,21 @@ outcomes, encodings — and the application owns only its semantics:
   the function's `stateMutability` decides which side may run it
   (`transactions` for nonpayable/payable, `views` for view/pure). View
   results are plain values; the library ABI-encodes them.
-- **Exceptions are reverts** — the EVM's own rule. A thrown `Revert`
-  carries chosen revert data; any other exception reverts with its message
-  as `Error(string)`. The one escalation is a drive-format refusal
-  (`AccountsDriveError`), which reaches the router and rejects (§5, §8).
-- **Application state reverts with the ledger**: `guest.store(n)` returns a
-  byte store journaled through the router's journal, rolled back on REVERT
-  and REJECT exactly like drive bytes. It lives in machine RAM — machine
-  state, but not outside-readable; what must be readable belongs in a
-  drive.
+- **Exceptions are reverts** — the EVM's own rule, with no escape upward.
+  A thrown `Revert` carries chosen revert data; a thrown `Fail` carries
+  the same data but keeps the ledger and the outputs (§5); any other
+  exception reverts with its message as `Error(string)`. Nothing an
+  application throws can reject the input, drive refusals included.
+- **Application state is just RAM the application owns.** A counter is
+  `let count = 0n`. It is machine state — covered by the state root, as
+  deterministic as anything else in the machine — but it is not
+  outside-readable, and it does **not** roll back on REVERT; what must be
+  readable, or must be undoable, belongs in a drive or in the ledger.
+  There is no state API, because the honest one would be a byte store the
+  application had to hand-serialize into and could silently forget to
+  use — a guarantee that only held for the state you remembered to opt
+  in. Owning the rule outright is simpler than a tool that half-enforces
+  it.
 - **The reserved namespaces are enforced at registration**: the 0xC751
   pattern and the adopted predeploys refuse application addresses.
 
@@ -735,9 +780,14 @@ guest did.
 - **Enforcement is unchanged in substance** — signature, chain-id pin,
   nonce, fee — relocated into native code and applied before any handler
   runs. The envelope's `msgSender` stays untrusted (§4).
-- **Failed transactions stop being free** (§5): REVERT consumes nonce and
-  fee, closing the re-inclusion loop that flat-fee enforcement would
-  otherwise leave open.
+- **Failed transactions stop being free** (§5): REVERT and FAIL both
+  consume nonce and fee, closing the re-inclusion loop that flat-fee
+  enforcement would otherwise leave open. Because an application cannot
+  reject — not by throwing, not by crashing, not by exhausting the drive —
+  there is no application-reachable path back to a free retry. What
+  remains free is an input the sequencer never charges for at all
+  (README, "Inputs are free"), which is the fee-market question, not
+  this one.
 - **Address collisions**: a specific system address is unreachable by
   keyed accounts short of a 2^160 preimage, the `prefix ‖ zero-run`
   namespace pattern costs ~2^144 to grind into, and façade derivation
@@ -745,10 +795,11 @@ guest did.
   with the manifest at all (§6). The brand prefix alone is 2^16 and
   carries no authority — the rule §6 states normatively. The registry
   view makes the routed set auditable.
-- **Handler blast radius**: out-of-process by default; crash → REJECT;
-  in-process reserved for the platform's own code and explicit operator
-  grants (§10). `MaxCyclesPerInput` bounds every input regardless of what
-  its handler does.
+- **Handler blast radius**: out-of-process by default; crash → REVERT,
+  so the sender still pays and the input still advances (§5); in-process
+  reserved for the platform's own code and explicit operator grants
+  (§10). `MaxCyclesPerInput` bounds every input regardless of what its
+  handler does.
 - **The journal is consensus code.** REVERT's partial rollback is part of
   the state transition function and must be bit-identical across
   implementations; it goes in the normative spec with golden vectors,
@@ -758,7 +809,7 @@ guest did.
 
 1. **Freeze the standard.** The normative companion: envelope field
    authority (§4), transaction admission and sighashes (§5), the
-   three-outcome model and journal semantics (§5), `EvmCall`/`EvmSimulate`
+   outcome model and journal semantics (§5), `EvmCall`/`EvmSimulate`
    /`EvmLog` encodings (§7–8), address derivations (§6), the handler ABI
    and manifest (§10) — with golden vectors in the accounts-drive style.
 2. **The reference router**, native (Rust or C — the accounts-drive

@@ -25,7 +25,7 @@ import {
 import { Rollup, type AdvanceRequest } from "@deroll/cmio";
 import { getAddress, numberToHex, type Abi, type Address } from "viem";
 import { contractHandler, type ContractSpec } from "./contract.ts";
-import { JournaledStore, Ledger } from "./ledger.ts";
+import { Ledger } from "./ledger.ts";
 import { Router } from "./router.ts";
 
 export interface GuestOptions {
@@ -94,14 +94,6 @@ export class Guest {
         }
         this.router.register(address, contractHandler(spec));
         await this.abiDrive.register(address, KIND_APP, JSON.stringify(spec.abi));
-    }
-
-    /** Application state that reverts with the ledger: a byte store whose
-     * writes journal through the router's journal, rolled back on REVERT and
-     * REJECT exactly like drive bytes. In machine RAM — part of machine
-     * state, not outside-readable. */
-    store(length: number): Store {
-        return new JournaledStore(new MemStore(length), this.ledger.journal);
     }
 
     /** What the ABI drive records — for tests and introspection. */

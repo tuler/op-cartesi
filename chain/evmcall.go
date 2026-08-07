@@ -26,7 +26,19 @@ const (
 	ReportTagApp    byte = 0x00 // application diagnostic, passed through
 	ReportTagReturn byte = 0x01 // eth_call return data
 	ReportTagRevert byte = 0x02 // revert data (Error(string) where the guest produces it)
+	// ReportTagFail marks a handler failure that KEPT its state changes
+	// (EVM-COMPAT §5's FAIL). It carries the same Error(string)-shaped data
+	// as a revert, but means the opposite to whoever reads it: a revert is
+	// safe to treat as "nothing happened", a fail is not.
+	ReportTagFail byte = 0x03
 )
+
+// IsErrorTag reports whether a report tag carries handler error data, either
+// flavor. Callers that only need the message treat them alike; callers that
+// decide whether state moved must not.
+func IsErrorTag(tag byte) bool {
+	return tag == ReportTagRevert || tag == ReportTagFail
+}
 
 var (
 	evmCallOnce     sync.Once

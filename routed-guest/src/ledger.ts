@@ -6,9 +6,13 @@
 // then still commits the nonce bump and the fee. Journaling happens at the
 // byte layer — a Store wrapper records each write's before-image — so a
 // rollback restores the drive bit-exactly with no knowledge of drive
-// semantics, and the registry's append-only rule is no special case. In-RAM
-// state (token totals, metadata, portals, the fee) journals through the same
-// entry list as restore closures.
+// semantics, and the registry's append-only rule is no special case.
+//
+// Its remit is the ledger, and only the ledger: the drive bytes plus the
+// in-RAM state that shadows them (token totals, metadata, portals, the fee),
+// which journal through the same entry list as restore closures. An
+// application's own RAM is outside it — see EVM-COMPAT §10a for why that is
+// the deliberate line rather than an omission.
 
 import {
     AccountsDriveError,
@@ -62,8 +66,9 @@ export class Journal {
 }
 
 /** JournaledStore records a before-image per write. Reads pass through.
- * Exported for application state: a store wrapped over the router's journal
- * rolls back with the ledger on REVERT (Guest.store). */
+ * Internal to the ledger: it is how the accounts drive becomes undoable, and
+ * it is not an application tool. Application state lives in plain RAM and
+ * does not roll back (EVM-COMPAT §5, §10a). */
 export class JournaledStore implements Store {
     constructor(
         private inner: Store,

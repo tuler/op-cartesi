@@ -19,7 +19,7 @@
 
 import { PORTAL_ERC20, PORTAL_ETHER, errorRevert, l2TokenAddress, transferLog } from "@cartesi/evm-compat";
 import { getAddress, toHex, type Address } from "viem";
-import { AccountsDriveError, InsufficientFunds, type Ledger } from "../ledger.ts";
+import { InsufficientFunds, type Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, Handler, OutputsSink, TxContext } from "../types.ts";
 
 const ZERO_ADDRESS: Address = "0x0000000000000000000000000000000000000000";
@@ -58,8 +58,7 @@ export class PortalReceiver implements Handler {
                 if (e instanceof InsufficientFunds) {
                     return { kind: "revert", data: errorRevert("deposit value does not cover the credit") };
                 }
-                if (e instanceof AccountsDriveError) throw e; // tableFull → reject
-                throw e;
+                throw e; // tableFull etc. — a deposit has no charge to keep, so the router rejects
             }
             return { kind: "accept" };
         }
@@ -70,7 +69,7 @@ export class PortalReceiver implements Handler {
         const amount = uint256At(ctx.data, 40);
         // First-seen registration (spec §8's permissionless policy), width 32
         // like the Lua guest: devnet tokens are arbitrary ERC-20s. Throws
-        // registryFull → the router escalates to reject.
+        // registryFull → the router rejects, this being a deposit.
         let token = ledger.tokenByL1Address(l1Token);
         if (!token) {
             const { id } = await ledger.registerToken(l1Token);
