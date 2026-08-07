@@ -11,9 +11,8 @@
 // ordinary ERC-20 — reverts included, surfaced as execution-reverted errors
 // with the reason.
 
-import { getAddress } from "viem";
+import { erc20Abi, getAddress } from "viem";
 import { l2TokenAddress } from "ledger-app/addresses";
-import { erc20Abi } from "ledger-app/handlers/erc20";
 import { l2Public, usage } from "./lib/env.ts";
 
 const [whoArg, tokenArg] = process.argv.slice(2);

@@ -4,7 +4,8 @@
 //   bun devnet/deposit-erc20.ts [amount] [token]
 //
 // Deploys a test token on first use (via forge) and records it in
-// devnet/token.env.
+// devnet/token.env. A recorded token that no longer has code — anvil forgets
+// every deployment on restart — is replaced by a fresh deploy.
 //
 // The portal escrows the tokens in the application contract — the same
 // contract a voucher later runs from — and hands the guest Cartesi's own
@@ -16,13 +17,8 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { getAddress, parseAbi, type Address } from "viem";
+import { erc20Abi, getAddress, parseAbi, type Address } from "viem";
 import { config, DEVNET_DIR, l1Public, l1Wallet, usage } from "./lib/env.ts";
-
-const erc20Abi = parseAbi([
-    "function approve(address spender, uint256 value) returns (bool)",
-    "function balanceOf(address owner) view returns (uint256)",
-]);
 
 const portalAbi = parseAbi([
     "function depositERC20Tokens(address token, address appContract, uint256 value, bytes execLayerData)",
@@ -43,13 +39,27 @@ const l1 = l1Public();
 const wallet = l1Wallet(config.depositorKey);
 const depositor = wallet.account.address;
 
+// A transaction to an address without code succeeds as a no-op, so a bad
+// token address would sail through approve and the portal deposit and only
+// surface at the first read ("returned no data"). Check for code up front.
+const deployed = async (address: Address) => (await l1.getCode({ address })) !== undefined;
+
 let token: Address;
 if (tokenArg) {
     token = getAddress(tokenArg);
-} else if (config.testToken) {
+    if (!(await deployed(token))) {
+        console.error(`no contract code at ${token} on L1 — is the token deployed there?`);
+        process.exit(1);
+    }
+} else if (config.testToken && (await deployed(config.testToken))) {
     token = config.testToken;
 } else {
-    console.error("deploying a test token");
+    if (config.testToken) {
+        // token.env outlives anvil, which forgets every deployment on restart.
+        console.error(`token.env's ${config.testToken} has no code on this L1 — deploying a fresh test token`);
+    } else {
+        console.error("deploying a test token");
+    }
     const out = spawnSync(
         "forge",
         [
@@ -70,6 +80,11 @@ if (tokenArg) {
         process.exit(1);
     }
     token = getAddress(match[1]!);
+    if (!(await deployed(token))) {
+        console.error(`forge reported ${token} but the L1 has no code there:`);
+        console.error(text.split("\n").slice(-20).join("\n"));
+        process.exit(1);
+    }
     writeFileSync(
         config.tokenEnvFile,
         `# Written by devnet/deposit-erc20.ts.\nTEST_TOKEN_ADDRESS=${token}\n`,
@@ -84,14 +99,22 @@ const approval = await wallet.writeContract({
     functionName: "approve",
     args: [portal, amount],
 });
-await l1.waitForTransactionReceipt({ hash: approval });
+const approvalReceipt = await l1.waitForTransactionReceipt({ hash: approval });
+if (approvalReceipt.status !== "success") {
+    console.error(`approve reverted in ${approval}`);
+    process.exit(1);
+}
 const deposit = await wallet.writeContract({
     address: portal,
     abi: portalAbi,
     functionName: "depositERC20Tokens",
     args: [token, executor, amount, "0x"],
 });
-await l1.waitForTransactionReceipt({ hash: deposit });
+const depositReceipt = await l1.waitForTransactionReceipt({ hash: deposit });
+if (depositReceipt.status !== "success") {
+    console.error(`depositERC20Tokens reverted in ${deposit} — does ${depositor} hold ${amount} of ${token}?`);
+    process.exit(1);
+}
 
 const escrowed = await l1.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [executor] });
 console.error(`  escrowed in the application: ${escrowed}`);
