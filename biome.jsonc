@@ -1,0 +1,70 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.5.7/schema.json",
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true
+    },
+    "files": {
+        "includes": [
+            "**",
+            "!**/node_modules/",
+            "!**/dist/",
+            "!bun.lock",
+            // Foundry's vendored deps and build output.
+            "!contracts/lib/",
+            "!contracts/out/",
+            "!contracts/cache/"
+        ]
+    },
+    // 4-space indent and double quotes: the style the TypeScript already
+    // uses everywhere except accounts-drive/js, which this normalizes. The
+    // 100-column width is where the existing code sits — the prose comments
+    // are hand-wrapped near 76, but signatures and viem calls run longer.
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineWidth": 100
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "preset": "recommended",
+            "complexity": {
+                // Hex byte keys mirror the spec fixtures they come from
+                // (`{ 0xaa: 5 }` for the account at 0xaa..aa); decimal keys
+                // would lose that correspondence.
+                "useSimpleNumberKeys": "off"
+            },
+            "style": {
+                // `!` is how this code states an invariant the checker
+                // cannot see: an index into a fixed-width buffer, a regex
+                // group guarded by its match, a value the line above
+                // asserted present.
+                "noNonNullAssertion": "off"
+            }
+        }
+    },
+    "assist": {
+        "enabled": true,
+        "actions": {
+            "source": {
+                "organizeImports": "on"
+            }
+        }
+    },
+    "javascript": {
+        "formatter": {
+            "quoteStyle": "double",
+            "semicolons": "always",
+            "trailingCommas": "all",
+            "arrowParentheses": "always"
+        }
+    },
+    "json": {
+        "formatter": {
+            "indentWidth": 4
+        }
+    }
+}
