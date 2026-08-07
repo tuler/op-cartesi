@@ -39,10 +39,7 @@ export async function executeVoucher(txHash: Hex): Promise<bigint> {
 
     // 1. The voucher's chain-wide index and the block that produced it.
     const receipt = await l2.waitForTransactionReceipt({ hash: txHash, pollingInterval: 2_000 });
-    const emissions = await l2.request({
-        method: "cartesi_getTransactionEmissions",
-        params: [txHash],
-    });
+    const emissions = await l2.getTransactionEmissions({ hash: txHash });
     const first = emissions.outputs[0];
     if (!first) throw new Error("the transaction emitted no provable output");
     const index = BigInt(first.index);
@@ -92,10 +89,7 @@ export async function executeVoucher(txHash: Hex): Promise<bigint> {
     // 4. Prove the voucher against that block and execute it. The proof is
     //    against the proposed block's tree, not the emitting block's — a
     //    withdrawal has to stay provable as the tree grows past it.
-    const proof = await l2.request({
-        method: "cartesi_getOutputProof",
-        params: [`0x${index.toString(16)}`, `0x${proposedBlock.toString(16)}`],
-    });
+    const proof = await l2.getOutputProof({ index, blockNumber: proposedBlock });
     await waitL1(l1, caller.writeContract({
         address: executor,
         abi: executorAbi,

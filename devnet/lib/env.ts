@@ -33,6 +33,8 @@ import {
     type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
+import { publicActionsL1, walletActionsL1 } from "viem/op-stack";
+import { cartesiActions, type CartesiRpcSchema } from "./cartesi.ts";
 
 export const DEVNET_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -142,25 +144,12 @@ export const l2Chain = defineChain({
     },
 });
 
-/** The cartesi_ RPC surface the scripts consume (engineapi/cartesi.go). */
-type CartesiRpcSchema = [
-    {
-        Method: "cartesi_getTransactionEmissions";
-        Parameters: [Hex];
-        ReturnType: {
-            outputs: { index: Hex; payload: Hex }[];
-            reports: Hex[];
-        };
-    },
-    {
-        Method: "cartesi_getOutputProof";
-        Parameters: [Hex, Hex];
-        ReturnType: { output: Hex; outputHashesSiblings: Hex[] };
-    },
-];
+// The clients come pre-extended: OP-stack L1 actions on the L1 pair (viem's
+// deposit/withdrawal/game surface), and the cartesi_ namespace on the L2
+// public client (lib/cartesi.ts).
 
 export function l1Public() {
-    return createPublicClient({ chain: l1Chain, transport: http() });
+    return createPublicClient({ chain: l1Chain, transport: http() }).extend(publicActionsL1());
 }
 
 export function l1Wallet(key: string) {
@@ -168,7 +157,7 @@ export function l1Wallet(key: string) {
         chain: l1Chain,
         transport: http(),
         account: privateKeyToAccount(asKey(key)),
-    });
+    }).extend(walletActionsL1());
 }
 
 /** Anvil-only management calls (the contract-less deposit path). */
@@ -181,7 +170,7 @@ export function l2Public() {
         chain: l2Chain,
         transport: http(),
         rpcSchema: rpcSchema<CartesiRpcSchema>(),
-    });
+    }).extend(cartesiActions());
 }
 
 export function l2Wallet(key: string) {
