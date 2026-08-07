@@ -1,0 +1,60 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 640" role="img">
+<title>The devnet at a glance: L1 exchanges derivation data and batches with the OP Stack services; the sequencer op-node triggers block production over the Engine API while the op-cartesi shim fills blocks from its own mempool; the shim runs every transaction in a Cartesi machine and gets state and outputs roots back; ordinary EVM tooling talks to the shim's eth RPC.</title>
+<style>
+  .b     { fill: #ffffff; stroke: #9fada5; stroke-width: 1.2; }
+  .group { fill: none; stroke: #0b7a63; stroke-width: 1.6; }
+  .t   { fill: #212824; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 14px; font-weight: 600; }
+  .m   { fill: #5d6a63; font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace; font-size: 11px; }
+  .lbl { fill: #5d6a63; font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace; font-size: 11px; }
+  .grp { fill: #0b7a63; font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace; font-size: 11px; letter-spacing: 0.1em; }
+  .edge { stroke: #414d46; stroke-width: 1.4; fill: none; }
+  .arrowhead { fill: #414d46; }
+</style>
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+    <path d="M 0 1 L 9 5 L 0 9 z" class="arrowhead"/>
+  </marker>
+</defs>
+
+<rect width="880" height="640" fill="#f2f5f2"/>
+
+<rect class="b" x="230" y="40" width="420" height="76" rx="9"/>
+<text class="t" x="250" y="72">L1 — anvil</text>
+<text class="m" x="250" y="94">OP contracts · deposits · batches · dispute games</text>
+
+<rect class="b" x="230" y="196" width="420" height="76" rx="9"/>
+<text class="t" x="250" y="228">OP Stack services</text>
+<text class="m" x="250" y="250">op-node (sequencer) · op-batcher · op-proposer — stock</text>
+
+<rect class="group" x="210" y="332" width="460" height="288" rx="12"/>
+<text class="grp" x="250" y="356">EXECUTION LAYER — THIS REPO</text>
+
+<rect class="b" x="230" y="372" width="420" height="76" rx="9"/>
+<text class="t" x="250" y="404">op-cartesi shim</text>
+<text class="m" x="250" y="426">Engine API + eth JSON-RPC + mempool — in op-geth's seat</text>
+
+<rect class="b" x="230" y="528" width="420" height="76" rx="9"/>
+<text class="t" x="250" y="560">Cartesi machine</text>
+<text class="m" x="250" y="582">RISC-V Linux · routed guest · accounts drive</text>
+
+<rect class="b" x="20" y="372" width="150" height="76" rx="9"/>
+<text class="t" x="36" y="404">EVM tooling</text>
+<text class="m" x="36" y="426">wallets · viem · cast</text>
+
+<path class="edge" d="M 400 116 L 400 192" marker-end="url(#ah)"/>
+<text class="lbl" x="392" y="158" text-anchor="end">derivation: heads · deposits</text>
+<path class="edge" d="M 480 196 L 480 120" marker-end="url(#ah)"/>
+<text class="lbl" x="488" y="158">batches · output roots</text>
+
+<path class="edge" d="M 440 272 L 440 368" marker-end="url(#ah)"/>
+<text class="lbl" x="448" y="310">Engine API — sequencing: op-node triggers,</text>
+<text class="lbl" x="448" y="326">shim fills the block from its mempool</text>
+
+<path class="edge" d="M 400 448 L 400 524" marker-end="url(#ah)"/>
+<text class="lbl" x="392" y="490" text-anchor="end">runs every transaction</text>
+<path class="edge" d="M 480 528 L 480 452" marker-end="url(#ah)"/>
+<text class="lbl" x="488" y="490">state root · outputs root</text>
+
+<path class="edge" d="M 170 410 L 226 410" marker-end="url(#ah)"/>
+<text class="lbl" x="198" y="400" text-anchor="middle">eth RPC</text>
+</svg>

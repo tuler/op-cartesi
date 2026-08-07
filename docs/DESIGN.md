@@ -56,6 +56,22 @@ This is the one genuinely new component, and it's Monomer-shaped: a Go (or TS/Ru
 
 Estimated scope: a few thousand lines plus tests. It's the price of admission for both plans, it's the piece with the best prior art to crib from, and note the leverage: **op-node, op-batcher, op-proposer, op-conductor, sequencer mode, P2P, blob DA, and the entire derivation pipeline come for free once this shim exists.**
 
+![The devnet at a glance: OP Stack above the line, Cartesi execution layer below it](diagrams/devnet-overview.svg)
+
+*The shim's seat, as the devnet runs it. Sequencing is a split job: op-node
+triggers block production over the Engine API and pins the deposits; the shim
+fills the rest of the block from its own mempool and computes it in the
+machine, returning the machine Merkle root as `stateRoot` and the outputs
+tree root as `withdrawalsRoot`. The full runtime, process by process:*
+
+![Devnet runtime components: anvil L1 with the OP and outputs contract suites, the OP services, sequencer and verifier stacks of shim plus machine, and the viem scripts](diagrams/devnet-components.svg)
+
+*Accent-stroked boxes are this repo's code (shim, routed guest, scripts,
+outputs contracts); plain boxes are stock tooling (OP Stack, foundry, the
+emulator); dashed boxes are startup-time artifacts. The verifier column is
+the rollup property made visible: it rebuilds the same chain from nothing
+but what the batcher posted to L1.*
+
 One design decision to make early: **input granularity**. Either (a) one CMIO input per transaction (simple, matches Cartesi Rollups today, coarse dispute granularity at the input level), or (b) one CMIO input per block containing the ordered tx list (fewer yields, block-atomic). (a) composes better with existing Cartesi tooling and with Plan A's dispute story.
 
 **Settled (a), with Cartesi's envelope.** Each transaction is one CMIO input, wrapped in `EvmAdvance(chainId, appContract, msgSender, blockNumber, blockTimestamp, prevRandao, index, bytes payload)` — the encoding Cartesi's guest tools already decode — with the raw transaction as the payload. Feeding raw transaction bytes was tried first and fails against a stock guest: the guest cannot parse them, exits, and halts the machine. The envelope is also what conveys the L2 block context, which the machine has no other way to learn. Indices are chain-wide, since an app-chain is one application. Every field is derivable from the block header, so verifiers reconstruct the builder's context exactly.
@@ -279,6 +295,12 @@ but nothing finalizes on a devnet L1 and the count is what makes progress there.
 **Done, end to end.** The guest emits a voucher, `op-proposer` proposes, and the
 voucher executes on L1 — moving real ETH — with no change to `OptimismPortal`,
 `op-node`, `op-batcher` or `op-proposer`.
+
+![Deposit and withdrawal value paths across the bridge](diagrams/devnet-value-paths.svg)
+
+*Deposits ride OP's own derivation pipeline into the guest's portal receiver;
+withdrawals become vouchers whose tree root the header already carries, so a
+stock proposal makes them provable and executable on L1.*
 
 The bridge is one contract, and it is small for a structural reason. A Cartesi
 `Application` asks exactly one question before executing an output:
