@@ -1,12 +1,11 @@
-// Shared types of the routed guest (docs/EVM-COMPAT.md).
+// Shared types of the routed guest standard (docs/EVM-COMPAT.md).
 //
-// The router owns transaction-level enforcement and dispatches every input
-// and every inspect query on its `to` address to a handler. Handlers are
-// native code registered in a manifest fixed at snapshot build; this file is
-// the vocabulary between the router and its handlers.
+// This is the wire-level vocabulary — contexts, outcomes, emissions, report
+// tags — shared by the guest runtime (@cartesi/routed-guest) and by host
+// tooling. The Handler interface itself lives with the runtime, since it
+// names the ledger.
 
 import type { Address, Hex } from "viem";
-import type { Ledger } from "./ledger.ts";
 
 /** L2 block context, from the EvmAdvance envelope (transport framing only —
  * EVM-COMPAT §4: nothing here is an authority on the sender). */
@@ -76,16 +75,6 @@ export interface OutputsSink {
     voucher(v: { destination: Address; value?: bigint; payload?: Hex }): void;
     report(payload: Hex): void;
     log(emitter: Address, topics: Hex[], data: Hex): void;
-}
-
-/** A handler: native guest code at an address. Either entry is optional —
- * an advance-only handler reverts calls, a view-only handler reverts
- * transactions. */
-export interface Handler {
-    /** Refuse value unless declared payable (Ethereum's rule). */
-    payable?: boolean;
-    advance?(ctx: TxContext, out: OutputsSink, ledger: Ledger): Promise<AdvanceOutcome>;
-    view?(call: CallContext, ledger: Ledger): Promise<ViewOutcome>;
 }
 
 /** Report framing (prototype convention, one byte before every report the

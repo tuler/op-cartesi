@@ -3,9 +3,8 @@
 
 import { describe, expect, it } from "vitest";
 import { concat, encodeFunctionData, toBytes, toFunctionSelector, toHex, type Hex } from "viem";
-import { L1BLOCK_ADDRESS } from "../src/addresses.ts";
-import { encodeEvmCall } from "../src/evmcall.ts";
-import { l1BlockAbi } from "../src/handlers/l1block.ts";
+import { L1BLOCK_ADDRESS, l1BlockAbi } from "@cartesi/evm-compat";
+import { encodeEvmCall } from "@cartesi/evm-compat";
 import { block, CHAIN_ID, depositTx, driveBytes, makeRouter, user } from "./helpers.ts";
 
 const EOA = "0x00000000000000000000000000000000000000aa";

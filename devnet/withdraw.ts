@@ -13,8 +13,7 @@
 // and Cartesi's own proof libraries verify the voucher against it on L1.
 
 import { encodeFunctionData, getAddress } from "viem";
-import { BRIDGE_ADDRESS } from "ledger-app/addresses";
-import { bridgeAbi } from "ledger-app/handlers/bridge";
+import { BRIDGE_ADDRESS, bridgeAbi } from "@cartesi/evm-compat";
 import { l1Public, usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 import { executeVoucher } from "./lib/voucher.ts";

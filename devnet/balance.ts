@@ -12,7 +12,7 @@
 // with the reason.
 
 import { erc20Abi, getAddress } from "viem";
-import { l2TokenAddress } from "ledger-app/addresses";
+import { l2TokenAddress } from "@cartesi/evm-compat";
 import { l2Public, usage } from "./lib/env.ts";
 
 const [whoArg, tokenArg] = process.argv.slice(2);

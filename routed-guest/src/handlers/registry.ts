@@ -1,18 +1,10 @@
 // The router registry (EVM-COMPAT §6): discovery views over the manifest,
 // and the source the shim reads eth_getCode markers from.
 
-import { encodeFunctionResult, parseAbi, type Address } from "viem";
-import { tryDecodeCalldata } from "../abi.ts";
-import { l2TokenAddress } from "../addresses.ts";
-import { errorRevert } from "../evmcall.ts";
+import { errorRevert, l2TokenAddress, registryAbi, tryDecodeCalldata } from "@cartesi/evm-compat";
+import { encodeFunctionResult, type Address } from "viem";
 import type { Ledger } from "../ledger.ts";
 import type { CallContext, Handler, ViewOutcome } from "../types.ts";
-
-export const registryAbi = parseAbi([
-    "function handlerAt(address target) view returns (bool routed, bool isPayable)",
-    "function handlers() view returns (address[])",
-    "function l2TokenOf(address l1Token) view returns (address)",
-]);
 
 export class Registry implements Handler {
     payable = false;

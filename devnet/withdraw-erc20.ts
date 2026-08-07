@@ -19,8 +19,7 @@
 // tree. See DESIGN §7d.
 
 import { encodeFunctionData, getAddress, parseAbi } from "viem";
-import { l2TokenAddress, BRIDGE_ADDRESS } from "ledger-app/addresses";
-import { bridgeAbi } from "ledger-app/handlers/bridge";
+import { BRIDGE_ADDRESS, bridgeAbi, l2TokenAddress } from "@cartesi/evm-compat";
 import { config, l1Public, usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 import { executeVoucher } from "./lib/voucher.ts";

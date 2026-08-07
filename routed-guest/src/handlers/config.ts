@@ -6,33 +6,19 @@
 // outputs tree where it can be proven (the same argument the Lua app made
 // for its notices).
 
+import { PORTAL_ERC20, PORTAL_ETHER, applyL1ToL2Alias, configAbi, errorRevert, sameAddress, tryDecodeCalldata } from "@cartesi/evm-compat";
 import {
     encodeAbiParameters,
     encodeFunctionResult,
     keccak256,
     padHex,
-    parseAbi,
+
     toHex,
     type Address,
     type Hex,
 } from "viem";
-import { tryDecodeCalldata } from "../abi.ts";
-import { applyL1ToL2Alias, sameAddress } from "../addresses.ts";
-import { errorRevert } from "../evmcall.ts";
 import { AccountsDriveError, type Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, CallContext, Handler, OutputsSink, TxContext, ViewOutcome } from "../types.ts";
-
-export const configAbi = parseAbi([
-    "function setFee(uint256 fee)",
-    "function registerPortal(uint8 kind, address portal)",
-    "function registerToken(address l1Token, uint8 width, string name, string symbol, uint8 decimals)",
-    "function setTokenMetadata(address l1Token, string name, string symbol, uint8 decimals)",
-    "function fee() view returns (uint256)",
-    "function owner() view returns (address)",
-]);
-
-export const PORTAL_ETHER = 0;
-export const PORTAL_ERC20 = 1;
 
 const FEE_SET_TOPIC: Hex = keccak256(toHex("FeeSet(uint256)"));
 const PORTAL_REGISTERED_TOPIC: Hex = keccak256(toHex("PortalRegistered(uint8,address,address)"));
