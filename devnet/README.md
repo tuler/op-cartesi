@@ -130,6 +130,16 @@ what viem is for. Orchestration — `start-devnet.sh`, `deploy-l1.sh`,
 external binaries, and it still sources `env.sh`, which `lib/env.ts` mirrors
 variable for variable (same names, same address files, same defaults).
 
+User overrides go in a `.env` at the repo root — `SENDER_KEY=…`,
+`L1_RPC=…`, anything `env.sh` reads. Bun loads it automatically for the
+TypeScript scripts (from the invocation cwd, so run them from the repo
+root), and `env.sh` replays the same file for the shell orchestration with
+the same rule: a variable already exported in the environment wins over the
+file. The machine-written address files (`l1-addresses.env`,
+`outputs-addresses.env`, `token.env`) stay separate and stronger — they are
+deployment outputs, not preferences. `.env` is gitignored; keys live there,
+not in command lines.
+
 One seam to know about: `withdraw.ts`, `withdraw-erc20.ts` and the token
 path of `balance.ts` speak the **routed guest**
 ([ledger-app](../ledger-app/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md))
