@@ -3,13 +3,19 @@
 //
 //   bun devnet/deposit.ts <recipient> [wei]
 //
-// A real chain gets these from OptimismPortal.depositTransaction, and with
-// the contract suite deployed that is the path taken. On a contract-less
-// devnet it installs a minimal emitter at the rollup config's deposit
-// contract address instead: op-node's derivation reads the
+// With the contract suite deployed this is viem's own OP-stack deposit flow
+// (https://viem.sh/op-stack/guides/deposits): walletActionsL1's
+// depositTransaction against the portal the l2Chain definition names. On a
+// contract-less devnet it installs a minimal emitter at the rollup config's
+// deposit contract address instead — op-node's derivation reads the
 // TransactionDeposited log, not the contract that produced it, so an emitter
 // that logs the canonical event is indistinguishable from the portal as far
-// as the chain is concerned.
+// as the chain is concerned. viem's action cannot drive the emitter (it
+// speaks the portal ABI; the emitter reads its own raw calldata layout), but
+// because the emitted event is canonical, both branches share the good part:
+// getL2TransactionHashes derives the L2 deposit hash from the L1 receipt,
+// and the script waits for the L2 inclusion instead of saying "check back
+// in a few blocks".
 //
 // Requires the devnet to be running (./devnet/start-devnet.sh).
 
@@ -19,14 +25,11 @@ import {
     encodePacked,
     getAddress,
     padHex,
-    parseAbi,
     type Hex,
+    type TransactionReceipt,
 } from "viem";
-import { config, l1Public, l1Test, l1Wallet, usage } from "./lib/env.ts";
-
-const portalAbi = parseAbi([
-    "function depositTransaction(address to, uint256 value, uint64 gasLimit, bool isCreation, bytes data) payable",
-]);
+import { getL2TransactionHashes, walletActionsL1 } from "viem/op-stack";
+import { config, l1Public, l1Test, l1Wallet, l2Chain, l2Public, usage } from "./lib/env.ts";
 
 // Runtime bytecode for the emitter. It logs TransactionDeposited with
 // from = msg.sender, to = calldata word 0, version = 0, and data = the rest
@@ -52,21 +55,39 @@ const amount = BigInt(amountArg ?? "1000000000000000000");
 const l1 = l1Public();
 const wallet = l1Wallet(config.depositorKey);
 
+/** Reports the L1 inclusion, then follows the deposit to L2: the derived
+ * deposit-transaction hash comes from the receipt's canonical
+ * TransactionDeposited log, which both branches emit. */
 async function report(hash: Hex): Promise<void> {
-    const receipt = await l1.waitForTransactionReceipt({ hash });
+    const receipt: TransactionReceipt = await l1.waitForTransactionReceipt({ hash });
     console.log(`L1 tx ${hash} in block ${receipt.blockNumber} status ${receipt.status}`);
+    const [l2Hash] = getL2TransactionHashes(receipt);
+    if (!l2Hash) {
+        console.error("no TransactionDeposited log in the receipt");
+        process.exit(1);
+    }
+    console.error(`  L2 deposit tx ${l2Hash}; waiting for derivation`);
+    try {
+        const l2Receipt = await l2Public().waitForTransactionReceipt({
+            hash: l2Hash,
+            pollingInterval: 2_000,
+            timeout: 120_000,
+        });
+        console.log(`L2 tx ${l2Hash} in block ${l2Receipt.blockNumber} status ${l2Receipt.status}`);
+    } catch {
+        // The L1 deposit is done regardless; derivation just has not caught
+        // up within the wait. The hash above is the one to watch.
+        console.error("  not derived within 120s — the deposit stands, check the L2 hash later");
+    }
 }
 
 const code = await l1.getCode({ address: config.depositContract });
 if (code !== undefined && code !== "0x") {
     console.error(`depositing ${amount} wei to ${to} via OptimismPortal at ${config.depositContract}`);
     await report(
-        await wallet.writeContract({
-            address: config.depositContract,
-            abi: portalAbi,
-            functionName: "depositTransaction",
-            args: [to, amount, config.depositGasLimit, false, "0x"],
-            value: amount,
+        await wallet.extend(walletActionsL1()).depositTransaction({
+            request: { to, value: amount, mint: amount, gas: config.depositGasLimit },
+            targetChain: l2Chain,
         }),
     );
     process.exit(0);
