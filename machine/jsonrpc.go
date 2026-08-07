@@ -17,8 +17,7 @@ import (
 // Remote drives a cartesi-jsonrpc-machine server (the emulator's remote
 // machine protocol), pinned to the protocol of machine-emulator 0.21.0
 // (JSON-RPC "get_version" reports 0.7.0; the 0.21.0-test prereleases this
-// client was developed against reported 0.6.x, and every method used here is
-// unchanged between them).
+// client was developed against reported 0.6.x).
 //
 // The wire format was established by probing a running server, not by reading
 // its rpc.discover schema: in the test prereleases the schema advertised
@@ -26,8 +25,11 @@ import (
 // 0.21.0 release reconciled the two — the schema now says machine.read_reg
 // and machine.is_empty exists — so the probed surface and the published one
 // finally agree. Byte buffers and hashes are base64, registers are read
-// through machine.read_reg, cmio requests are fetched with an explicit length,
-// and responses carry the root hash to revert to on rejection.
+// through machine.read_reg, and cmio requests are fetched with an explicit
+// length. One method tightened between the prereleases and the release:
+// send_cmio_response takes the revert root hash only on advance-state
+// responses — required there, verified against the machine's own root — and
+// refuses it on every other kind (see sendCmioResponse).
 //
 // Snapshots map onto the server's "fork" method, which spawns a copy-on-write
 // child server, so Fork and Close are process lifecycle operations on the
@@ -232,15 +234,25 @@ func (r *Remote) receiveCmioRequest(ctx context.Context) (*cmioRequest, error) {
 	return &req, nil
 }
 
-// sendCmioResponse hands the guest its input. revertRootHash is the state the
-// emulator returns to if the guest ends up rejecting this input, which is what
-// makes a rejection leave no trace.
-func (r *Remote) sendCmioResponse(ctx context.Context, reason uint16, data []byte, revertRootHash common.Hash) error {
-	return r.call(ctx, "machine.send_cmio_response", map[string]any{
-		"revert_root_hash": base64.StdEncoding.EncodeToString(revertRootHash.Bytes()),
-		"reason":           reason,
-		"data":             base64.StdEncoding.EncodeToString(data),
-	}, nil)
+// sendCmioResponse hands the guest a response, and 0.21.0 is strict about the
+// revert_root_hash parameter: an advance-state response REQUIRES it — the
+// state the machine returns to if the guest rejects the input, which is what
+// makes a rejection leave no trace — and the machine checks it equals its own
+// current root hash, so it is a cross-check binding the host's view to the
+// machine's state rather than a free choice. Every other response kind
+// (inspect-state, GIO) must OMIT it: the machine refuses the call otherwise
+// ("revert root hash is only accepted for advance-state responses"), because
+// it never records a revert point for them. A nil revertRootHash omits the
+// parameter.
+func (r *Remote) sendCmioResponse(ctx context.Context, reason uint16, data []byte, revertRootHash *common.Hash) error {
+	params := map[string]any{
+		"reason": reason,
+		"data":   base64.StdEncoding.EncodeToString(data),
+	}
+	if revertRootHash != nil {
+		params["revert_root_hash"] = base64.StdEncoding.EncodeToString(revertRootHash.Bytes())
+	}
+	return r.call(ctx, "machine.send_cmio_response", params, nil)
 }
 
 // storeSharing is the sharing mode Store uses, and it is not a free choice.
@@ -341,11 +353,14 @@ func (r *Remote) AdvanceInput(ctx context.Context, input []byte, maxCycles uint6
 	if err != nil {
 		return nil, err
 	}
+	// The pre-input root hash: the state a rejection reverts to, and — since
+	// 0.21.0 — a value the machine verifies against its own root before
+	// accepting the input at all.
 	revert, err := r.RootHash(ctx)
 	if err != nil {
 		return nil, err
 	}
-	if err := r.sendCmioResponse(ctx, CmioRxRequestAdvanceState, input, revert); err != nil {
+	if err := r.sendCmioResponse(ctx, CmioRxRequestAdvanceState, input, &revert); err != nil {
 		return nil, err
 	}
 	res := &AdvanceResult{}
@@ -378,11 +393,10 @@ func (r *Remote) Inspect(ctx context.Context, query []byte, maxCycles uint64) (*
 	if err != nil {
 		return nil, err
 	}
-	revert, err := r.RootHash(ctx)
-	if err != nil {
-		return nil, err
-	}
-	if err := r.sendCmioResponse(ctx, CmioRxRequestInspectState, query, revert); err != nil {
+	// No revert_root_hash: 0.21.0 refuses one on anything but an advance
+	// response, since the machine records no revert point for an inspect —
+	// the rollback is the caller discarding its fork.
+	if err := r.sendCmioResponse(ctx, CmioRxRequestInspectState, query, nil); err != nil {
 		return nil, err
 	}
 	res := &InspectResult{}
