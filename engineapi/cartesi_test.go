@@ -1,11 +1,15 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"math/big"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/beacon/engine"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -27,9 +31,15 @@ func newPublicServer(t *testing.T) (*rpcClient, *chain.Chain) {
 			{Reason: machine.CmioYieldAutomaticReasonTxReport, Data: []byte("why it happened")},
 		}
 	}
+	// Tagged like the routed guest answers (chain.ReportTag*): a return-
+	// tagged echo, so eth_call strips the tag and cartesi_inspect shows it.
 	m.InspectFn = func(query []byte) [][]byte {
-		return [][]byte{append([]byte("answer:"), query...)}
+		if bytes.Contains(query, []byte("REVERTME")) {
+			return [][]byte{append([]byte{chain.ReportTagRevert}, revertData("nope")...)}
+		}
+		return [][]byte{append(append([]byte{chain.ReportTagReturn}, []byte("answer:")...), query...)}
 	}
+	m.RejectFn = func(query []byte) bool { return bytes.Contains(query, []byte("REVERTME")) }
 	pool := mempool.New(64)
 	c, err := chain.New(context.Background(), chain.Config{ChainID: 901, GenesisTimestamp: 1000}, m, pool)
 	if err != nil {
@@ -184,35 +194,100 @@ func TestCartesiGetOutputsRoot(t *testing.T) {
 	}
 }
 
-// eth_call runs the machine's inspect protocol and returns the reports.
+// revertData ABI-encodes Error(string), the require-style revert payload.
+func revertData(reason string) []byte {
+	stringTy, err := abi.NewType("string", "", nil)
+	if err != nil {
+		panic(err)
+	}
+	packed, err := (abi.Arguments{{Type: stringTy}}).Pack(reason)
+	if err != nil {
+		panic(err)
+	}
+	return append([]byte{0x08, 0xc3, 0x79, 0xa0}, packed...)
+}
+
+// eth_call wraps the query in the EvmCall envelope, runs inspect, and strips
+// the return tag from the guest's report.
 func TestEthCallRunsInspect(t *testing.T) {
 	client, c := newPublicServer(t)
 	sequenceOneBlock(t, c)
 
 	headBefore := c.HeadBlock().Hash()
 
+	from := common.HexToAddress("0xabcd")
+	to := common.HexToAddress("0x1234")
+
 	var result hexutil.Bytes
 	client.call("eth_call", &result, map[string]any{
-		"to":   common.HexToAddress("0x1234"),
-		"data": hexutil.Bytes("ping"),
+		"from":  from,
+		"to":    to,
+		"value": (*hexutil.Big)(big.NewInt(7)),
+		"data":  hexutil.Bytes("ping"),
 	}, "latest")
-	if string(result) != "answer:ping" {
-		t.Errorf("eth_call returned %q, want the inspect report", result)
+	// The mock echoes its query, so the result doubles as proof of the
+	// envelope the shim built: EvmCall(chainId, from, to, value, data).
+	envelope, err := chain.EncodeEvmCall(901, from, to, big.NewInt(7), []byte("ping"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := append([]byte("answer:"), envelope...)
+	if !bytes.Equal(result, want) {
+		t.Errorf("eth_call returned %x, want the tag-stripped echo of the EvmCall envelope", result)
 	}
 
-	// And the same query through the cartesi namespace, which keeps the
-	// reports separate rather than concatenating them.
+	// The same raw payload through the cartesi namespace passes through
+	// untouched — no envelope, and the framing tag stays visible.
 	var inspect InspectResult
 	client.call("cartesi_inspect", &inspect, hexutil.Bytes("ping"), "latest")
 	if !inspect.Accepted {
 		t.Error("inspect was rejected")
 	}
-	if len(inspect.Reports) != 1 || string(inspect.Reports[0]) != "answer:ping" {
+	wantRaw := append([]byte{chain.ReportTagReturn}, []byte("answer:ping")...)
+	if len(inspect.Reports) != 1 || !bytes.Equal(inspect.Reports[0], wantRaw) {
 		t.Errorf("inspect reports %q", inspect.Reports)
 	}
 
 	if c.HeadBlock().Hash() != headBefore {
 		t.Error("a read-only query moved the chain head")
+	}
+}
+
+// A rejected inspect with a revert-tagged report becomes the standard
+// Ethereum revert error: code 3, the decoded Error(string) reason in the
+// message, and the raw revert bytes in data — which is what lets viem and
+// cast surface require-style messages.
+func TestEthCallRevertCarriesData(t *testing.T) {
+	client, c := newPublicServer(t)
+	sequenceOneBlock(t, c)
+
+	rpcErr := client.callError("eth_call", map[string]any{
+		"to":   common.HexToAddress("0x1234"),
+		"data": hexutil.Bytes("REVERTME"),
+	}, "latest")
+	if rpcErr.Code != 3 {
+		t.Errorf("revert error code %d, want 3", rpcErr.Code)
+	}
+	if !strings.Contains(rpcErr.Message, "execution reverted: nope") {
+		t.Errorf("revert message %q, want the decoded Error(string) reason", rpcErr.Message)
+	}
+	var data hexutil.Bytes
+	if err := json.Unmarshal(rpcErr.Data, &data); err != nil {
+		t.Fatalf("revert data is not hex bytes: %v", err)
+	}
+	if !bytes.Equal(data, revertData("nope")) {
+		t.Errorf("revert data %x, want the Error(string) encoding", data)
+	}
+}
+
+// eth_call without a target has nothing to route: there is no contract
+// creation to simulate on this chain.
+func TestEthCallRequiresTo(t *testing.T) {
+	client, c := newPublicServer(t)
+	sequenceOneBlock(t, c)
+	rpcErr := client.callError("eth_call", map[string]any{"data": hexutil.Bytes("ping")}, "latest")
+	if !strings.Contains(rpcErr.Message, "requires 'to'") {
+		t.Errorf("error %q, want the missing-to explanation", rpcErr.Message)
 	}
 }
 

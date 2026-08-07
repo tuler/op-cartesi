@@ -1,11 +1,8 @@
 package engineapi
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"math/big"
-	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -113,36 +110,6 @@ func TestGetBalanceAndNonceFromTheDrive(t *testing.T) {
 	}
 }
 
-// callError performs an RPC call expected to fail and returns the error
-// message; the regular call helper treats any RPC error as fatal.
-func (c *rpcClient) callError(method string, params ...any) string {
-	c.t.Helper()
-	c.nextID++
-	body, err := json.Marshal(map[string]any{
-		"jsonrpc": "2.0", "id": c.nextID, "method": method, "params": params,
-	})
-	if err != nil {
-		c.t.Fatal(err)
-	}
-	resp, err := http.Post(c.url, "application/json", bytes.NewReader(body))
-	if err != nil {
-		c.t.Fatal(err)
-	}
-	defer resp.Body.Close()
-	var rr struct {
-		Error *struct {
-			Message string `json:"message"`
-		} `json:"error"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
-		c.t.Fatal(err)
-	}
-	if rr.Error == nil {
-		c.t.Fatalf("%s: expected an RPC error, got success", method)
-	}
-	return rr.Error.Message
-}
-
 // cartesi_getAccountProof is a proof endpoint: against a machine that cannot
 // produce Merkle proofs (the mock — machine.get_proof needs an emulator) it
 // must error rather than serve unproven pages. The record/walk assembly it
@@ -157,7 +124,7 @@ func TestGetAccountProofWithoutEmulatorErrs(t *testing.T) {
 	})
 	sequenceOneBlock(t, c)
 
-	msg := client.callError("cartesi_getAccountProof", alice, "latest")
+	msg := client.callError("cartesi_getAccountProof", alice, "latest").Message
 	if !strings.Contains(msg, "mock") {
 		t.Fatalf("error %q does not name the mock's missing proof capability", msg)
 	}

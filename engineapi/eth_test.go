@@ -234,12 +234,12 @@ func TestFeeHistoryClampsToAvailableBlocks(t *testing.T) {
 	}
 
 	// A window ending beyond the head is an error, as geth reports it.
-	if msg := client.callError("eth_feeHistory", "0x1", "0x99", []float64{}); !strings.Contains(msg, "beyond head") {
+	if msg := client.callError("eth_feeHistory", "0x1", "0x99", []float64{}).Message; !strings.Contains(msg, "beyond head") {
 		t.Errorf("beyond-head error %q does not say so", msg)
 	}
 
 	// Misordered percentiles are an error, as geth reports them.
-	if msg := client.callError("eth_feeHistory", "0x1", "latest", []float64{75, 25}); !strings.Contains(msg, "percentile") {
+	if msg := client.callError("eth_feeHistory", "0x1", "latest", []float64{75, 25}).Message; !strings.Contains(msg, "percentile") {
 		t.Errorf("percentile error %q does not name the percentiles", msg)
 	}
 }
@@ -278,7 +278,7 @@ func TestEstimateGasServesTheInputBudget(t *testing.T) {
 		t.Errorf("estimate at latest = %d, want %d", est, want)
 	}
 	// ...so a block that does not exist is an error, not an estimate.
-	if msg := client.callError("eth_estimateGas", args, "0x99"); msg == "" {
+	if msg := client.callError("eth_estimateGas", args, "0x99").Message; msg == "" {
 		t.Error("estimating against a missing block did not error")
 	}
 }

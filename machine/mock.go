@@ -94,12 +94,14 @@ func (m *Mock) Inspect(_ context.Context, query []byte, maxCycles uint64) (*Insp
 	if cycles > maxCycles {
 		return nil, ErrCycleLimit
 	}
-	if m.RejectFn != nil && m.RejectFn(query) {
-		return &InspectResult{Accepted: false, Cycles: cycles}, nil
-	}
 	reports := [][]byte{query}
 	if m.InspectFn != nil {
 		reports = m.InspectFn(query)
+	}
+	if m.RejectFn != nil && m.RejectFn(query) {
+		// A rejected inspect still surfaces its reports, as the real machine
+		// does — they are usually the only explanation of the rejection.
+		return &InspectResult{Accepted: false, Cycles: cycles, Reports: reports}, nil
 	}
 	return &InspectResult{Accepted: true, Cycles: cycles, Reports: reports}, nil
 }

@@ -158,22 +158,23 @@ with a raw payload. Pointing the devnet at the ledger-app snapshot
 
 ```sh
 bun devnet/deposit.ts 0x00000000000000000000000000000000000a11ce 1000000000000000000
-
-# a few L2 blocks later, on either node:
-cast rpc eth_call \
-  '{"to":"0x0000000000000000000000000000000000000000",
-    "data":"0x00000000000000000000000000000000000a11ce"}' latest \
-  --rpc-url http://127.0.0.1:8545
-# "0x...0de0b6b3a7640000"
+# ...the script follows the deposit to its derived L2 transaction, then:
+bun devnet/balance.ts 0x00000000000000000000000000000000000a11ce
 ```
 
-The balance is kept by the guest (`bank-app.sh`), not by the shim, on the
-accounts drive of [docs/ACCOUNTS.md](../docs/ACCOUNTS.md), so it is part of
-the state the machine's Merkle root commits to — and readable two ways: the
-`eth_call` above runs the guest's own inspect protocol on a discarded fork,
-while plain `eth_getBalance` reads the drive record straight out of machine
-memory with no execution at all. `eth_getTransactionCount` is served the same
-way (the nonce is 0 until the guest starts enforcing nonces).
+The balance is kept by the guest, not by the shim, on the accounts drive of
+[docs/ACCOUNTS.md](../docs/ACCOUNTS.md), so it is part of the state the
+machine's Merkle root commits to — and readable two ways: plain
+`eth_getBalance` reads the drive record straight out of machine memory with
+no execution at all (`eth_getTransactionCount` likewise), while `eth_call`
+runs the guest's inspect protocol on a discarded fork. Since the shim
+learned EVM-COMPAT §7's envelope, `eth_call` wraps every query as
+`EvmCall(chainId, from, to, value, data)` and unwraps the guest's tagged
+reports — return data on accept, a code-3 revert error with data on reject —
+which is what lets `readContract` and `cast call` treat guest handlers as
+ordinary contracts. Guests speaking their own inspect dialect (the Lua bank
+app) are reached through `cartesi_inspect`, which stays a raw passthrough in
+both directions.
 
 This calls `OptimismPortal.depositTransaction` — the path a real user takes —
 and requires the deployed contract suite; on a `WITH_CONTRACTS=0` devnet
