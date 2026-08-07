@@ -98,8 +98,12 @@ accounts drive, the geometry is consensus once the snapshot is stored.
 
 - `@cartesi/abis` (this repo, `abi-drive/js`) — reference reader/writer over
   a byte store; the guest runtime uses it to record registrations at boot.
-- The shim (Go) — planned: read the drive through `machine.ReadMemory` by
-  drive label, the same path `AccountAt` uses on the accounts drive, and
-  serve discovery RPC (`cartesi_getContracts`) and `eth_getCode` markers
-  from it. Until then the drive is host-readable from any stored snapshot
-  with the layout above.
+  `abi-drive/js/golden.ts` writes the golden image the Go tests read, which
+  is what pins the two implementations to the same bytes.
+- `abi-drive/go` (this repo) — the shim's reader, over the same `Store`
+  abstraction as `accounts-drive/go`. The shim discovers the drive by its
+  label (`abi`), reads it through `machine.ReadMemory` — the `AccountAt`
+  path — and serves `eth_getCode` markers from it: `0xEF 0xC7 0x51 <kind>`,
+  with kind 0/1 straight from the index and 2 for token façades derived
+  from the accounts drive's registry (`chain/code.go`). The discovery RPC
+  (`cartesi_getContracts`) is next.

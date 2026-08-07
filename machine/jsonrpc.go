@@ -457,6 +457,8 @@ func (r *Remote) ReadMemory(ctx context.Context, address, length uint64) ([]byte
 const (
 	accountsDriveLabel        = "accounts"
 	accountsDriveDefaultStart = uint64(0x80000000000000)
+	// abiDriveLabel is the ABI drive's label (docs/ABI-DRIVE-SPEC.md §5).
+	abiDriveLabel = "abi"
 )
 
 // AccountsDriveStart discovers the accounts drive's start address, by label
@@ -471,6 +473,28 @@ const (
 // drive's magic check, so at worst "config unreadable" degrades into "drive
 // unreadable", never into misread balances.
 func (r *Remote) AccountsDriveStart(ctx context.Context) (start uint64, found bool, err error) {
+	start, found = r.driveStart(ctx, accountsDriveLabel)
+	if !found && !r.configKnown(ctx) {
+		// No config to consult: fall back to the spec's well-known start.
+		return accountsDriveDefaultStart, true, nil
+	}
+	return start, found, nil
+}
+
+// AbiDriveStart discovers the ABI drive (docs/ABI-DRIVE-SPEC.md) by its
+// label. Unlike the accounts drive it has no well-known fallback address:
+// a machine whose config does not declare it simply has none.
+func (r *Remote) AbiDriveStart(ctx context.Context) (start uint64, found bool, err error) {
+	start, found = r.driveStart(ctx, abiDriveLabel)
+	return start, found, nil
+}
+
+func (r *Remote) configKnown(ctx context.Context) bool {
+	var cfg struct{}
+	return r.call(ctx, "machine.get_initial_config", nil, &cfg) == nil
+}
+
+func (r *Remote) driveStart(ctx context.Context, label string) (start uint64, found bool) {
 	var cfg struct {
 		FlashDrive []struct {
 			Label string `json:"label"`
@@ -478,14 +502,14 @@ func (r *Remote) AccountsDriveStart(ctx context.Context) (start uint64, found bo
 		} `json:"flash_drive"`
 	}
 	if err := r.call(ctx, "machine.get_initial_config", nil, &cfg); err != nil {
-		return accountsDriveDefaultStart, true, nil
+		return 0, false
 	}
 	for _, d := range cfg.FlashDrive {
-		if d.Label == accountsDriveLabel {
-			return d.Start, true, nil
+		if d.Label == label {
+			return d.Start, true
 		}
 	}
-	return 0, false, nil
+	return 0, false
 }
 
 // MerkleProof is machine.get_proof's answer: the aligned range
