@@ -4,7 +4,7 @@
 // wire's hex quantities converted at the boundary so call sites speak
 // bigint.
 
-import { numberToHex, type Account, type Chain, type Client, type Hex, type Transport } from "viem";
+import { numberToHex, type Abi, type Account, type Address, type Chain, type Client, type Hex, type Transport } from "viem";
 
 /** What cartesi_getTransactionEmissions returns: the transaction's provable
  * outputs with their chain-wide indices, and its diagnostic reports. */
@@ -18,6 +18,24 @@ export interface TransactionEmissions {
 export interface OutputProof {
     output: Hex;
     outputHashesSiblings: Hex[];
+}
+
+/** One routed address, as cartesi_getContracts reports it: the recorded
+ * contracts carry their standard JSON ABI; token façades carry the L1 token
+ * instead — their shared ABI is fixed by the standard (erc20FacadeAbi). */
+export interface ContractEntry {
+    address: Address;
+    kind: "system" | "app" | "token";
+    abi?: Abi;
+    l1Token?: Address;
+}
+
+/** What cartesi_getContracts returns: the guest's interface surface as of a
+ * block — the ABI drive's contracts plus the registry's token façades. */
+export interface ContractsList {
+    blockHash: Hex;
+    blockNumber: Hex;
+    contracts: ContractEntry[];
 }
 
 /** The raw schema, for createClient({ rpcSchema: rpcSchema<...>() }) — the
@@ -34,6 +52,11 @@ export type CartesiRpcSchema = [
         Parameters: [Hex, Hex];
         ReturnType: OutputProof;
     },
+    {
+        Method: "cartesi_getContracts";
+        Parameters: [] | [Hex];
+        ReturnType: ContractsList;
+    },
 ];
 
 // A type alias, deliberately not an interface: .extend()'s constraint wants
@@ -48,6 +71,10 @@ export type CartesiActions = {
      * the tree is cumulative, so a withdrawal stays provable against every
      * later proposal. */
     getOutputProof(args: { index: bigint; blockNumber: bigint }): Promise<OutputProof>;
+    /** The guest's interface surface as of a block (defaults to the head):
+     * every routed address, with ABIs for the recorded contracts and the L1
+     * token behind each façade. */
+    getContracts(args?: { blockNumber?: bigint }): Promise<ContractsList>;
 };
 
 // Shaped exactly like viem's own decorators: generic over transport, chain
@@ -67,6 +94,11 @@ export function cartesiActions() {
             client.request({
                 method: "cartesi_getOutputProof",
                 params: [numberToHex(index), numberToHex(blockNumber)],
+            }),
+        getContracts: (args) =>
+            client.request({
+                method: "cartesi_getContracts",
+                params: args?.blockNumber !== undefined ? [numberToHex(args.blockNumber)] : [],
             }),
     });
 }

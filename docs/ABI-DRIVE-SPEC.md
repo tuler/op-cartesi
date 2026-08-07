@@ -105,5 +105,7 @@ accounts drive, the geometry is consensus once the snapshot is stored.
   label (`abi`), reads it through `machine.ReadMemory` — the `AccountAt`
   path — and serves `eth_getCode` markers from it: `0xEF 0xC7 0x51 <kind>`,
   with kind 0/1 straight from the index and 2 for token façades derived
-  from the accounts drive's registry (`chain/code.go`). The discovery RPC
-  (`cartesi_getContracts`) is next.
+  from the accounts drive's registry (`chain/code.go`). The discovery RPC,
+  `cartesi_getContracts`, serves the full surface from the same reads: the
+  recorded contracts with their ABIs embedded, and each façade with the L1
+  token it serves (`devnet/contracts.ts` prints it).

@@ -86,6 +86,82 @@ func (c *Chain) abiDriveBase(ctx context.Context, m machine.Machine) (uint64, er
 	return base, nil
 }
 
+// Contract is one routed address the guest serves, as discovery reports it.
+type Contract struct {
+	Address common.Address
+	Kind    byte // CodeKindSystem, CodeKindApp or CodeKindToken
+	// Abi is the recorded standard JSON ABI text, straight from the ABI
+	// drive. Nil for token façades: their shared ABI is fixed by the
+	// standard (EVM-COMPAT §9), not recorded per token.
+	Abi []byte
+	// L1Token names the registered L1 token a façade serves; nil otherwise.
+	L1Token *common.Address
+}
+
+// ContractsAt lists everything the guest routes as of the block, from the
+// same two sources CodeAt reads: the ABI drive's recorded contracts
+// (registration order), then the token façades derived from the accounts
+// drive's registry (id order). A machine missing one drive or the other
+// simply contributes nothing from it.
+func (c *Chain) ContractsAt(ctx context.Context, blockHash common.Hash) ([]Contract, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	m, ok := c.machines[blockHash]
+	if !ok {
+		return nil, fmt.Errorf("%w: %s", ErrNoSnapshot, blockHash)
+	}
+	read := func(address, length uint64) ([]byte, error) {
+		return m.ReadMemory(ctx, address, length)
+	}
+
+	var out []Contract
+	if base, err := c.abiDriveBase(ctx, m); err == nil {
+		d, err := abidrive.Open(&drive.MachineStore{Base: base, ReadMemory: read})
+		if err != nil && !errors.Is(err, abidrive.ErrNotFormatted) {
+			return nil, fmt.Errorf("opening the abi drive: %w", err)
+		}
+		if err == nil {
+			entries, err := d.Entries()
+			if err != nil {
+				return nil, fmt.Errorf("reading the abi drive: %w", err)
+			}
+			for _, e := range entries {
+				out = append(out, Contract{
+					Address: common.BytesToAddress(e.Address[:]),
+					Kind:    e.Kind,
+					Abi:     e.Abi,
+				})
+			}
+		}
+	} else if !errors.Is(err, errNoAbiDrive) {
+		return nil, err
+	}
+
+	base, err := c.accountsDriveBase(ctx, m)
+	if err != nil {
+		if errors.Is(err, ErrNoAccountsDrive) {
+			return out, nil
+		}
+		return nil, err
+	}
+	d, err := drive.Open(&drive.MachineStore{Base: base, ReadMemory: read})
+	if err != nil {
+		if errors.Is(err, drive.ErrNotFormatted) {
+			return out, nil
+		}
+		return nil, fmt.Errorf("opening the accounts drive: %w", err)
+	}
+	for _, t := range d.Tokens() {
+		l1 := common.BytesToAddress(t.Address[:])
+		out = append(out, Contract{
+			Address: L2TokenAddress(l1),
+			Kind:    CodeKindToken,
+			L1Token: &l1,
+		})
+	}
+	return out, nil
+}
+
 // CodeAt answers eth_getCode for the block: a marker for every address the
 // guest routes — recorded contracts out of the ABI drive, token façades
 // derived from the accounts drive's registry — and nil for everything else,

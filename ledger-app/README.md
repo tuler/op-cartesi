@@ -55,9 +55,9 @@ installs.
 
 ## Not here yet
 
-The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding and the
-`cartesi_getContracts` discovery RPC. (`eth_getCode` is done — the shim
-reads the ABI drive and the token registry by drive label and answers the
-`0xEFC751<kind>` markers, so wallets see routed addresses as contracts.)
+The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding.
+(Discovery is done — `eth_getCode` answers the `0xEFC751<kind>` markers so
+wallets see routed addresses as contracts, and `cartesi_getContracts`
+serves the full surface with ABIs; `bun devnet/contracts.ts` prints it.)
 The CLI also auto-places flash drives — the shim discovers both drives by
 label rather than assuming fixed starts.

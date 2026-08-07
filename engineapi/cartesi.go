@@ -2,6 +2,7 @@ package engineapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -111,6 +112,74 @@ func (a *CartesiAPI) GetOutputsRoot(_ context.Context, id rpc.BlockNumberOrHash)
 		Root:        tree.Root(),
 		Count:       hexutil.Uint64(tree.Count()),
 	}, nil
+}
+
+// ContractEntry is one routed address, as cartesi_getContracts reports it.
+type ContractEntry struct {
+	Address common.Address `json:"address"`
+	// Kind is "system" (a built-in of the standard), "app" (an application
+	// contract), or "token" (a registered token's ERC-20 façade).
+	Kind string `json:"kind"`
+	// Abi is the recorded standard JSON ABI, embedded as JSON — present for
+	// system and app entries. Token façades omit it: their shared ABI is
+	// fixed by the standard (EVM-COMPAT §9).
+	Abi json.RawMessage `json:"abi,omitempty"`
+	// L1Token names the registered L1 token a façade serves.
+	L1Token *common.Address `json:"l1Token,omitempty"`
+}
+
+// Contracts is cartesi_getContracts's answer: the guest's interface surface
+// as of a block.
+type Contracts struct {
+	BlockHash   common.Hash     `json:"blockHash"`
+	BlockNumber hexutil.Uint64  `json:"blockNumber"`
+	Contracts   []ContractEntry `json:"contracts"`
+}
+
+// GetContracts lists every address the guest routes as of a block — the
+// contracts recorded in the ABI drive with their ABIs, and the token façades
+// the accounts drive's registry implies — read straight off the parked
+// machine's drives, with no execution and no knowledge of the application's
+// implementation (EVM-COMPAT §10a). With the accounts drive serving balances
+// and this serving interfaces, a node answers "what does this chain speak?"
+// from drive bytes alone. The block tag defaults to the head.
+func (a *CartesiAPI) GetContracts(ctx context.Context, id *rpc.BlockNumberOrHash) (*Contracts, error) {
+	b, err := blockFromChainOptional(a.chain, id)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, fmt.Errorf("unknown block")
+	}
+	found, err := a.chain.ContractsAt(ctx, b.Hash())
+	if err != nil {
+		return nil, err
+	}
+	out := &Contracts{
+		BlockHash:   b.Hash(),
+		BlockNumber: hexutil.Uint64(b.NumberU64()),
+		Contracts:   make([]ContractEntry, 0, len(found)),
+	}
+	for _, c := range found {
+		entry := ContractEntry{Address: c.Address, L1Token: c.L1Token}
+		switch c.Kind {
+		case chain.CodeKindSystem:
+			entry.Kind = "system"
+		case chain.CodeKindApp:
+			entry.Kind = "app"
+		case chain.CodeKindToken:
+			entry.Kind = "token"
+		default:
+			entry.Kind = fmt.Sprintf("kind-%d", c.Kind)
+		}
+		// Embed the recorded ABI only when it is well-formed JSON — a drive
+		// written by a broken guest must not corrupt the whole response.
+		if len(c.Abi) > 0 && json.Valid(c.Abi) {
+			entry.Abi = json.RawMessage(c.Abi)
+		}
+		out.Contracts = append(out.Contracts, entry)
+	}
+	return out, nil
 }
 
 // InspectResult is the machine's answer to a read-only query.
