@@ -36,11 +36,17 @@ WORKDIR /opt/cartesi
 # Manifests first, for layer caching; bun resolves the whole workspace.
 COPY package.json bun.lock ./
 COPY accounts-drive/js/package.json accounts-drive/js/
+COPY abi-drive/js/package.json abi-drive/js/
+COPY evm-compat/js/package.json evm-compat/js/
+COPY routed-guest/package.json routed-guest/
 COPY ledger-app/package.json ledger-app/
 COPY devnet/package.json devnet/
 RUN bun install --frozen-lockfile
 
 COPY accounts-drive/ accounts-drive/
+COPY abi-drive/ abi-drive/
+COPY evm-compat/ evm-compat/
+COPY routed-guest/ routed-guest/
 COPY ledger-app/ ledger-app/
 RUN cd ledger-app && bun run build
 
@@ -88,6 +94,7 @@ ARG OWNER=0x90F79bf6EB2c4f870365E785982E1f101E93b906
 ENV CHAIN_ID=${CHAIN_ID}
 ENV OWNER=${OWNER}
 ENV ACCOUNTS_DRIVE=/dev/pmem1
+ENV ABI_DRIVE=/dev/pmem2
 
 WORKDIR /opt/cartesi/dapp
 COPY --from=build-stage /opt/cartesi/rootfs .

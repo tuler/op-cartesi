@@ -103,9 +103,10 @@ go build ./...
 go test ./...
 (cd integration && go test ./...)   # op-node compatibility suite
 
-# The TypeScript side is a bun workspace: the accounts-drive library
-# (accounts-drive/js), the routed guest prototype (ledger-app), and the
-# devnet client scripts (devnet/*.ts).
+# The TypeScript side is a bun workspace: the drive libraries
+# (accounts-drive/js, abi-drive/js), the EVM-compat wire vocabulary
+# (evm-compat/js), the guest runtime (routed-guest), the devnet guest
+# application (ledger-app), and the devnet client scripts (devnet/*.ts).
 bun install
 bun run test
 bun run typecheck

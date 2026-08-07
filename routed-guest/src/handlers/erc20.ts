@@ -3,21 +3,10 @@
 // sparse table. approve/allowance/transferFrom are deferred — every v1 money
 // path debits msg.sender, which the signature already authorizes.
 
-import { encodeFunctionResult, parseAbi } from "viem";
-import { tryDecodeCalldata } from "../abi.ts";
-import { transferLog } from "../events.ts";
-import { errorRevert } from "../evmcall.ts";
+import { erc20FacadeAbi as erc20Abi, errorRevert, transferLog, tryDecodeCalldata } from "@cartesi/evm-compat";
+import { encodeFunctionResult } from "viem";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, CallContext, Handler, OutputsSink, TxContext, ViewOutcome } from "../types.ts";
-
-export const erc20Abi = parseAbi([
-    "function balanceOf(address owner) view returns (uint256)",
-    "function totalSupply() view returns (uint256)",
-    "function decimals() view returns (uint8)",
-    "function name() view returns (string)",
-    "function symbol() view returns (string)",
-    "function transfer(address to, uint256 value) returns (bool)",
-]);
 
 export class Erc20Facade implements Handler {
     payable = false;

@@ -14,23 +14,10 @@
 // 128  bytes32 batcherHash
 // Isthmus appends: 160 uint32 operatorFeeScalar, 164 uint64 operatorFeeConstant.
 
-import { encodeFunctionResult, parseAbi, toFunctionSelector, toHex, type Hex } from "viem";
-import { tryDecodeCalldata } from "../abi.ts";
-import { errorRevert } from "../evmcall.ts";
+import { errorRevert, l1BlockAbi, tryDecodeCalldata } from "@cartesi/evm-compat";
+import { encodeFunctionResult, toFunctionSelector, toHex, type Hex } from "viem";
 import type { Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, CallContext, Handler, OutputsSink, TxContext, ViewOutcome } from "../types.ts";
-
-export const l1BlockAbi = parseAbi([
-    "function number() view returns (uint64)",
-    "function timestamp() view returns (uint64)",
-    "function basefee() view returns (uint256)",
-    "function blobBaseFee() view returns (uint256)",
-    "function hash() view returns (bytes32)",
-    "function sequenceNumber() view returns (uint64)",
-    "function batcherHash() view returns (bytes32)",
-    "function baseFeeScalar() view returns (uint32)",
-    "function blobBaseFeeScalar() view returns (uint32)",
-]);
 
 const SET_ECOTONE: Hex = toFunctionSelector("setL1BlockValuesEcotone()");
 const SET_ISTHMUS: Hex = toFunctionSelector("setL1BlockValuesIsthmus()");

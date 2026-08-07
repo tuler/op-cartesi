@@ -3,6 +3,9 @@
     "private": true,
     "workspaces": [
         "accounts-drive/js",
+        "abi-drive/js",
+        "evm-compat/js",
+        "routed-guest",
         "ledger-app",
         "devnet"
     ],

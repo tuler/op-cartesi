@@ -8,17 +8,10 @@
 // façade address, and the voucher tells the L1 token to move itself from the
 // application contract that has escrowed it since the deposit.
 
+import { bridgeAbi, errorRevert, transferLog, tryDecodeCalldata } from "@cartesi/evm-compat";
 import { encodeFunctionData, parseAbi, type Address } from "viem";
-import { tryDecodeCalldata } from "../abi.ts";
-import { transferLog } from "../events.ts";
-import { errorRevert } from "../evmcall.ts";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, Handler, OutputsSink, TxContext } from "../types.ts";
-
-export const bridgeAbi = parseAbi([
-    "function withdrawEther(address to) payable",
-    "function withdrawERC20(address token, address to, uint256 amount)",
-]);
 
 const erc20TransferAbi = parseAbi(["function transfer(address to, uint256 amount) returns (bool)"]);
 

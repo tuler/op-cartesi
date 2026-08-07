@@ -9,17 +9,8 @@
 // rollback on the bytes). Nothing a handler throws escapes: a crashed
 // handler is a deterministic reject, never a halted machine.
 
+import { BRIDGE_ADDRESS, CONFIG_ADDRESS, L1BLOCK_ADDRESS, REGISTRY_ADDRESS, addrKey, decodeEvmCall, encodeEvmLog, errorRevert, parseInput, recoverSender, sameAddress } from "@cartesi/evm-compat";
 import { concat, toHex, type Address, type Hex } from "viem";
-import {
-    BRIDGE_ADDRESS,
-    CONFIG_ADDRESS,
-    L1BLOCK_ADDRESS,
-    REGISTRY_ADDRESS,
-    addrKey,
-    sameAddress,
-} from "./addresses.ts";
-import { encodeEvmLog } from "./events.ts";
-import { decodeEvmCall, errorRevert } from "./evmcall.ts";
 import { Bridge } from "./handlers/bridge.ts";
 import { Config } from "./handlers/config.ts";
 import { Erc20Facade } from "./handlers/erc20.ts";
@@ -27,7 +18,6 @@ import { L1Block } from "./handlers/l1block.ts";
 import { PortalReceiver } from "./handlers/portal.ts";
 import { Registry } from "./handlers/registry.ts";
 import { AccountsDriveError, InsufficientFunds, type Ledger } from "./ledger.ts";
-import { parseInput, recoverSender } from "./tx.ts";
 import {
     TAG_APP,
     TAG_RETURN,
@@ -108,6 +98,17 @@ export class Router {
             return h ? { payable: h.payable ?? false } : undefined;
         };
         registry.list = () => [...this.manifest.keys()];
+    }
+
+    /** Adds a manifest entry — the application API's entry into the router.
+     * The manifest is fixed before the first input (EVM-COMPAT §10); this
+     * exists for boot-time registration, not dynamic deploy. */
+    register(address: Address, handler: Handler): void {
+        const key = addrKey(address);
+        if (this.manifest.has(key)) {
+            throw new Error(`address ${address} is already routed`);
+        }
+        this.manifest.set(key, handler);
     }
 
     /** Manifest first, then the portal receiver, then the token façades.

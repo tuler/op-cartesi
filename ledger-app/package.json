@@ -1,34 +1,21 @@
 {
     "name": "ledger-app",
     "version": "0.0.0",
-    "description": "The routed guest of docs/EVM-COMPAT.md, on @deroll/cmio",
+    "description": "The devnet guest: @cartesi/routed-guest booted with the devnet genesis, plus the app-specific contracts",
     "type": "module",
-    "exports": {
-        "./addresses": "./src/addresses.ts",
-        "./evmcall": "./src/evmcall.ts",
-        "./events": "./src/events.ts",
-        "./types": "./src/types.ts",
-        "./handlers/bridge": "./src/handlers/bridge.ts",
-        "./handlers/config": "./src/handlers/config.ts",
-        "./handlers/erc20": "./src/handlers/erc20.ts",
-        "./handlers/l1block": "./src/handlers/l1block.ts",
-        "./handlers/registry": "./src/handlers/registry.ts"
-    },
     "dependencies": {
-        "@cartesi/accounts": "workspace:*",
+        "@cartesi/routed-guest": "workspace:*",
         "@deroll/cmio": "alpha",
         "viem": "^2.55.10"
     },
     "devDependencies": {
         "@types/node": "^26.1.2",
         "esbuild": "^0.28.1",
-        "typescript": "^7.0.2",
-        "vitest": "^4.1.10"
+        "typescript": "^7.0.2"
     },
     "scripts": {
         "build": "node esbuild.mts",
         "clean": "rm -rf node_modules && rm -rf dist",
-        "test": "vitest run",
         "typecheck": "tsc --noEmit"
     },
     "keywords": [

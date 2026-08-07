@@ -1,0 +1,27 @@
+{
+    "name": "@cartesi/abis",
+    "version": "0.0.0",
+    "description": "The ABI drive (docs/ABI-DRIVE-SPEC.md): a machine-readable registry of the contracts a routed guest serves, and their ABIs",
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts",
+        "./package.json": "./package.json"
+    },
+    "dependencies": {
+        "@cartesi/accounts": "workspace:*",
+        "viem": "^2.55.10"
+    },
+    "devDependencies": {
+        "@types/node": "^26.1.2",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
+    },
+    "scripts": {
+        "test": "vitest run",
+        "typecheck": "tsc --noEmit"
+    },
+    "keywords": [
+        "cartesi",
+        "op-cartesi"
+    ]
+}

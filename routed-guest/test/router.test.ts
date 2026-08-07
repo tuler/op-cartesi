@@ -143,8 +143,8 @@ describe("fees", () => {
         const { router, ledger } = await makeRouter();
         // Owner needs no balance while the fee is zero.
         const { encodeFunctionData } = await import("viem");
-        const { configAbi } = await import("../src/handlers/config.ts");
-        const { CONFIG_ADDRESS } = await import("../src/addresses.ts");
+        const { configAbi } = await import("@cartesi/evm-compat");
+        const { CONFIG_ADDRESS } = await import("@cartesi/evm-compat");
         const setFee = encodeFunctionData({ abi: configAbi, functionName: "setFee", args: [7n] });
         const res = await router.advance(
             block(),
@@ -162,8 +162,8 @@ describe("fees", () => {
         const { router, ledger } = await makeRouter();
         await router.advance(block(), depositTx({ from: user.address, to: user.address, mint: 100n, value: 100n }));
         const { encodeFunctionData } = await import("viem");
-        const { configAbi } = await import("../src/handlers/config.ts");
-        const { CONFIG_ADDRESS } = await import("../src/addresses.ts");
+        const { configAbi } = await import("@cartesi/evm-compat");
+        const { CONFIG_ADDRESS } = await import("@cartesi/evm-compat");
         const setFee = encodeFunctionData({ abi: configAbi, functionName: "setFee", args: [5n] });
         await router.advance(block(), await signedTx(owner, { to: CONFIG_ADDRESS, nonce: 0, data: setFee }));
 

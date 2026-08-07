@@ -239,7 +239,7 @@ contract mint claims against tokens the application really holds.
 The guest never runs a machine on the host, but its logic does:
 
 ```sh
-cd ledger-app && bun run test
+bun run test    # at the repo root: routed-guest + abi-drive suites
 ```
 
 The vitest suite drives the router with hand-built deposits and signed

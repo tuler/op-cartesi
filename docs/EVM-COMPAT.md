@@ -626,13 +626,58 @@ one the router already owns: all drive bytes current at every yield
 after the journal commits — handlers never sync, and out-of-process
 handlers never see the device at all.
 
+### 10a. The application API, as built: ABI-driven registration
+
+The prototype realizes the manifest as an API rather than a file. The
+runtime is a workspace library (`@cartesi/routed-guest`); an application
+boots it and declares each contract as **an address, an ABI, and
+callbacks**:
+
+```ts
+const guest = await Guest.boot({ chainId, owner });
+await guest.contract({ address, abi, transactions: {...}, views: {...} });
+await guest.run();
+```
+
+The library owns everything the standard specifies — admission, dispatch,
+outcomes, encodings — and the application owns only its semantics:
+
+- **Dispatch is ABI-driven.** Calldata decodes against the registered ABI;
+  the function's `stateMutability` decides which side may run it
+  (`transactions` for nonpayable/payable, `views` for view/pure). View
+  results are plain values; the library ABI-encodes them.
+- **Exceptions are reverts** — the EVM's own rule. A thrown `Revert`
+  carries chosen revert data; any other exception reverts with its message
+  as `Error(string)`. The one escalation is a drive-format refusal
+  (`AccountsDriveError`), which reaches the router and rejects (§5, §8).
+- **Application state reverts with the ledger**: `guest.store(n)` returns a
+  byte store journaled through the router's journal, rolled back on REVERT
+  and REJECT exactly like drive bytes. It lives in machine RAM — machine
+  state, but not outside-readable; what must be readable belongs in a
+  drive.
+- **The reserved namespaces are enforced at registration**: the 0xC751
+  pattern and the adopted predeploys refuse application addresses.
+
+And the manifest becomes machine-readable state: every registered address
+and its ABI — built-ins as kind 0, applications as kind 1 — is recorded in
+the **ABI drive** (ABI-DRIVE-SPEC.md) at boot, before the first yield, so
+the record is genesis state under the genesis root. This closes the
+discovery loop the drives were always pointing at: the **accounts drive**
+names the tokens a machine serves, the **ABI drive** names the contracts
+and their interfaces — so the chain, or anyone holding a snapshot, knows
+what the machine speaks by reading drive bytes, with zero knowledge of the
+application's implementation. It is the natural bridge for outside
+communication: the shim can serve contract discovery
+(`cartesi_getContracts`) and `eth_getCode` markers from the same
+read-memory path `AccountAt` already uses.
+
 ## 11. What changes where
 
 | Layer | Change |
 |---|---|
 | **Consensus / wire** | **Nothing.** EvmAdvance unchanged, block format unchanged, outputs tree and voucher encodings unchanged, op-node/op-batcher/op-proposer untouched, L1 contracts untouched. |
-| **Guest** | The router (native, reference implementation of the standard) replaces `bank-app.sh`: CMIO loop, outputs accumulator, typed-tx sighash, enforcement, journal, manifest dispatch, built-in family. The accounts drive and its libraries: unchanged. |
-| **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `engineapi/eth.go`)*; receipts try the `EvmLog` decode; `eth_getCode` serves markers from the registry view; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
+| **Guest** | The router (native, reference implementation of the standard) replaces `bank-app.sh`: CMIO loop, outputs accumulator, typed-tx sighash, enforcement, journal, manifest dispatch, built-in family. The accounts drive and its libraries: unchanged. *(done, as workspace libraries — `@cartesi/routed-guest` the runtime, `@cartesi/evm-compat` the wire vocabulary, `@cartesi/abis` the ABI drive; `ledger-app` is an application of them, §10a)* |
+| **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `engineapi/eth.go`)*; receipts try the `EvmLog` decode; `eth_getCode` markers and `cartesi_getContracts` read the ABI drive (§10a) over the `AccountAt` path; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
 | **Devnet** | `build-snapshot.sh` ships the router; the dialect scripts collapse into standard tooling — `cast send $TOKEN "transfer(address,uint256)" …`, `cast call $TOKEN "balanceOf(address)" …`, `cast send $BRIDGE "withdrawEther(address)" --value …` — and `send-l2-tx.sh` drops `--legacy`. Scripts getting shorter is the acceptance test. |
 | **Tests** | The realmachine suite keeps its role with the new guest *(done — its inputs now speak the standard)*; enforcement (sighash, recovery, nonce) is covered by the router's vitest suite, retiring `test-guest.lua`; golden accounts-drive vectors already cover the ledger. |
 
@@ -717,7 +762,9 @@ guest did.
    enforcement vectors of the Lua guest's `test-guest.lua` (since retired
    in favor of the vitest suite).
 3. **The shim half**: `EvmCall` in `eth_call` + revert mapping, `EvmLog`
-   receipts, `eth_getCode`, `CallArgs.From/Value`.
+   receipts, `CallArgs.From/Value`; then the ABI drive's Go reader —
+   `cartesi_getContracts` and `eth_getCode` markers from drive bytes
+   (§10a), mirroring `AccountAt`.
 4. **Devnet swap**: router into `build-snapshot.sh`, dialect scripts
    replaced by `cast` one-liners, realmachine suite green.
 5. **Later, in this order of pull**: `EvmSimulate` under

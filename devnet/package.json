@@ -5,7 +5,7 @@
     "description": "Devnet client scripts: viem on bun, replacing the cast/curl shell scripts",
     "type": "module",
     "dependencies": {
-        "ledger-app": "workspace:*",
+        "@cartesi/evm-compat": "workspace:*",
         "viem": "^2.55.10"
     },
     "devDependencies": {

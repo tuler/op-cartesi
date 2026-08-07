@@ -1,80 +1,62 @@
-# ledger-app: the routed guest, prototyped
+# ledger-app: the devnet guest
 
-The guest half of **[docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md)** in
-TypeScript: a router that dispatches every transaction and every call on its
-`to` address to native handlers, over [`@deroll/cmio`](https://github.com/tuler/deroll)
-(the Node.js binding for libcmt) with viem doing the Ethereum heavy lifting —
-transaction parsing (legacy, EIP-2930, EIP-1559, OP deposits), sender
-recovery, ABI encode/decode.
+The devnet's application, and deliberately small: it boots
+[`@cartesi/routed-guest`](../routed-guest) with the devnet genesis
+(`CHAIN_ID`, `OWNER` from the image environment) and registers the one
+app-specific contract — a counter at `0xc0de…01`, the smallest honest
+demonstration of the standard's fall-through: an ABI, callbacks, and
+revert-safe state in a journaled store.
 
-What works, exercised by the vitest suite (`bun run test`, host-side, no
-machine needed):
+Everything standard lives in the workspace libraries:
 
-- **Enforcement in the router**: signature recovery, the EIP-2 low-s rule,
-  the chain-id pin, nonce equality, fee-and-value cover — uniformly, before
-  any dispatch. Typed transactions are first-class; `--legacy` is dead.
-- **The three-outcome model**: ACCEPT / REVERT / REJECT, with a byte-level
-  write journal over the accounts drive so a revert rolls back the handler
-  and the value transfer while still consuming nonce and fee — failed
-  transactions are not free. Charged under the fee schedule the transaction
-  entered under.
-- **The built-in family**: native ether transfers; the ERC-20 façade over
-  the accounts drive at derived addresses (`balanceOf`, `transfer`,
-  `totalSupply`, metadata) emitting real `Transfer` events; the bridge
-  (`withdrawEther`/`withdrawERC20` → vouchers); the owner config contract
-  (`setFee`, `registerPortal`, `registerToken`); the adopted `L1Block`
-  predeploy fed by op-node's own attributes deposit; and the Cartesi-portal
-  receiver at the application contract address.
-- **Events as `EvmLog` notices**, provable in the outputs tree, decodable
-  into standard receipt logs.
-- **`EvmCall` / `EvmSimulate` over inspect**, with one-byte report framing
-  (0x00 app, 0x01 return data, 0x02 revert data) so `eth_call` can return
-  ABI words and surface `Error(string)` reverts.
-
-The ledger is the **accounts drive** (docs/ACCOUNTS-DRIVE-SPEC.md), via the
-TypeScript library at `accounts-drive/js` — a bun workspace dependency
-(`@cartesi/accounts`), consumed as source. The snapshot build makes this
-work by using the repo root as its docker context (`cartesi.toml` sets
-`context = ".."`), so the workspace resolves inside the build too.
-
-## On @deroll/cmio vs @deroll/app
-
-This app deliberately sits on the low-level `Rollup` binding, not
-`createApp`: the app layer's handler-chain model (every handler sniffs every
-payload) is exactly the single-app pattern EVM-COMPAT replaces with address
-routing, and its inspect handlers cannot reject — which is how `eth_call`
-reverts travel. `@deroll/cmio` fits as-is: envelope decode, outputs with the
-libcmt-maintained outputs-root accumulator, reports, and boolean
-accept/reject for both request kinds. The router layer here is in effect the
-seed of a `@deroll/op` package, if it grows up.
+- [`@cartesi/routed-guest`](../routed-guest) — the runtime: router,
+  admission, the three-outcome model, the journaled ledger, the built-in
+  handlers, and the application API (`guest.contract({ address, abi,
+  transactions, views })`).
+- [`@cartesi/evm-compat`](../evm-compat/js) — the wire-level vocabulary:
+  addresses, transaction parsing, `EvmCall`/`EvmSimulate`, `EvmLog`, report
+  tags, and the built-in ABIs. Host tooling (devnet scripts, tests) imports
+  from here.
+- [`@cartesi/abis`](../abi-drive/js) — the ABI drive
+  ([docs/ABI-DRIVE-SPEC.md](../docs/ABI-DRIVE-SPEC.md)): the machine's own
+  record of the contracts it serves. With the accounts drive
+  ([docs/ACCOUNTS-DRIVE-SPEC.md](../docs/ACCOUNTS-DRIVE-SPEC.md)) naming the
+  tokens, a stored snapshot describes its interface surface with no
+  knowledge of the application.
+- [`@cartesi/accounts`](../accounts-drive/js) — the accounts drive itself.
 
 ## Build and run
 
 ```sh
 bun install        # once, at the repo root (bun workspace)
-bun run test       # vitest, host-side, in-memory drive
 bun run typecheck
 bun run build      # esbuild bundle (dist/index.js)
 
 cartesi build      # @cartesi/cli 2.0 alpha → snapshot under .cartesi/image
 ```
 
-`cartesi.toml` declares the accounts drive (raw, 1 MiB, unmounted, formatted
-by the guest at first boot, before the first yield, and handed to the app
-user with `user = "dapp"` — cartesi-init runs the entrypoint unprivileged).
-It also pins `machine.ram_image` to a machine-emulator-0.21.0-compatible
-kernel installed on the host (the macOS homebrew path; adjust for your OS)
-until the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are
+The runtime's tests live with the runtime (`routed-guest`, `abi-drive/js`):
+`bun run test` at the repo root runs them all.
+
+`cartesi.toml` declares three drives: root, the accounts drive (raw, 1 MiB)
+and the abi drive (raw, 256 KiB) — both unmounted, formatted by the guest at
+first boot before the first yield, and handed to the app user with
+`user = "dapp"` (cartesi-init runs the entrypoint unprivileged). It also
+pins `machine.ram_image` to a machine-emulator-0.21.0-compatible kernel
+installed on the host (the macOS homebrew path; adjust for your OS) until
+the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are
 Dockerfile `ENV`, which `cartesi build` passes into the machine; defaults
 match `devnet/env.sh`.
 
+`@deroll/cmio` stays a direct dependency although only the library uses it:
+it is the native addon `stage.mts` stages next to the bundle, and the
+dependency keeps it resolvable from this package under bun's isolated
+installs.
+
 ## Not here yet
 
-The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding and
-`eth_getCode` markers. (`eth_call` is done — the shim builds the `EvmCall`
-envelope and maps the report framing to return data and code-3 revert
-errors, so `readContract` works against the façades — and this app is the
-devnet guest: `devnet/build-snapshot.sh` wraps `cartesi build` and the
-chain boots from `.cartesi/image`.) The CLI also auto-places flash drives —
-the shim must discover the accounts drive by label rather than assume the
-spec's recommended 2^55 start.
+The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding,
+`eth_getCode` markers, and reading the ABI drive from the shim
+(`cartesi_getContracts`) — the Go reader mirroring what `AccountAt` does on
+the accounts drive. The CLI also auto-places flash drives — the shim must
+discover both drives by label rather than assume fixed starts.

@@ -12,13 +12,9 @@ import {
     type Address,
     type Hex,
 } from "viem";
-import { applyL1ToL2Alias, BRIDGE_ADDRESS, CONFIG_ADDRESS, l2TokenAddress, REGISTRY_ADDRESS } from "../src/addresses.ts";
-import { EVM_LOG_SELECTOR, TRANSFER_TOPIC } from "../src/events.ts";
-import { encodeEvmCall } from "../src/evmcall.ts";
-import { bridgeAbi } from "../src/handlers/bridge.ts";
-import { configAbi, PORTAL_ERC20, PORTAL_ETHER } from "../src/handlers/config.ts";
-import { erc20Abi } from "../src/handlers/erc20.ts";
-import { registryAbi } from "../src/handlers/registry.ts";
+import { applyL1ToL2Alias, BRIDGE_ADDRESS, bridgeAbi, CONFIG_ADDRESS, configAbi, erc20FacadeAbi as erc20Abi, l2TokenAddress, PORTAL_ERC20, PORTAL_ETHER, REGISTRY_ADDRESS, registryAbi } from "@cartesi/evm-compat";
+import { EVM_LOG_SELECTOR, TRANSFER_TOPIC } from "@cartesi/evm-compat";
+import { encodeEvmCall } from "@cartesi/evm-compat";
 import {
     APP_CONTRACT,
     block,
@@ -111,7 +107,7 @@ describe("the token path", () => {
         expect(bal.accept).toBe(true);
         // Reports carry the one-byte framing tag; 0x01 is return data.
         expect(bal.reports[0]!.slice(0, 4)).toBe("0x01");
-        const returned = `0x${bal.reports[0]!.slice(4)}`;
+        const returned: Hex = `0x${bal.reports[0]!.slice(4)}`;
         expect(decodeFunctionResult({ abi: erc20Abi, functionName: "balanceOf", data: returned })).toBe(1000n);
 
         const derived = await callView(

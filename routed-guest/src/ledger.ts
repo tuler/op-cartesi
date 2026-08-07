@@ -20,7 +20,7 @@ import {
     open as openDrive,
     type Store,
 } from "@cartesi/accounts";
-import { addrKey, l2TokenAddress, type Address } from "./addresses.ts";
+import { addrKey, l2TokenAddress, type Address } from "@cartesi/evm-compat";
 import { getAddress, toBytes } from "viem";
 
 /** A debit that the balance cannot cover. Distinct from AccountsDriveError:
@@ -61,8 +61,10 @@ export class Journal {
     }
 }
 
-/** JournaledStore records a before-image per write. Reads pass through. */
-class JournaledStore implements Store {
+/** JournaledStore records a before-image per write. Reads pass through.
+ * Exported for application state: a store wrapped over the router's journal
+ * rolls back with the ledger on REVERT (Guest.store). */
+export class JournaledStore implements Store {
     constructor(
         private inner: Store,
         private journal: Journal,
