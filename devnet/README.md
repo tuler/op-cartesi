@@ -84,8 +84,10 @@ cast block 10 --rpc-url http://127.0.0.1:8565 | grep -E 'hash|stateRoot'
 
 `start-devnet.sh` deploys the full OP Stack L1 suite with `op-deployer` before
 starting anything else, then runs `op-proposer` against it. Set
-`WITH_CONTRACTS=0` for the older, faster bring-up on placeholder addresses, or
-`WITH_PROPOSER=0` to deploy but not propose.
+`WITH_CONTRACTS=0` for a faster bring-up on placeholder addresses — a
+sequencing-only smoke mode: blocks, derivation, restarts, but no deposits
+(there is no portal to call) and therefore no funded accounts, withdrawals
+or tokens. Set `WITH_PROPOSER=0` to deploy but not propose.
 
 Two things about a devnet L1 that the standard path does not handle:
 
@@ -173,12 +175,14 @@ while plain `eth_getBalance` reads the drive record straight out of machine
 memory with no execution at all. `eth_getTransactionCount` is served the same
 way (the nonce is 0 until the guest starts enforcing nonces).
 
-With the contracts deployed, this calls `OptimismPortal.depositTransaction` —
-the path a real user takes. With `WITH_CONTRACTS=0` there is no portal, so
-`deposit.ts` installs a minimal `TransactionDeposited` emitter at the
-configured address with `anvil_setCode` instead. Derivation reads the log
-rather than the contract that produced it, so as far as the chain is concerned
-the two are the same, and the guest is credited either way.
+This calls `OptimismPortal.depositTransaction` — the path a real user takes —
+and requires the deployed contract suite; on a `WITH_CONTRACTS=0` devnet
+there is no portal, and `deposit.ts` says so and stops. (An earlier version
+carried a contract-less fallback: a minimal `TransactionDeposited` emitter
+installed with `anvil_setCode`, exploiting the fact that derivation reads
+the log rather than the contract that produced it. It was the last of the
+hand-packed hex, anvil-only, and the only thing the contract-less mode
+funded — retired once `WITH_CONTRACTS=1` became the default.)
 
 ### Withdrawals
 

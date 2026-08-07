@@ -23,7 +23,6 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
     createPublicClient,
-    createTestClient,
     createWalletClient,
     defineChain,
     http,
@@ -158,11 +157,6 @@ export function l1Wallet(key: string) {
         transport: http(),
         account: privateKeyToAccount(asKey(key)),
     }).extend(walletActionsL1());
-}
-
-/** Anvil-only management calls (the contract-less deposit path). */
-export function l1Test() {
-    return createTestClient({ chain: l1Chain, transport: http(), mode: "anvil" });
 }
 
 export function l2Public() {
