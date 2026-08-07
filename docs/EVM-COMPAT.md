@@ -1,12 +1,15 @@
 # EVM compatibility at the ABI boundary: contract addresses, routed to native guest code
 
-**Status: proposed design; guest half prototyped.** This document is the
-research and the design it leads to; a normative companion spec (the routing
-standard's byte-level contract, in the mold of ACCOUNTS-DRIVE-SPEC.md)
-follows on adoption. The router, the journal, and the built-in contract
-family of §5–§10 are implemented and tested in
+**Status: adopted on the devnet.** This document is the research and the
+design it leads to; a normative companion spec (the routing standard's
+byte-level contract, in the mold of ACCOUNTS-DRIVE-SPEC.md) remains to be
+written. The router, the journal, and the built-in contract family of
+§5–§10 are implemented and tested in
 [`ledger-app/`](../ledger-app/README.md) — TypeScript on `@deroll/cmio`,
-with viem supplying transaction parsing, recovery and ABI plumbing. It
+with viem supplying transaction parsing, recovery and ABI plumbing — and
+that guest **is the devnet guest**: `build-snapshot.sh` builds it, the
+devnet scripts speak its bridge and façades, and the shim's `eth_call`
+speaks §7's envelope. The Lua bank app it replaced is retired. It
 addresses the gap between what the chain's transport already is — ordinary
 signed Ethereum transactions, addressed to twenty-byte addresses — and what
 the guest does with it: a private dialect no EVM tool can speak.
@@ -325,8 +328,8 @@ counters written at ACCEPT, so they satisfy this trivially.
 A handler that crashes, exceeds its manifest bounds, or breaks the
 handler protocol (§10) is treated as REJECT — deterministic, and the
 machine's rollback contains whatever mess it made. It never halts the
-machine: a halted machine is a halted chain, the doctrine `bank-app.sh`
-already carries.
+machine: a halted machine is a halted chain, the doctrine the Lua guest
+established and this design keeps.
 
 ## 6. The address map
 
@@ -442,13 +445,18 @@ issuer who someday wants a particular address honored — recorded
 on-chain and provable like every other owner configuration, without
 weakening the namespace invariant for permissionless registrations.
 
-**Genesis-parameter addresses.** The Cartesi-portal receiver is registered
-at the application contract address (a config value, like `OWNER`), because
-that is where portal deposits are already addressed. Its calldata is
-`InputEncoding`'s packed format, not ABI — which is fine, because *the
-router routes and the handler owns its calldata*. ABI is the convention of
-the built-in family, not a router-enforced rule; a handler speaking a
-packed format, or protobuf, or anything else, is a first-class citizen.
+**Genesis-parameter addresses.** The Cartesi-portal receiver resolves at
+the envelope's application contract address — where portal deposits are
+addressed — and, for deposits, by a **registered portal sender** whatever
+the `to`. The second route is what makes the bootstrap work: the portals
+and the application contract are deployed after the chain's genesis is
+fixed, so the chain cannot name them up front; the owner's registration
+input is what makes a portal real, and the sender is the deposit's
+authentication anyway (§9). The receiver's calldata is `InputEncoding`'s
+packed format, not ABI — which is fine, because *the router routes and the
+handler owns its calldata*. ABI is the convention of the built-in family,
+not a router-enforced rule; a handler speaking a packed format, or
+protobuf, or anything else, is a first-class citizen.
 
 **`eth_getCode`.** Tools probe code to distinguish contracts from EOAs.
 The shim serves a one-byte marker `0xfe` (the INVALID opcode — honest to
@@ -626,7 +634,7 @@ handlers never see the device at all.
 | **Guest** | The router (native, reference implementation of the standard) replaces `bank-app.sh`: CMIO loop, outputs accumulator, typed-tx sighash, enforcement, journal, manifest dispatch, built-in family. The accounts drive and its libraries: unchanged. |
 | **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `engineapi/eth.go`)*; receipts try the `EvmLog` decode; `eth_getCode` serves markers from the registry view; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
 | **Devnet** | `build-snapshot.sh` ships the router; the dialect scripts collapse into standard tooling — `cast send $TOKEN "transfer(address,uint256)" …`, `cast call $TOKEN "balanceOf(address)" …`, `cast send $BRIDGE "withdrawEther(address)" --value …` — and `send-l2-tx.sh` drops `--legacy`. Scripts getting shorter is the acceptance test. |
-| **Tests** | The realmachine suite keeps its role with the new guest; `test-guest.lua`'s enforcement vectors (sighash, ecrecover, nonce) port to the router's language; golden accounts-drive vectors already cover the ledger. |
+| **Tests** | The realmachine suite keeps its role with the new guest *(done — its inputs now speak the standard)*; enforcement (sighash, recovery, nonce) is covered by the router's vitest suite, retiring `test-guest.lua`; golden accounts-drive vectors already cover the ledger. |
 
 ## 12. Alternatives considered
 
@@ -706,7 +714,8 @@ guest did.
    libraries and a vendorable secp256k1 exist for both): CMIO loop,
    outputs accumulator, enforcement, journal, and the built-in family
    (ledger, façade, bridge, config, L1Block, portal receiver). Port the
-   `test-guest.lua` enforcement vectors.
+   enforcement vectors of the Lua guest's `test-guest.lua` (since retired
+   in favor of the vitest suite).
 3. **The shim half**: `EvmCall` in `eth_call` + revert mapping, `EvmLog`
    receipts, `eth_getCode`, `CallArgs.From/Value`.
 4. **Devnet swap**: router into `build-snapshot.sh`, dialect scripts

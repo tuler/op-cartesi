@@ -66,10 +66,11 @@ the machine; defaults match `devnet/env.sh`.
 
 ## Not here yet
 
-The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding,
-`eth_getCode` markers, and pointing `devnet/build-snapshot.sh` at
-`.cartesi/image` instead of the Lua guest. (`eth_call` is done: the shim
-builds the `EvmCall` envelope and maps the report framing to return data
-and code-3 revert errors, so `readContract` works against the façades.)
-The CLI also auto-places flash drives — the shim must discover the accounts
-drive by label rather than assume the spec's recommended 2^55 start.
+The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding and
+`eth_getCode` markers. (`eth_call` is done — the shim builds the `EvmCall`
+envelope and maps the report framing to return data and code-3 revert
+errors, so `readContract` works against the façades — and this app is the
+devnet guest: `devnet/build-snapshot.sh` wraps `cartesi build` and the
+chain boots from `.cartesi/image`.) The CLI also auto-places flash drives —
+the shim must discover the accounts drive by label rather than assume the
+spec's recommended 2^55 start.

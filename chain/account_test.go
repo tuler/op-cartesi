@@ -12,13 +12,15 @@ import (
 	"github.com/tuler/op-cartesi/machine"
 )
 
-// testDriveBase is where devnet/build-snapshot.sh places the accounts drive:
-// the spec's recommended well-known start (docs/ACCOUNTS-DRIVE-SPEC.md §4).
+// testDriveBase is the spec's recommended well-known start for the accounts
+// drive (docs/ACCOUNTS-DRIVE-SPEC.md §4). The devnet's `cartesi build`
+// auto-places the drive, and the shim discovers it by label — this constant
+// is the fallback convention.
 const testDriveBase = uint64(0x80000000000000)
 
 // formatTestDrive builds a drive image with the same geometry the devnet
-// guest formats at boot (devnet/bank-app.sh), so the host is exercised
-// against the exact layout it will meet on a real machine.
+// guest (ledger-app) formats at boot, so the host is exercised against the
+// exact layout it will meet on a real machine.
 func formatTestDrive(t *testing.T) (*drive.MemStore, *drive.Drive) {
 	t.Helper()
 	mem := drive.NewMemStore(1 << 20)

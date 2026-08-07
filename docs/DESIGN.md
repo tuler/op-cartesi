@@ -421,13 +421,14 @@ to be cut somewhere:
   is not a deployment artifact — it can be chosen before anything exists. The
   guest carries one, and takes configuration from nothing else.
 
-The third is what `devnet/bank-app.sh` does. `GUEST_OWNER` is substituted into
-the app at snapshot time, so it is covered by the genesis state root like every
-other consensus parameter, and registration arrives as an ordinary deposit whose
-`from` is the owner — unaliased, because `OptimismPortal` only aliases contract
-callers. The registration is answered with a notice rather than a report: which
-contracts the guest will credit is consensus state, so it belongs in the outputs
-tree where it can be proven.
+The third is what the devnet guest does (today the routed `ledger-app`, and
+its Lua predecessor `bank-app.sh` before it). The owner address is baked into
+the snapshot — a Dockerfile build argument, covered by the genesis state root
+like every other consensus parameter — and registration arrives as an
+ordinary deposit whose `from` is the owner — unaliased, because
+`OptimismPortal` only aliases contract callers. The registration is answered
+with a notice rather than a report: which contracts the guest will credit is
+consensus state, so it belongs in the outputs tree where it can be proven.
 
 The ledger is keyed by `token ‖ account`, with the zero address for ether, so
 one table serves both assets, and a withdrawal is the same voucher either way —

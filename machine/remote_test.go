@@ -126,18 +126,39 @@ func evmAdvance(t *testing.T, index uint64, payload []byte) []byte {
 	return append(selector, packed...)
 }
 
-// sampleDeposit is the kind of transaction op-node derives from an L1 deposit
-// event, which is the one input every guest on this chain has to understand.
-func sampleDeposit(t *testing.T) []byte {
+// sampleRegistration is an owner configuration input for the routed guest
+// (docs/EVM-COMPAT.md): registerPortal(uint8,address) addressed to the
+// config contract, sent by the owner the devnet snapshot bakes in. It is the
+// one input a freshly booted ledger-app guest answers with a provable output
+// — the registration notice — which is exactly what the outputs-root test
+// needs. (A plain ether deposit credits silently: native transfers emit no
+// event, matching OP.)
+func sampleRegistration(t *testing.T) []byte {
 	t.Helper()
-	to := common.HexToAddress("0x00000000000000000000000000000000000a11ce")
+	config := common.HexToAddress("0xc751000000000000000000000000000000000002")
+	owner := common.HexToAddress("0x90F79bf6EB2c4f870365E785982E1f101E93b906")
+	uint8Ty, err := abi.NewType("uint8", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addressTy, err := abi.NewType("address", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packed, err := (abi.Arguments{{Type: uint8Ty}, {Type: addressTy}}).Pack(
+		uint8(0), common.HexToAddress("0x907a70"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := crypto.Keccak256([]byte("registerPortal(uint8,address)"))[:4]
 	raw, err := types.NewTx(&types.DepositTx{
 		SourceHash: crypto.Keccak256Hash([]byte("outputs root test")),
-		From:       common.HexToAddress("0xdead"),
-		To:         &to,
-		Mint:       big.NewInt(1),
-		Value:      big.NewInt(1),
+		From:       owner,
+		To:         &config,
+		Mint:       new(big.Int),
+		Value:      new(big.Int),
 		Gas:        1_000_000,
+		Data:       append(selector, packed...),
 	}).MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -177,10 +198,10 @@ func TestRemoteOutputsRootMatchesHostTree(t *testing.T) {
 	}
 
 	// After an input that emits an output, the guest's root must move. The
-	// input is a deposit rather than arbitrary bytes because a guest that
-	// interprets its inputs — the devnet's ledger app does — has no reason to
-	// emit a provable output for something it cannot parse.
-	res, err := remote.AdvanceInput(ctx, evmAdvance(t, 0, sampleDeposit(t)), 10_000_000_000)
+	// input is an owner registration rather than arbitrary bytes because a
+	// guest that interprets its inputs — the devnet's routed guest does —
+	// has no reason to emit a provable output for something it cannot parse.
+	res, err := remote.AdvanceInput(ctx, evmAdvance(t, 0, sampleRegistration(t)), 10_000_000_000)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -450,7 +471,7 @@ func TestRemoteStoreCapturesLiveState(t *testing.T) {
 	}
 
 	for i := range 2 {
-		if _, err := remote.AdvanceInput(ctx, evmAdvance(t, uint64(i), sampleDeposit(t)), 10_000_000_000); err != nil {
+		if _, err := remote.AdvanceInput(ctx, evmAdvance(t, uint64(i), sampleRegistration(t)), 10_000_000_000); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -482,7 +503,7 @@ func TestRemoteStoreCapturesLiveState(t *testing.T) {
 
 	// Running on does not reach back into what was written.
 	for i := range 2 {
-		if _, err := remote.AdvanceInput(ctx, evmAdvance(t, uint64(10+i), sampleDeposit(t)), 10_000_000_000); err != nil {
+		if _, err := remote.AdvanceInput(ctx, evmAdvance(t, uint64(10+i), sampleRegistration(t)), 10_000_000_000); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -505,7 +526,7 @@ func TestRemoteStoreFromFork(t *testing.T) {
 	if err := remote.CheckReady(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := remote.AdvanceInput(ctx, evmAdvance(t, 0, sampleDeposit(t)), 10_000_000_000); err != nil {
+	if _, err := remote.AdvanceInput(ctx, evmAdvance(t, 0, sampleRegistration(t)), 10_000_000_000); err != nil {
 		t.Fatal(err)
 	}
 	at, _ := remote.RootHash(ctx)
@@ -531,7 +552,7 @@ func TestRemoteStoreFromFork(t *testing.T) {
 	}
 
 	// The parent must be unharmed by having been forked and stored.
-	if _, err := remote.AdvanceInput(ctx, evmAdvance(t, 1, sampleDeposit(t)), 10_000_000_000); err != nil {
+	if _, err := remote.AdvanceInput(ctx, evmAdvance(t, 1, sampleRegistration(t)), 10_000_000_000); err != nil {
 		t.Fatalf("the machine broke after a fork stored from it: %v", err)
 	}
 }

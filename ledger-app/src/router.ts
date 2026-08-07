@@ -110,12 +110,20 @@ export class Router {
         registry.list = () => [...this.manifest.keys()];
     }
 
-    /** Manifest first, then the portal receiver at the application contract
-     * address, then the token façades. */
-    private resolve(to: Address, block: BlockContext | null): Handler | undefined {
+    /** Manifest first, then the portal receiver, then the token façades.
+     *
+     * The portal receiver resolves two ways: at the envelope's appContract
+     * address, and — for deposits — by a *registered portal sender*,
+     * whatever the `to`. The sender is the authentication anyway
+     * (EVM-COMPAT §9), and sender-routing frees the chain from having to
+     * know the application contract address at genesis: on the devnet the
+     * portals and the app contract are deployed after the chain starts, and
+     * the owner's registration input is what makes them real. */
+    private resolve(to: Address, block: BlockContext | null, deposit?: { sender: Address }): Handler | undefined {
         const fixed = this.manifest.get(addrKey(to));
         if (fixed) return fixed;
         if (block && sameAddress(to, block.appContract)) return this.portalReceiver;
+        if (deposit && this.ledger.portalKind(deposit.sender) !== undefined) return this.portalReceiver;
         if (this.ledger.tokenByL2Address(to)) return this.erc20;
         return undefined;
     }
@@ -230,7 +238,7 @@ export class Router {
         try {
             await this.ledger.debitEther(ctx.sender, ctx.value);
             await this.ledger.creditEther(ctx.to, ctx.value);
-            const handler = this.resolve(ctx.to, ctx.block);
+            const handler = this.resolve(ctx.to, ctx.block, ctx.isDeposit ? { sender: ctx.sender } : undefined);
             if (!handler) {
                 outcome = { kind: "accept" }; // plain transfer; calldata ignored
             } else if (ctx.value > 0n && !handler.payable) {

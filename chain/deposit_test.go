@@ -6,30 +6,39 @@ import (
 	"os"
 	"testing"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// bankMachineEnv points at a machine whose guest keeps a balance ledger and
-// credits OP deposits into it — devnet/bank-app.sh:
+// ledgerMachineEnv points at a machine running the devnet guest — the routed
+// guest of ledger-app (docs/EVM-COMPAT.md), which keeps its ledger on the
+// accounts drive and routes every input by its `to` address:
 //
-//	SNAPSHOT_DIR=/tmp/bank GUEST_APP=$PWD/devnet/bank-app.sh ./devnet/build-snapshot.sh
-//	OP_CARTESI_TEST_BANK_SNAPSHOT=/tmp/bank go test ./chain/
+//	./devnet/build-snapshot.sh
+//	OP_CARTESI_TEST_LEDGER_SNAPSHOT=./ledger-app/.cartesi/image go test ./chain/
 //
 // It is separate from OP_CARTESI_TEST_SNAPSHOT because the other real-machine
 // tests only need a guest that consumes inputs, while these need one that
 // means something by them.
-const bankMachineEnv = "OP_CARTESI_TEST_BANK_SNAPSHOT"
+const ledgerMachineEnv = "OP_CARTESI_TEST_LEDGER_SNAPSHOT"
 
-func newBankChain(t *testing.T) *Chain {
+func newLedgerChain(t *testing.T) *Chain {
 	t.Helper()
-	if os.Getenv(bankMachineEnv) == "" {
-		t.Skipf("set %s to a stored machine running devnet/bank-app.sh", bankMachineEnv)
+	if os.Getenv(ledgerMachineEnv) == "" {
+		t.Skipf("set %s to a stored machine running the ledger-app guest", ledgerMachineEnv)
 	}
-	t.Setenv(realMachineEnv, os.Getenv(bankMachineEnv))
+	t.Setenv(realMachineEnv, os.Getenv(ledgerMachineEnv))
 	return newRealChain(t)
 }
+
+// The routed guest's standard addresses and genesis parameters, as the
+// devnet snapshot bakes them (ledger-app defaults, matching devnet/env.sh).
+var (
+	guestConfigAddress = common.HexToAddress("0xc751000000000000000000000000000000000002")
+	guestOwner         = common.HexToAddress("0x90F79bf6EB2c4f870365E785982E1f101E93b906")
+)
 
 // ethDeposit is the L2 transaction op-node derives from an L1
 // TransactionDeposited log: an ETH deposit mints `amount` and hands it to the
@@ -51,22 +60,115 @@ func ethDeposit(t *testing.T, source string, to common.Address, amount *big.Int)
 	return raw
 }
 
-// balanceOf asks the guest for an address's balance the way a user would: an
-// eth_call, which the chain answers by running inspect on a discarded fork.
-func balanceOf(t *testing.T, c *Chain, at common.Hash, addr common.Address) *big.Int {
+// registerPortalDeposit is an owner configuration input: a deposit from the
+// guest owner's EOA to the config contract carrying
+// registerPortal(uint8 kind, address portal) — how the devnet's
+// deploy-outputs.sh tells the guest which L1 contracts to credit deposits
+// from. It is also the one input a fresh routed guest answers with a
+// provable output (the registration notice), which several real-machine
+// tests lean on.
+func registerPortalDeposit(t *testing.T, source string, kind uint8, portal common.Address) []byte {
 	t.Helper()
-	res, err := c.Inspect(context.Background(), at, addr.Bytes())
+	uint8Ty, err := abi.NewType("uint8", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	addressTy, err := abi.NewType("address", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	packed, err := (abi.Arguments{{Type: uint8Ty}, {Type: addressTy}}).Pack(kind, portal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selector := crypto.Keccak256([]byte("registerPortal(uint8,address)"))[:4]
+	tx := types.NewTx(&types.DepositTx{
+		SourceHash: crypto.Keccak256Hash([]byte(source)),
+		From:       guestOwner,
+		To:         &guestConfigAddress,
+		Mint:       new(big.Int),
+		Value:      new(big.Int),
+		Gas:        1_000_000,
+		Data:       append(selector, packed...),
+	})
+	raw, err := tx.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// aliasL1 applies OP's L1-to-L2 contract aliasing, which is how a portal's
+// deposits arrive at the guest.
+func aliasL1(addr common.Address) common.Address {
+	offset, _ := new(big.Int).SetString("1111000000000000000000000000000000001111", 16)
+	aliased := new(big.Int).Add(addr.Big(), offset)
+	return common.BigToAddress(aliased) // BigToAddress truncates to 160 bits
+}
+
+// erc20PortalDeposit is what OPERC20Portal's escrow becomes on L2: a deposit
+// from the aliased portal whose data is InputEncoding's packed
+// token ‖ beneficiary ‖ amount. The `to` is deliberately not anything the
+// guest knows — a registered portal routes by sender (EVM-COMPAT §6).
+func erc20PortalDeposit(t *testing.T, source string, portal, token, beneficiary common.Address, amount *big.Int) []byte {
+	t.Helper()
+	appContract := common.HexToAddress("0x00000000000000000000000000000000000a99c0")
+	data := append(append(append([]byte{}, token.Bytes()...), beneficiary.Bytes()...), common.BigToHash(amount).Bytes()...)
+	from := aliasL1(portal)
+	tx := types.NewTx(&types.DepositTx{
+		SourceHash: crypto.Keccak256Hash([]byte(source)),
+		From:       from,
+		To:         &appContract,
+		Mint:       new(big.Int),
+		Value:      new(big.Int),
+		Gas:        1_000_000,
+		Data:       data,
+	})
+	raw, err := tx.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+// l2TokenAddress derives a registered token's L2 façade address, exactly as
+// the guest does: last20(keccak256("ctsi.erc20.v1" ‖ l1Token)).
+func l2TokenAddress(l1Token common.Address) common.Address {
+	hash := crypto.Keccak256(append([]byte("ctsi.erc20.v1"), l1Token.Bytes()...))
+	return common.BytesToAddress(hash[12:])
+}
+
+// etherBalanceAt reads an account's native balance the way eth_getBalance
+// does: straight off the accounts drive, no execution, no dialect.
+func etherBalanceAt(t *testing.T, c *Chain, at common.Hash, addr common.Address) *big.Int {
+	t.Helper()
+	_, balance, err := c.AccountAt(context.Background(), at, addr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return balance
+}
+
+// erc20BalanceOf asks the token façade the way eth_call now does: the
+// EvmCall envelope around balanceOf, answered with a return-tagged report.
+func erc20BalanceOf(t *testing.T, c *Chain, at common.Hash, l1Token, holder common.Address) *big.Int {
+	t.Helper()
+	data := append(crypto.Keccak256([]byte("balanceOf(address)"))[:4], common.LeftPadBytes(holder.Bytes(), 32)...)
+	envelope, err := EncodeEvmCall(c.Config().ChainID, holder, l2TokenAddress(l1Token), nil, data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := c.Inspect(context.Background(), at, envelope)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !res.Accepted {
-		t.Fatal("the guest rejected the balance query")
+		t.Fatalf("the guest rejected the balanceOf call: reports %x", res.Reports)
 	}
-	var out []byte
-	for _, r := range res.Reports {
-		out = append(out, r...)
+	if len(res.Reports) != 1 || len(res.Reports[0]) < 1 || res.Reports[0][0] != ReportTagReturn {
+		t.Fatalf("balanceOf answered with reports %x, want one return-tagged report", res.Reports)
 	}
-	return new(big.Int).SetBytes(out)
+	return new(big.Int).SetBytes(res.Reports[0][1:])
 }
 
 // unwrapNotice strips Cartesi's Notice(bytes) envelope: a 4-byte selector,
@@ -86,16 +188,39 @@ func unwrapNotice(t *testing.T, output []byte) []byte {
 	return body[start : start+length]
 }
 
+// decodeEvmLog opens the EvmLog(address,bytes32[],bytes) encoding the routed
+// guest's events travel in (EVM-COMPAT §8).
+func decodeEvmLog(t *testing.T, payload []byte) (emitter common.Address, topics []common.Hash, data []byte) {
+	t.Helper()
+	selector := crypto.Keccak256([]byte("EvmLog(address,bytes32[],bytes)"))[:4]
+	if len(payload) < 4 || string(payload[:4]) != string(selector) {
+		t.Fatalf("notice payload %x does not carry the EvmLog selector", payload[:4])
+	}
+	addressTy, _ := abi.NewType("address", "", nil)
+	topicsTy, _ := abi.NewType("bytes32[]", "", nil)
+	bytesTy, _ := abi.NewType("bytes", "", nil)
+	vals, err := (abi.Arguments{{Type: addressTy}, {Type: topicsTy}, {Type: bytesTy}}).Unpack(payload[4:])
+	if err != nil {
+		t.Fatalf("decoding EvmLog: %v", err)
+	}
+	emitter = vals[0].(common.Address)
+	for _, raw := range vals[1].([][32]byte) {
+		topics = append(topics, common.Hash(raw))
+	}
+	return emitter, topics, vals[2].([]byte)
+}
+
 // TestDepositIsCreditedInGuest is milestone 1's first half: a deposit that
-// arrives from L1 is credited by the execution layer itself. The balance lives
-// in the machine, so it is committed to by the state root — the shim holds no
-// ledger of its own and could not fake this.
+// arrives from L1 is credited by the execution layer itself. The balance
+// lives on the guest's accounts drive, so it is committed to by the state
+// root — the shim holds no ledger of its own and could not fake this — and
+// read back the way eth_getBalance reads it, one machine memory read.
 func TestDepositIsCreditedInGuest(t *testing.T) {
-	c := newBankChain(t)
+	c := newLedgerChain(t)
 	alice := common.HexToAddress("0x00000000000000000000000000000000000a11ce")
 	oneEther := new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)
 
-	if got := balanceOf(t, c, c.HeadBlock().Hash(), alice); got.Sign() != 0 {
+	if got := etherBalanceAt(t, c, c.HeadBlock().Hash(), alice); got.Sign() != 0 {
 		t.Fatalf("alice starts with %s, want 0", got)
 	}
 
@@ -103,7 +228,7 @@ func TestDepositIsCreditedInGuest(t *testing.T) {
 		ethDeposit(t, "first", alice, oneEther),
 	}, true))
 
-	if got := balanceOf(t, c, env.ExecutionPayload.BlockHash, alice); got.Cmp(oneEther) != 0 {
+	if got := etherBalanceAt(t, c, env.ExecutionPayload.BlockHash, alice); got.Cmp(oneEther) != 0 {
 		t.Fatalf("after a 1 ETH deposit alice holds %s, want %s", got, oneEther)
 	}
 
@@ -114,53 +239,73 @@ func TestDepositIsCreditedInGuest(t *testing.T) {
 	}, true))
 
 	want := new(big.Int).Mul(oneEther, big.NewInt(2))
-	if got := balanceOf(t, c, env.ExecutionPayload.BlockHash, alice); got.Cmp(want) != 0 {
+	if got := etherBalanceAt(t, c, env.ExecutionPayload.BlockHash, alice); got.Cmp(want) != 0 {
 		t.Fatalf("after two 1 ETH deposits alice holds %s, want %s", got, want)
 	}
 }
 
-// The credit must also be provable, not just readable: the guest emits a
-// notice for it, so it enters the outputs tree and therefore the block's
-// withdrawals root. A verifier re-executing the block re-derives that root, so
-// a sequencer cannot credit an account without the chain committing to it.
-func TestDepositCreditIsCommittedTo(t *testing.T) {
-	c := newBankChain(t)
+// The token path must also be provable, not just readable: the registration
+// and the portal credit each emit an EvmLog notice, so they enter the
+// outputs tree and therefore the block's withdrawals root. A verifier
+// re-executing the block re-derives that root, so a sequencer cannot credit
+// an account without the chain committing to it.
+func TestPortalDepositIsCommittedTo(t *testing.T) {
+	c := newLedgerChain(t)
+	portal := common.HexToAddress("0x0000000000000000000000000000000000907a70")
+	token := common.HexToAddress("0x000000000000000000000000000000000070ce20")
 	bob := common.HexToAddress("0x000000000000000000000000000000000000b0b0")
 	amount := big.NewInt(12345)
 
+	// 1. The owner registers the portal; the registration is consensus
+	// state, so it travels as a notice and moves the outputs commitment.
 	before := *c.HeadBlock().Header.WithdrawalsHash
 	env := buildBlock(c, t, attrsOn(c.HeadBlock(), [][]byte{
-		ethDeposit(t, "bob", bob, amount),
+		registerPortalDeposit(t, "register", 1, portal),
 	}, true))
-
 	if *env.ExecutionPayload.WithdrawalsRoot == before {
-		t.Fatal("the outputs commitment did not move; the credit was not committed to")
+		t.Fatal("the outputs commitment did not move; the registration was not committed to")
 	}
+
+	// 2. A deposit from the (aliased) portal credits the beneficiary and
+	// emits the mint Transfer event — an EvmLog notice from the token's
+	// derived façade address.
+	env = buildBlock(c, t, attrsOn(c.HeadBlock(), [][]byte{
+		erc20PortalDeposit(t, "deposit", portal, token, bob, amount),
+	}, true))
 
 	receipts := c.BlockReceipts(env.ExecutionPayload.BlockHash)
 	if len(receipts) != 1 {
 		t.Fatalf("got %d receipts, want 1", len(receipts))
 	}
 	if len(receipts[0].Logs) != 1 {
-		t.Fatalf("the deposit produced %d logs, want the one notice", len(receipts[0].Logs))
+		t.Fatalf("the deposit produced %d logs, want the one Transfer notice", len(receipts[0].Logs))
 	}
-	// A log carries the output exactly as the machine emitted it, which for a
-	// notice is Cartesi's own envelope: the Notice(bytes) selector, then the
-	// ABI encoding of the payload. Unwrapping it here rather than in the chain
-	// is deliberate — the chain commits to the bytes the guest produced, and
-	// interpreting them is the reader's business.
-	data := unwrapNotice(t, receipts[0].Logs[0].Data)
-	// The payload is address ‖ amount ‖ new balance, each a 32-byte word.
-	if len(data) != 96 {
-		t.Fatalf("notice payload is %d bytes, want 96", len(data))
+	// A log carries the output exactly as the machine emitted it: Cartesi's
+	// Notice(bytes) envelope around the guest's EvmLog encoding. Unwrapping
+	// here rather than in the chain is deliberate — the chain commits to the
+	// bytes the guest produced, and interpreting them is the reader's
+	// business (the shim's EvmLog receipt decoding is its own step).
+	emitter, topics, data := decodeEvmLog(t, unwrapNotice(t, receipts[0].Logs[0].Data))
+	if want := l2TokenAddress(token); emitter != want {
+		t.Errorf("event emitter %s, want the derived façade %s", emitter, want)
 	}
-	if got := common.BytesToAddress(data[:32]); got != bob {
-		t.Errorf("notice credits %s, want %s", got, bob)
+	transferTopic := common.BytesToHash(crypto.Keccak256([]byte("Transfer(address,address,uint256)")))
+	if len(topics) != 3 || topics[0] != transferTopic {
+		t.Fatalf("topics %v, want Transfer(from,to,value)", topics)
 	}
-	if got := new(big.Int).SetBytes(data[32:64]); got.Cmp(amount) != 0 {
-		t.Errorf("notice amount %s, want %s", got, amount)
+	if topics[1] != (common.Hash{}) {
+		t.Errorf("Transfer from %s, want the zero address (a mint)", topics[1])
 	}
-	if got := new(big.Int).SetBytes(data[64:]); got.Cmp(amount) != 0 {
-		t.Errorf("notice balance %s, want %s", got, amount)
+	if got := common.BytesToAddress(topics[2].Bytes()); got != bob {
+		t.Errorf("Transfer to %s, want %s", got, bob)
+	}
+	if got := new(big.Int).SetBytes(data); got.Cmp(amount) != 0 {
+		t.Errorf("Transfer value %s, want %s", got, amount)
+	}
+
+	// 3. And the credit is readable back through the façade, the way
+	// eth_call reads it.
+	if got := erc20BalanceOf(t, c, env.ExecutionPayload.BlockHash, token, bob); got.Cmp(amount) != 0 {
+		t.Errorf("balanceOf(bob) = %s, want %s", got, amount)
 	}
 }

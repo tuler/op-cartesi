@@ -1,10 +1,13 @@
-// The Cartesi-portal receiver (EVM-COMPAT §6, §9), registered at the
-// application contract address — where portal deposits are already addressed.
+// The Cartesi-portal receiver (EVM-COMPAT §6, §9). The router resolves it at
+// the envelope's application contract address and, for deposits, by a
+// registered portal *sender* whatever the `to` — the sender is the
+// authentication, and the application contract does not exist yet when the
+// chain's genesis is built.
 //
 // Its calldata is InputEncoding's packed format, not ABI: the router routes
 // and the handler owns its calldata. Which layout applies comes from *who
-// sent it* — the aliased portal address, registered by the owner — never from
-// the bytes, exactly the authentication argument of the Lua guest.
+// sent it* — the aliased portal address, registered by the owner — never
+// from the bytes.
 //
 //   ether: sender(20) ‖ value(32) ‖ extra
 //   erc20: token(20) ‖ sender(20) ‖ value(32) ‖ extra

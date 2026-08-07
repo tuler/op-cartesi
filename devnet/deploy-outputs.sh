@@ -20,9 +20,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 : "${OUTPUT_REQUIRE_RESOLVED:=false}"
 : "${OUTPUTS_ENV_FILE:=$DEVNET_DIR/outputs-addresses.env}"
 : "${EXECUTOR_FUNDING:=10000000000000000000}"
-# OptimismPortal's floor is 21000 + 16 per byte, and the registration payload
-# is 22 bytes. The chain meters in machine cycles and ignores this, but L1
-# still checks it.
+# OptimismPortal's floor is 21000 + 16 per byte, and the registration
+# calldata (registerPortal's selector plus two ABI words) is 68 bytes. The
+# chain meters in machine cycles and ignores this, but L1 still checks it.
 : "${REGISTER_GAS_LIMIT:=100000}"
 
 if [ -z "${DISPUTE_GAME_FACTORY_ADDRESS:-}" ]; then
@@ -66,14 +66,19 @@ source "$OUTPUTS_ENV_FILE"
 cast send "$OUTPUT_EXECUTOR_ADDRESS" --value "$EXECUTOR_FUNDING" \
   --private-key "$DEPLOYER_KEY" --rpc-url "$L1_RPC" > /dev/null
 
-# Tell the guest which contracts it may credit deposits from.
+# Tell the guest which contracts it may credit deposits from: an owner call
+# to the routed guest's config contract (EVM-COMPAT §6),
+# registerPortal(uint8 kind, address portal), carried as an L1 deposit
+# addressed to GUEST_CONFIG_ADDRESS.
 #
-# The guest cannot have these baked into its genesis state: they do not exist
-# until L1 is deployed, and L1 cannot be deployed after a genesis that names
-# them. So they arrive as an input like any other — one the guest takes only
-# from the owner address baked into the snapshot. An EOA calling the portal
-# directly is not aliased, so the deposit reaches the guest with `from` set to
-# the owner itself, which is what it checks.
+# The guest cannot have the portals baked into its genesis state: they do not
+# exist until L1 is deployed, and L1 cannot be deployed after a genesis that
+# names them. So they arrive as an input like any other — one the config
+# contract takes only from the owner address baked into the snapshot. An EOA
+# calling the portal directly is not aliased, so the deposit reaches the
+# guest with `from` set to the owner itself, which is what it checks. Once
+# registered, the guest routes deposits from these senders to the portal
+# receiver, whatever address they are sent to.
 if [ "$(cast wallet address --private-key "$DEPLOYER_KEY")" != "$GUEST_OWNER" ]; then
   echo "the deploy key is not the guest's owner ($GUEST_OWNER); the guest will ignore this registration" >&2
   exit 1
@@ -81,11 +86,12 @@ fi
 register_portal() {
   cast send "$DEPOSIT_CONTRACT_ADDRESS" \
     "depositTransaction(address,uint256,uint64,bool,bytes)" \
-    "$OUTPUT_EXECUTOR_ADDRESS" 0 "$REGISTER_GAS_LIMIT" false "0x70$1${2#0x}" \
+    "$GUEST_CONFIG_ADDRESS" 0 "$REGISTER_GAS_LIMIT" false \
+    "$(cast calldata 'registerPortal(uint8,address)' "$1" "$2")" \
     --private-key "$DEPLOYER_KEY" --rpc-url "$L1_RPC" > /dev/null
 }
-register_portal 00 "$ETHER_PORTAL_ADDRESS"
-register_portal 01 "$ERC20_PORTAL_ADDRESS"
+register_portal 0 "$ETHER_PORTAL_ADDRESS"
+register_portal 1 "$ERC20_PORTAL_ADDRESS"
 
 echo "wrote $OUTPUTS_ENV_FILE" >&2
 grep -v '^#' "$OUTPUTS_ENV_FILE" | sed 's/^/  /' >&2
