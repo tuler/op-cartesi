@@ -36,6 +36,11 @@ type Mock struct {
 	driveBase  uint64
 	driveImage []byte
 
+	// abiBase and abiImage are the mock's ABI drive, installed by
+	// SetAbiDrive with the same fixture semantics as the accounts drive.
+	abiBase  uint64
+	abiImage []byte
+
 	// RejectFn, when set, marks inputs the mock refuses (rx-rejected).
 	// Rejected inputs leave the state untouched.
 	RejectFn func(input []byte) bool
@@ -117,23 +122,35 @@ func (m *Mock) SetAccountsDrive(base uint64, image []byte) {
 	m.driveBase, m.driveImage = base, image
 }
 
-// ReadMemory serves reads from the installed drive image. A mock without one
-// has no memory to read — the error stands in for a guest with no accounts
-// drive, and chain code maps it accordingly.
+// SetAbiDrive installs an in-memory ABI-drive image, with the same fixture
+// semantics as SetAccountsDrive.
+func (m *Mock) SetAbiDrive(base uint64, image []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.abiBase, m.abiImage = base, image
+}
+
+// ReadMemory serves reads from whichever installed drive image covers the
+// range. A mock without one has no memory to read — the error stands in for
+// a guest with no such drive, and chain code maps it accordingly.
 func (m *Mock) ReadMemory(_ context.Context, address, length uint64) ([]byte, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.driveImage == nil {
-		return nil, fmt.Errorf("mock machine has no memory image to read at %#x", address)
-	}
 	end := address + length
-	if end < address || address < m.driveBase || end > m.driveBase+uint64(len(m.driveImage)) {
-		return nil, fmt.Errorf("read [%#x,%#x) outside the mock's drive [%#x,%#x)",
-			address, end, m.driveBase, m.driveBase+uint64(len(m.driveImage)))
+	if end < address {
+		return nil, fmt.Errorf("read [%#x,%#x) wraps", address, end)
 	}
-	out := make([]byte, length)
-	copy(out, m.driveImage[address-m.driveBase:])
-	return out, nil
+	for _, d := range []struct {
+		base  uint64
+		image []byte
+	}{{m.driveBase, m.driveImage}, {m.abiBase, m.abiImage}} {
+		if d.image != nil && address >= d.base && end <= d.base+uint64(len(d.image)) {
+			out := make([]byte, length)
+			copy(out, d.image[address-d.base:])
+			return out, nil
+		}
+	}
+	return nil, fmt.Errorf("read [%#x,%#x) outside the mock's installed drives", address, end)
 }
 
 // AccountsDriveStart mirrors Remote's discovery: the installed image's base,
@@ -145,6 +162,16 @@ func (m *Mock) AccountsDriveStart(context.Context) (uint64, bool, error) {
 		return 0, false, nil
 	}
 	return m.driveBase, true, nil
+}
+
+// AbiDriveStart mirrors Remote's discovery for the ABI drive.
+func (m *Mock) AbiDriveStart(context.Context) (uint64, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.abiImage == nil {
+		return 0, false, nil
+	}
+	return m.abiBase, true, nil
 }
 
 // GetProof mirrors Remote's proof capability in signature only: the mock has
@@ -163,16 +190,21 @@ func (m *Mock) RootHash(context.Context) (common.Hash, error) {
 func (m *Mock) Fork(context.Context) (Machine, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	// The drive image is copied: a fork shares no mutable state with its
-	// parent, and the drive is machine state like everything else.
-	var image []byte
+	// The drive images are copied: a fork shares no mutable state with its
+	// parent, and the drives are machine state like everything else.
+	var image, abiImage []byte
 	if m.driveImage != nil {
 		image = append([]byte(nil), m.driveImage...)
+	}
+	if m.abiImage != nil {
+		abiImage = append([]byte(nil), m.abiImage...)
 	}
 	return &Mock{
 		root:       m.root,
 		driveBase:  m.driveBase,
 		driveImage: image,
+		abiBase:    m.abiBase,
+		abiImage:   abiImage,
 		RejectFn:   m.RejectFn,
 		CycleCost:  m.CycleCost,
 		OutputFn:   m.OutputFn,

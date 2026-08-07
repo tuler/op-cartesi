@@ -55,8 +55,9 @@ installs.
 
 ## Not here yet
 
-The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding,
-`eth_getCode` markers, and reading the ABI drive from the shim
-(`cartesi_getContracts`) — the Go reader mirroring what `AccountAt` does on
-the accounts drive. The CLI also auto-places flash drives — the shim must
-discover both drives by label rather than assume fixed starts.
+The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding and the
+`cartesi_getContracts` discovery RPC. (`eth_getCode` is done — the shim
+reads the ABI drive and the token registry by drive label and answers the
+`0xEFC751<kind>` markers, so wallets see routed addresses as contracts.)
+The CLI also auto-places flash drives — the shim discovers both drives by
+label rather than assuming fixed starts.

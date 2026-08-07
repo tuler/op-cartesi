@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/ethereum/go-ethereum v1.16.3
+	github.com/tuler/op-cartesi/abi-drive/go v0.0.0-00010101000000-000000000000
 	github.com/tuler/op-cartesi/accounts-drive/go v0.0.0-00010101000000-000000000000
 )
 
@@ -76,6 +77,8 @@ require (
 
 replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101702.2
 
-// The accounts-drive reference library lives in this repository; the replace
-// keeps host and guest reading the drive from the same commit.
+// The drive reference libraries live in this repository; the replaces keep
+// host and guest reading the drives from the same commit.
 replace github.com/tuler/op-cartesi/accounts-drive/go => ./accounts-drive/go
+
+replace github.com/tuler/op-cartesi/abi-drive/go => ./abi-drive/go

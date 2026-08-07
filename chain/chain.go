@@ -76,6 +76,13 @@ type Chain struct {
 		state int // driveUnresolved, driveFound or driveAbsent
 		base  uint64
 	}
+	// abiDrive caches the ABI drive's discovered start address, under the
+	// same one-discovery-per-process reasoning (see code.go).
+	abiDrive struct {
+		mu    sync.Mutex
+		state int // driveUnresolved, driveFound or driveAbsent
+		base  uint64
+	}
 
 	genesisHash common.Hash
 	head        common.Hash

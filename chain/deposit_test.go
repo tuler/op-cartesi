@@ -1,6 +1,7 @@
 package chain
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 	"os"
@@ -131,11 +132,10 @@ func erc20PortalDeposit(t *testing.T, source string, portal, token, beneficiary 
 	return raw
 }
 
-// l2TokenAddress derives a registered token's L2 façade address, exactly as
-// the guest does: last20(keccak256("ctsi.erc20.v1" ‖ l1Token)).
+// l2TokenAddress is the exported derivation, under the name the assertions
+// grew up with.
 func l2TokenAddress(l1Token common.Address) common.Address {
-	hash := crypto.Keccak256(append([]byte("ctsi.erc20.v1"), l1Token.Bytes()...))
-	return common.BytesToAddress(hash[12:])
+	return L2TokenAddress(l1Token)
 }
 
 // etherBalanceAt reads an account's native balance the way eth_getBalance
@@ -307,5 +307,28 @@ func TestPortalDepositIsCommittedTo(t *testing.T) {
 	// eth_call reads it.
 	if got := erc20BalanceOf(t, c, env.ExecutionPayload.BlockHash, token, bob); got.Cmp(amount) != 0 {
 		t.Errorf("balanceOf(bob) = %s, want %s", got, amount)
+	}
+
+	// 4. eth_getCode's markers come off the real drives: the config
+	// built-in and the demo app contract from the ABI drive the guest wrote
+	// at boot, the token's façade from the registry the deposit just grew.
+	at := env.ExecutionPayload.BlockHash
+	codeCases := []struct {
+		name string
+		addr common.Address
+		want []byte
+	}{
+		{"config built-in", guestConfigAddress, CodeMarker(CodeKindSystem)},
+		{"counter app", common.HexToAddress("0xc0de000000000000000000000000000000000001"), CodeMarker(CodeKindApp)},
+		{"token façade", l2TokenAddress(token), CodeMarker(CodeKindToken)},
+	}
+	for _, tc := range codeCases {
+		code, err := c.CodeAt(context.Background(), at, tc.addr)
+		if err != nil {
+			t.Fatalf("CodeAt(%s): %v", tc.name, err)
+		}
+		if !bytes.Equal(code, tc.want) {
+			t.Errorf("CodeAt(%s) = %x, want %x", tc.name, code, tc.want)
+		}
 	}
 }

@@ -247,6 +247,24 @@ func (e *EthAPI) accountAt(ctx context.Context, addr common.Address, id *rpc.Blo
 	return nonce, balance, nil
 }
 
+// GetCode answers the contract/EOA question for a routed address: a
+// four-byte marker (chain.CodeMarker) for every address the guest routes —
+// recorded contracts out of the ABI drive, token façades derived from the
+// accounts drive's registry — and "0x" for everything else. There is no EVM
+// bytecode to serve; the marker (0xEF-prefixed, so no real EVM code can
+// collide with it) is what lets wallets and SDKs treat routed contracts as
+// contracts before calling them (EVM-COMPAT §10a).
+func (e *EthAPI) GetCode(ctx context.Context, addr common.Address, id *rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	b, err := e.blockFromOptional(id)
+	if err != nil {
+		return nil, err
+	}
+	if b == nil {
+		return nil, fmt.Errorf("unknown block")
+	}
+	return e.chain.CodeAt(ctx, b.Hash(), addr)
+}
+
 // GasPrice suggests what a transaction should offer per gas: the head block's
 // base fee plus a zero tip. There is no fee market — every header carries the
 // constant base fee chain.Config.BaseFee stamps on it, and nobody is paid a
