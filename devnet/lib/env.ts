@@ -123,11 +123,23 @@ export const l1Chain: Chain = defineChain({
     rpcUrls: { default: { http: [config.l1Rpc] } },
 });
 
-export const l2Chain: Chain = defineChain({
+// The L2 chain carries the OP-stack shape viem's op-stack actions resolve
+// against: sourceId names the L1, and contracts are keyed by it — so
+// `targetChain: l2Chain` finds the portal without every script naming an
+// address. Deliberately not annotated `: Chain`: the widened type would
+// erase the contracts entry the targetChain parameter's type requires.
+export const l2Chain = defineChain({
     id: config.l2ChainId,
     name: "op-cartesi-devnet",
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
     rpcUrls: { default: { http: [config.l2Rpc] } },
+    sourceId: config.l1ChainId,
+    contracts: {
+        portal: { [config.l1ChainId]: { address: config.depositContract } },
+        ...(config.disputeGameFactory
+            ? { disputeGameFactory: { [config.l1ChainId]: { address: config.disputeGameFactory } } }
+            : {}),
+    },
 });
 
 /** The cartesi_ RPC surface the scripts consume (engineapi/cartesi.go). */
