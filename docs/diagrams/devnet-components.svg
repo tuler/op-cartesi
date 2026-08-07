@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 860" role="img">
+<title>Component diagram of the devnet: anvil L1 with OP and outputs contract suites on top; op-batcher, op-proposer and two op-nodes in the middle; a sequencer and a verifier stack of op-cartesi shim plus cartesi-jsonrpc-machine below, with the routed guest and accounts drive inside the machine; bun/viem scripts on the left talking to both layers. Accent-stroked boxes are this repo's code, plain boxes are stock tooling, dashed boxes are startup-time artifacts.</title>
+<style>
+  .band  { fill: #fbfcfb; stroke: #9fada5; }
+  .b     { fill: #ffffff; stroke: #9fada5; stroke-width: 1.2; }
+  .b-acc { fill: #ffffff; stroke: #0b7a63; stroke-width: 1.6; }
+  .chip     { fill: #ffffff; stroke: #9fada5; stroke-width: 1; }
+  .chip-acc { fill: #e9f2ee; stroke: #0b7a63; stroke-width: 1.2; }
+  .ghost { fill: none; stroke: #414d46; stroke-width: 1.1; stroke-dasharray: 5 4; }
+  .t   { fill: #212824; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12.5px; font-weight: 600; }
+  .ts  { fill: #212824; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11.5px; font-weight: 600; }
+  .m   { fill: #5d6a63; font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace; font-size: 10.5px; }
+  .lbl { fill: #5d6a63; font-family: ui-monospace, "SF Mono", "Cascadia Code", monospace; font-size: 10.5px; }
+  .edge { stroke: #414d46; stroke-width: 1.3; fill: none; }
+  .edge-d { stroke: #414d46; stroke-width: 1.1; fill: none; stroke-dasharray: 5 4; }
+  .arrowhead { fill: #414d46; }
+</style>
+<defs>
+  <marker id="ah" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
+    <path d="M 0 1 L 9 5 L 0 9 z" class="arrowhead"/>
+  </marker>
+</defs>
+
+<rect width="1000" height="860" fill="#f2f5f2"/>
+
+<!-- L1 band -->
+<rect class="band" x="30" y="36" width="930" height="148" rx="10"/>
+<text class="t" x="46" y="60">anvil</text>
+<text class="m" x="88" y="60">L1 · chain 900 · :8600 · 2s blocks</text>
+
+<text class="m" x="46" y="86">OP suite — op-deployer</text>
+<rect class="chip" x="46"  y="94" width="150" height="28" rx="6"/>
+<text class="ts" x="58" y="112">OptimismPortal</text>
+<rect class="chip" x="206" y="94" width="120" height="28" rx="6"/>
+<text class="ts" x="218" y="112">SystemConfig</text>
+<rect class="chip" x="336" y="94" width="110" height="28" rx="6"/>
+<text class="ts" x="348" y="112">batch inbox</text>
+<rect class="chip" x="46" y="130" width="170" height="28" rx="6"/>
+<text class="ts" x="58" y="148">DisputeGameFactory</text>
+
+<text class="m" x="648" y="86">outputs suite — deploy-outputs.sh</text>
+<rect class="chip-acc" x="648" y="94" width="140" height="28" rx="6"/>
+<text class="ts" x="660" y="112">OutputsValidator</text>
+<rect class="chip-acc" x="798" y="94" width="140" height="28" rx="6"/>
+<text class="ts" x="810" y="112">OutputExecutor</text>
+<rect class="chip-acc" x="648" y="130" width="110" height="28" rx="6"/>
+<text class="ts" x="660" y="148">EtherPortal</text>
+<rect class="chip-acc" x="768" y="130" width="110" height="28" rx="6"/>
+<text class="ts" x="780" y="148">ERC20Portal</text>
+
+<!-- services band -->
+<rect class="b" x="50" y="244" width="170" height="88" rx="8"/>
+<text class="t" x="64" y="270">op-batcher</text>
+<text class="m" x="64" y="290">:8548 · calldata DA</text>
+<text class="m" x="64" y="306">no beacon endpoint</text>
+
+<rect class="b" x="240" y="244" width="170" height="88" rx="8"/>
+<text class="t" x="254" y="270">op-proposer</text>
+<text class="m" x="254" y="290">:8560 · game type 1</text>
+<text class="m" x="254" y="306">every 20s</text>
+
+<rect class="b" x="470" y="244" width="220" height="88" rx="8"/>
+<text class="t" x="484" y="270">op-node — sequencer</text>
+<text class="m" x="484" y="290">:9545 rollup RPC</text>
+<text class="m" x="484" y="306">p2p off · beacon ignored</text>
+
+<rect class="b" x="740" y="244" width="220" height="88" rx="8"/>
+<text class="t" x="754" y="270">op-node — verifier</text>
+<text class="m" x="754" y="290">:9555 rollup RPC</text>
+<text class="m" x="754" y="306">never sequences</text>
+
+<!-- execution band: shims -->
+<rect class="b-acc" x="440" y="404" width="260" height="104" rx="8"/>
+<text class="t" x="454" y="428">op-cartesi — shim (Go)</text>
+<text class="m" x="454" y="446">Engine API :8551 (JWT) · eth RPC :8545</text>
+<text class="m" x="454" y="462">engineapi · chain · mempool · machine</text>
+<text class="m" x="454" y="481">machine Merkle root → stateRoot</text>
+<text class="m" x="454" y="495">outputs tree root → withdrawalsRoot</text>
+
+<rect class="b-acc" x="740" y="404" width="220" height="84" rx="8"/>
+<text class="t" x="754" y="428">op-cartesi — shim</text>
+<text class="m" x="754" y="446">Engine :8571 · eth RPC :8565</text>
+<text class="m" x="754" y="462">own data dir</text>
+
+<!-- scripts -->
+<rect class="b-acc" x="50" y="452" width="200" height="188" rx="8"/>
+<text class="t" x="64" y="476">bun + viem scripts</text>
+<text class="m" x="64" y="498">deposit.ts</text>
+<text class="m" x="64" y="514">deposit-erc20.ts</text>
+<text class="m" x="64" y="530">send-l2-tx.ts</text>
+<text class="m" x="64" y="546">balance.ts</text>
+<text class="m" x="64" y="562">withdraw.ts</text>
+<text class="m" x="64" y="578">withdraw-erc20.ts</text>
+<text class="m" x="64" y="594">execute-voucher.ts</text>
+<text class="m" x="64" y="618">devnet/ workspace</text>
+
+<!-- machines -->
+<rect class="b" x="420" y="560" width="290" height="208" rx="8"/>
+<text class="t" x="436" y="584">cartesi-jsonrpc-machine</text>
+<text class="m" x="436" y="600">:6300 · emulator 0.21.0 · fork per block</text>
+<rect class="b" x="436" y="612" width="258" height="142" rx="7"/>
+<text class="ts" x="448" y="632">Cartesi machine — RISC-V Linux</text>
+<rect class="chip-acc" x="448" y="642" width="234" height="66" rx="6"/>
+<text class="ts" x="460" y="660">routed guest (node app)</text>
+<text class="m" x="460" y="676">router → façades · bridge · config</text>
+<text class="m" x="460" y="690">registry · L1Block · portal receiver</text>
+<rect class="chip-acc" x="448" y="716" width="240" height="30" rx="6"/>
+<text class="m" x="460" y="735">accounts drive — /dev/pmem1 · 1 MiB</text>
+
+<rect class="b" x="740" y="560" width="220" height="110" rx="8"/>
+<text class="t" x="754" y="584">cartesi-jsonrpc-machine</text>
+<text class="m" x="754" y="602">:6400 · same snapshot</text>
+<text class="m" x="754" y="618">re-executes every derived</text>
+<text class="m" x="754" y="632">block · roots must agree</text>
+
+<!-- startup-only artifacts -->
+<rect class="ghost" x="50" y="690" width="200" height="70" rx="8"/>
+<text class="ts" x="64" y="712">generate-config.sh</text>
+<text class="m" x="64" y="730">startup only · machine :6301</text>
+<text class="m" x="64" y="744">→ rollup.json for op-nodes</text>
+
+<rect class="ghost" x="420" y="800" width="290" height="46" rx="8"/>
+<text class="ts" x="436" y="820">ledger-app/.cartesi/image</text>
+<text class="m" x="436" y="836">cartesi build (devnet/build-snapshot.sh)</text>
+<path class="edge-d" d="M 500 800 L 500 772" marker-end="url(#ah)"/>
+<text class="lbl" x="510" y="790">loads at boot</text>
+<path class="edge-d" d="M 710 823 L 850 823 L 850 674" marker-end="url(#ah)"/>
+
+<!-- edges -->
+<path class="edge" d="M 580 184 L 580 240" marker-end="url(#ah)"/>
+<text class="lbl" x="588" y="206">derive: L1 heads · receipts · deposits</text>
+<path class="edge" d="M 850 184 L 850 240" marker-end="url(#ah)"/>
+<text class="lbl" x="842" y="224" text-anchor="end">derive from posted batches</text>
+
+<path class="edge" d="M 580 332 L 580 400" marker-end="url(#ah)"/>
+<text class="lbl" x="588" y="372">Engine API — FCU · payloads</text>
+<path class="edge" d="M 850 332 L 850 400" marker-end="url(#ah)"/>
+
+<path class="edge" d="M 580 508 L 580 556" marker-end="url(#ah)"/>
+<text class="lbl" x="588" y="538">fork · AdvanceState · Inspect</text>
+<path class="edge" d="M 850 488 L 850 556" marker-end="url(#ah)"/>
+
+<path class="edge" d="M 135 244 L 135 188" marker-end="url(#ah)"/>
+<text class="lbl" x="143" y="214">batches → inbox (calldata)</text>
+<path class="edge" d="M 310 244 L 310 188" marker-end="url(#ah)"/>
+<text class="lbl" x="318" y="214">create game (output root)</text>
+
+<path class="edge" d="M 500 332 L 500 360 L 325 360 L 325 336" marker-end="url(#ah)"/>
+<text class="lbl" x="350" y="354">outputAtBlock</text>
+
+<path class="edge" d="M 440 436 L 135 436 L 135 336" marker-end="url(#ah)"/>
+<text class="lbl" x="150" y="428">pulls L2 blocks (:8545)</text>
+
+<path class="edge" d="M 250 490 L 436 490" marker-end="url(#ah)"/>
+<text class="lbl" x="258" y="482">txs · eth_call · cartesi_*</text>
+
+<path class="edge" d="M 50 560 L 36 560 L 36 188" marker-end="url(#ah)"/>
+<text class="lbl" transform="rotate(-90 28 560)" x="28" y="560">deposits → portal · vouchers → executor</text>
+</svg>
