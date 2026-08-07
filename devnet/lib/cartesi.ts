@@ -16,9 +16,16 @@ import {
 } from "viem";
 
 /** What cartesi_getTransactionEmissions returns: the transaction's provable
- * outputs with their chain-wide indices, and its diagnostic reports. */
+ * outputs with their chain-wide indices, and its diagnostic reports — plus
+ * the machine's verdict on the input and what it cost to reach it. */
 export interface TransactionEmissions {
-    outputs: { index: Hex; payload: Hex }[];
+    /** False when the machine rejected the input: it then had no effect on
+     * state and produced no provable outputs, and the reports are the only
+     * account of why. */
+    accepted: boolean;
+    /** Cycles consumed processing the input: the chain's native cost unit. */
+    cycles: Hex;
+    outputs: { index: Hex; data: Hex }[];
     reports: Hex[];
 }
 

@@ -6,7 +6,7 @@
 source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 
 cd "$REPO_DIR"
-go run ./cmd/op-cartesi genesis \
+"${OP_CARTESI[@]}" genesis \
   "${CHAIN_FLAGS[@]}" \
   -out "$ROLLUP_CONFIG_FILE" \
   -l1.chain-id "$L1_CHAIN_ID" \
