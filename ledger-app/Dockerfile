@@ -45,14 +45,11 @@ COPY ledger-app/ ledger-app/
 RUN cd ledger-app && bun run build
 
 # Stage the runtime files: the JS bundle plus @deroll/cmio's native addon,
-# which esbuild cannot inline and must be required at runtime — the addon,
-# its node-gyp-build loader, and node-addon-api, out of bun's hoisted
-# node_modules.
-RUN mkdir -p rootfs/node_modules/@deroll \
- && cp ledger-app/dist/index.js rootfs/index.js \
- && cp -RL node_modules/@deroll/cmio rootfs/node_modules/@deroll/cmio \
- && cp -RL node_modules/node-gyp-build rootfs/node_modules/node-gyp-build \
- && cp -RL node_modules/node-addon-api rootfs/node_modules/node-addon-api
+# which esbuild cannot inline and must be required at runtime. The script
+# locates the packages through module resolution rather than assuming a
+# node_modules layout — bun 1.3's isolated linker keeps workspace members'
+# dependencies out of the root node_modules.
+RUN bun ledger-app/stage.mts rootfs
 
 
 ################################################################################
