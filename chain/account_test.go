@@ -75,6 +75,17 @@ func TestAccountAtReadsTheDrive(t *testing.T) {
 		t.Fatalf("absent account answered nonce %d balance %s, want zeros", nonce, bal)
 	}
 
+	// The zero address is absent by construction — the drive keys empty
+	// slots with it — and must answer zeros, not the drive's key refusal:
+	// it is the default from that cast's provider fills nonces for.
+	nonce, bal, err = c.AccountAt(ctx, c.GenesisHash(), common.Address{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if nonce != 0 || bal.Sign() != 0 {
+		t.Fatalf("zero address answered nonce %d balance %s, want zeros", nonce, bal)
+	}
+
 	// Building a block forks the machine; the fork carries the drive, so the
 	// new head answers too — that is the "parked machine per recent block"
 	// property the RPC leans on.

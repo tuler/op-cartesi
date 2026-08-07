@@ -82,6 +82,14 @@ func (c *Chain) AccountAt(ctx context.Context, blockHash common.Hash, addr commo
 	if !ok {
 		return 0, nil, fmt.Errorf("%w: %s", ErrNoSnapshot, blockHash)
 	}
+	// The zero address can never hold a record: the drive keys empty slots
+	// with it (spec §6), so its account is absent by construction — and it is
+	// what tools quietly ask about, since an eth_call without a from makes
+	// cast's provider fill the nonce of 0x000…0 before calling. Zeros, not an
+	// error, or every `cast call` without --from dies on the fill.
+	if addr == (common.Address{}) {
+		return 0, new(big.Int), nil
+	}
 	base, err := c.accountsDriveBase(ctx, m)
 	if err != nil {
 		return 0, nil, err

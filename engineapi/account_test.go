@@ -108,6 +108,18 @@ func TestGetBalanceAndNonceFromTheDrive(t *testing.T) {
 	if nonce != 0 {
 		t.Fatalf("absent account nonce = %d, want 0", nonce)
 	}
+
+	// The zero address too: it is the default from a fromless eth_call gets,
+	// and cast's provider fills its nonce before calling — this exact request
+	// is what a bare `cast call` sends first, and it must not error.
+	client.call("eth_getTransactionCount", &nonce, common.Address{}, "latest")
+	if nonce != 0 {
+		t.Fatalf("zero address nonce = %d, want 0", nonce)
+	}
+	client.call("eth_getBalance", &bal, common.Address{}, "latest")
+	if (*big.Int)(&bal).Sign() != 0 {
+		t.Fatalf("zero address balance = %s, want 0", (*big.Int)(&bal))
+	}
 }
 
 // cartesi_getAccountProof is a proof endpoint: against a machine that cannot
