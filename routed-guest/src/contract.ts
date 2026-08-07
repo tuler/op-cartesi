@@ -60,17 +60,32 @@ export interface ViewEnv {
 type Mutable = "nonpayable" | "payable";
 type Readonly_ = "pure" | "view";
 
+// Callbacks take the ABI function's parameters as their own — a variadic
+// tuple splices the decoded argument types in front of the environment, so
+// `transfer(address to, uint256 value)` is written
+// `transfer: (to, value, env) => …` with both fully typed. A callback that
+// wants no trailing environment simply declares fewer parameters.
+//
+// ArgsOf pins viem's argument type to something provably spreadable: for a
+// concrete abi it IS the argument tuple; only an abi TypeScript cannot
+// narrow falls back to an untyped list.
+type ArgsOf<
+    abi extends Abi,
+    mutability extends AbiStateMutability,
+    name extends ContractFunctionName<abi, mutability>,
+> = ContractFunctionArgs<abi, mutability, name> extends readonly unknown[]
+    ? ContractFunctionArgs<abi, mutability, name>
+    : readonly unknown[];
+
 export type TransactionCallbacks<abi extends Abi> = {
     [name in ContractFunctionName<abi, Mutable>]?: (
-        args: ContractFunctionArgs<abi, Mutable, name>,
-        env: TransactionEnv,
+        ...params: [...args: [...ArgsOf<abi, Mutable, name>], env: TransactionEnv]
     ) => Promise<void> | void;
 };
 
 export type ViewCallbacks<abi extends Abi> = {
     [name in ContractFunctionName<abi, Readonly_>]?: (
-        args: ContractFunctionArgs<abi, Readonly_, name>,
-        env: ViewEnv,
+        ...params: [...args: [...ArgsOf<abi, Readonly_, name>], env: ViewEnv]
     ) =>
         | Promise<ContractFunctionReturnType<abi, Readonly_, name>>
         | ContractFunctionReturnType<abi, Readonly_, name>;
@@ -107,6 +122,12 @@ function encodeResult(abi: Abi, functionName: string, result: unknown): Hex {
     return encodeFunctionResult({ abi, functionName, result });
 }
 
+/** The decoded arguments as a spreadable list — viem types `args` loosely
+ * enough that TypeScript cannot prove it iterable for a generic abi. */
+function argsOf(decoded: { args?: unknown }): readonly unknown[] {
+    return Array.isArray(decoded.args) ? decoded.args : [];
+}
+
 /** Builds the router Handler for a contract spec. Guest.contract is the
  * normal entry; this is exported for tests and custom wiring. */
 export function contractHandler<const abi extends Abi>(spec: ContractSpec<abi>): Handler {
@@ -132,7 +153,7 @@ export function contractHandler<const abi extends Abi>(spec: ContractSpec<abi>):
                 return { kind: "revert", data: errorRevert(`${name} is not implemented`) };
             }
             try {
-                await callback(decoded.args ?? [], { tx: ctx, ledger, out });
+                await callback(...argsOf(decoded), { tx: ctx, ledger, out });
                 return { kind: "accept" };
             } catch (e) {
                 if (e instanceof AccountsDriveError) throw e; // resource exhaustion → reject (spec §8)
@@ -153,7 +174,7 @@ export function contractHandler<const abi extends Abi>(spec: ContractSpec<abi>):
                 return { kind: "revert", data: errorRevert(`${name} is not implemented`) };
             }
             try {
-                const result = await callback(decoded.args ?? [], { call, ledger });
+                const result = await callback(...argsOf(decoded), { call, ledger });
                 return { kind: "return", data: encodeResult(spec.abi, name, result) };
             } catch (e) {
                 return revertOutcome(e);

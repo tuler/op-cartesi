@@ -16,9 +16,14 @@ const state = guest.store(8); // journaled: rolls back with REVERT/REJECT
 
 await guest.contract({
     address: "0xc0de000000000000000000000000000000000001",
-    abi: parseAbi(["function increment()", "function count() view returns (uint256)"]),
+    abi: parseAbi([
+        "function transfer(address to, uint256 value)",
+        "function count() view returns (uint256)",
+    ]),
     transactions: {
-        increment: async (_args, { tx, ledger, out }) => {
+        // ABI parameters are the callback's own, fully typed; the
+        // environment rides last (declare fewer parameters to ignore it).
+        transfer: async (to, value, { tx, ledger, out }) => {
             /* throw new Revert("reason") to revert with data; any other
                exception reverts with its message — the EVM's own rule */
         },
