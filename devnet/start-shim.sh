@@ -12,7 +12,7 @@ if [ -n "$DATA_DIR" ]; then
   RUN_FLAGS+=(-datadir "$DATA_DIR")
 fi
 
-exec go run ./cmd/op-cartesi run \
+exec "${OP_CARTESI[@]}" run \
   "${CHAIN_FLAGS[@]}" "${RUN_FLAGS[@]}" \
   -engine.addr "$ENGINE_ADDR" \
   -http.addr "$HTTP_ADDR" \

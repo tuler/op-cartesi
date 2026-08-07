@@ -8,7 +8,11 @@ devnet/logs/
 devnet/deployment/
 devnet/l1-addresses.env
 devnet/outputs-addresses.env
+devnet/chain-genesis.env
 devnet/token.env
+devnet/.state/
+# mprocs writes this next to wherever it was started, but only when it fails
+mprocs.log
 node_modules/
 .env
 .env.local

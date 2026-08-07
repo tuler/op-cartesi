@@ -59,6 +59,15 @@ if [ -f "$DEVNET_DIR/l1-addresses.env" ]; then
   # shellcheck disable=SC1091
   source "$DEVNET_DIR/l1-addresses.env"
 fi
+# devnet/procs/genesis.sh writes this one: the L1 block the rollup is anchored
+# at and the L2 genesis timestamp derived from it. It is how the engine — a
+# different process, in a different pane — ends up on the same genesis the
+# rollup config was generated with. Sourced after l1-addresses.env, because it
+# is computed from it and therefore wins.
+if [ -f "$DEVNET_DIR/chain-genesis.env" ]; then
+  # shellcheck disable=SC1091
+  source "$DEVNET_DIR/chain-genesis.env"
+fi
 if [ -f "$DEVNET_DIR/outputs-addresses.env" ]; then
   # shellcheck disable=SC1091
   source "$DEVNET_DIR/outputs-addresses.env"
@@ -121,6 +130,19 @@ fi
 
 : "${JWT_SECRET_FILE:=$DEVNET_DIR/jwt.hex}"
 : "${ROLLUP_CONFIG_FILE:=$DEVNET_DIR/rollup.json}"
+
+# --- the binary -------------------------------------------------------------
+# `go run` is the default because it needs no build step, but it is a wrapper
+# around the process that matters: a signal sent to it is not necessarily a
+# signal to the engine, and a supervisor that stops the wrapper can leave the
+# engine behind. start-devnet.sh compiles once and points this at the result,
+# so each pane holds the engine itself.
+: "${OP_CARTESI_BIN:=}"
+if [ -n "$OP_CARTESI_BIN" ]; then
+  OP_CARTESI=("$OP_CARTESI_BIN")
+else
+  OP_CARTESI=(go run ./cmd/op-cartesi)
+fi
 
 CHAIN_FLAGS=(
   -chain-id "$L2_CHAIN_ID"

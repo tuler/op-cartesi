@@ -22,6 +22,35 @@ bun install                    # once, at the repo root (bun workspace)
 ./devnet/start-devnet.sh
 ```
 
+Every piece runs in a pane of its own under
+[mprocs](https://github.com/pvolok/mprocs), which `bun install` provides:
+
+```
+info              op-cartesi devnet
+l1                =================
+l1-contracts
+genesis             L1 (anvil)        http://127.0.0.1:8600        chain 900
+machine             L2 (op-cartesi)   http://127.0.0.1:8545        chain 901
+engine              op-node           http://127.0.0.1:9545
+guest               op-batcher        http://127.0.0.1:8548
+op-node             op-proposer       http://127.0.0.1:8560
+op-batcher          verifier L2       http://127.0.0.1:8565
+op-proposer         verifier op-node  http://127.0.0.1:9555
+verifier-machine
+verifier-engine   panes
+verifier-node     -----
+outputs             machine   the emulator's console: Linux booting, then …
+```
+
+Up and down pick a pane, `s` starts one, `x` stops it, `r` restarts it, `q`
+quits and stops everything. Every pane is also written to
+`devnet/logs/<pane>.log`, so `grep` still works.
+
+Three of the panes are not long-running processes but steps that finish and
+stay down: `l1-contracts` (op-deployer), `genesis` (the rollup config), and
+`outputs`, which does not start on its own at all — see
+[below](#how-the-bring-up-is-organized).
+
 ### Where op-node and op-batcher come from
 
 The OP monorepo publishes **no binaries** — its releases carry source archives
@@ -82,10 +111,103 @@ cast block 10 --rpc-url http://127.0.0.1:8545 | grep -E 'hash|stateRoot'
 cast block 10 --rpc-url http://127.0.0.1:8565 | grep -E 'hash|stateRoot'
 ```
 
+### How the bring-up is organized
+
+`start-devnet.sh` starts nothing. It checks that the run can succeed — the
+tools on `PATH`, the snapshot, the ports, the JWT secret — compiles
+op-cartesi once into `bin/`, clears what a previous run left behind, writes
+an mprocs config for the panes this run wants, and hands over. One script per
+process, under `devnet/procs/`, each sourcing `devnet/lib/devnet.sh`:
+
+| pane | what it is |
+|---|---|
+| `info` | the endpoint summary; prints and stays down |
+| `l1` | anvil, not `--silent`: L1 blocks and transactions as they land |
+| `l1-contracts` | `deploy-l1.sh` (op-deployer). Optional, runs once |
+| `genesis` | anchors the rollup and writes `rollup.json`. Runs once |
+| `machine` | `cartesi-jsonrpc-machine`: the guest's console |
+| `engine` | op-cartesi, the sequencer's engine |
+| `guest` | what the guest says about each transaction — its reports |
+| `op-node` `op-batcher` `op-proposer` | the OP tools, native or in docker |
+| `verifier-*` | the second node's machine, engine and op-node |
+| `outputs` | `deploy-outputs.sh`. Does not autostart — press `s` |
+
+mprocs starts every pane at once and has no notion of dependencies, so the
+ordering the old single script did by hand each process now does for itself:
+`op-node` blocks until the engine's port answers, `engine` blocks until
+`genesis` has written the rollup config, `genesis` blocks until the contracts
+are deployed. Two kinds of signal, no log-scraping:
+
+- **A port that answers.** For op-cartesi this is exact rather than
+  approximate: it binds its listeners only after the chain is open and the
+  machine has booted, so a port that answers is an engine that can serve.
+  (This is what the old "op-node must not start before the engine logs
+  `chain initialized`" note was about; it is now the engine's own business.)
+- **A marker under `devnet/.state`,** for the steps that finish rather than
+  run — a file exists from its first byte, so the deploy announces itself
+  when it is done rather than when it starts writing.
+
+Because each pane's waits are its own, any pane restarts on its own: `r` on
+`op-node` re-runs the same waits and comes back up against the running
+engine. `x` then `s` on `engine` restarts the chain against the same machine
+server.
+
+The one thing that has to travel between panes is consensus-relevant:
+`genesis` writes the L1 anchor and the L2 genesis timestamp to
+`devnet/chain-genesis.env`, which `env.sh` sources — that is how the engine,
+started from a different pane, ends up on exactly the genesis the rollup
+config was generated with.
+
+Quitting mprocs stops every process it started, killing each one's whole
+process group, which is what the machine servers need: op-cartesi forks a
+server per block and the ones it prunes reparent to init, out of reach of any
+parent-to-child walk but never out of their process group. If mprocs is
+killed rather than quit, `start-devnet.sh` runs `stop-devnet.sh` on its way
+out; run it yourself if a terminal died and left the stack behind:
+
+```sh
+./devnet/stop-devnet.sh
+```
+
+### Watching the guest
+
+The guest program inside the machine is visible in two panes, and they show
+different things:
+
+- **`machine`** is the emulator's console — Linux booting, then anything the
+  guest writes to stdout. The servers op-cartesi forks per block inherit
+  these file descriptors, so their output lands in the same pane.
+- **`guest`** is the guest's account of the chain: the reports it emitted for
+  each transaction, read back over `cartesi_getTransactionEmissions`. Reports
+  are diagnostic and explicitly not provable, so they never appear in a
+  receipt — and for a rejected input they are the only account of why it
+  failed.
+
+```
+block 41 0x9f2c7a13…4b0e21 1 tx, 3.4M cycles
+  accepted 0x77c1ab90…5d1f42 to 0x42000000…000015 — 3.4M cycles
+  report   ledger: credited 0xa11ce with 1000000000000000000
+  output#7 0x…                       # a voucher or notice, with its tree index
+```
+
+Reports carry the router's one-byte tag ([EVM-COMPAT §8](../docs/EVM-COMPAT.md)),
+so the pane can tell an app diagnostic from `eth_call` return data from revert
+data — a revert is shown decoded, `Error("nonce too low")` rather than a
+selector. Printable payloads are shown as text, everything else as hex.
+
+`WITH_GUEST_LOG=0` drops the pane. It is an ordinary client script, so it also
+runs standalone against any node — the verifier included:
+
+```sh
+L2_RPC=http://127.0.0.1:8565 bun devnet/guest-log.ts
+```
+
 ### L1 contracts, and proposals
 
-`start-devnet.sh` deploys the full OP Stack L1 suite with `op-deployer` before
-starting anything else, then runs `op-proposer` against it. Set
+The `l1-contracts` pane deploys the full OP Stack L1 suite with `op-deployer`,
+and everything downstream waits for it — the rollup has to be anchored at a
+block where the SystemConfig already exists. `op-proposer` then runs against
+it. Set
 `WITH_CONTRACTS=0` for a faster bring-up on placeholder addresses — a
 sequencing-only smoke mode: blocks, derivation, restarts, but no deposits
 (there is no portal to call) and therefore no funded accounts, withdrawals
@@ -128,11 +250,13 @@ The transactional scripts are TypeScript (viem, run with `bun`), part of the
 repo's bun workspace — `bun install` at the repo root once, then invoke them
 directly. The Ethereum plumbing the shell versions did with `cast` and hex
 string surgery (ABI encoding, receipt polling, deposit payload packing) is
-what viem is for. Orchestration — `start-devnet.sh`, `deploy-l1.sh`,
-`deploy-outputs.sh`, `build-snapshot.sh`, `start-shim.sh`,
-`generate-config.sh` — stays shell: it is process supervision around
-external binaries, and it still sources `env.sh`, which `lib/env.ts` mirrors
-variable for variable (same names, same address files, same defaults).
+what viem is for. Orchestration — `start-devnet.sh`, `stop-devnet.sh`,
+`lib/devnet.sh`, `procs/*.sh`, `deploy-l1.sh`, `deploy-outputs.sh`,
+`build-snapshot.sh`, `start-shim.sh`, `generate-config.sh` — stays shell: it
+is process supervision around external binaries, and it still sources
+`env.sh`, which `lib/env.ts` mirrors variable for variable (same names, same
+address files, same defaults). The one client script that is not
+transactional is `guest-log.ts`, which drives the `guest` pane.
 
 User overrides go in a `.env` at the repo root — `SENDER_KEY=…`,
 `L1_RPC=…`, anything `env.sh` reads. Bun loads it automatically for the
@@ -193,6 +317,10 @@ funded — retired once `WITH_CONTRACTS=1` became the default.)
 proposal's root claim, the executor that runs a proven output, and the two
 portals. It also funds the executor and registers the portals with the guest.
 
+It is the `outputs` pane — the one step of the flow that waits for you rather
+than for another process, since not every run wants to move assets. Select it
+and press `s`, or run it yourself:
+
 ```sh
 ./devnet/deploy-outputs.sh
 bun devnet/withdraw.ts 0x00000000000000000000000000000000000a11ce 500000000000000000
@@ -250,11 +378,15 @@ since an error inside the guest halts the machine, and a halted machine is a
 halted chain. (Its Lua predecessor had the same discipline in
 `test-guest.lua`, retired with the bank app.)
 
-Two operational notes, both easy to trip over by hand:
+Two operational notes, both easy to trip over by hand — and both handled by
+`devnet/procs/`:
 
 - A machine server holds exactly one machine, and `machine.load` refuses to
-  replace it. Config generation and the node each need their own server.
-- op-node must not be started before the engine logs `chain initialized`.
+  replace it. Config generation and the node each need their own server,
+  which is why `genesis` starts one of its own and stops it again.
+- op-node must not be started before the engine is serving. `procs/op-node.sh`
+  waits for the engine's port, which op-cartesi binds only once the chain is
+  open.
 
 ## Persistence
 
