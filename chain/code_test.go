@@ -82,6 +82,32 @@ func TestCodeAtServesMarkers(t *testing.T) {
 	if _, err := c.CodeAt(ctx, common.HexToHash("0xdead"), counter); !errors.Is(err, ErrNoSnapshot) {
 		t.Fatalf("unknown block: want ErrNoSnapshot, got %v", err)
 	}
+
+	// ContractsAt lists the same surface: drive entries first (registration
+	// order, ABIs included), then façades derived from the registry.
+	contracts, err := c.ContractsAt(ctx, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(contracts) != 3 {
+		t.Fatalf("contracts %d, want 3", len(contracts))
+	}
+	if contracts[0].Address != config || contracts[0].Kind != CodeKindSystem ||
+		!bytes.Equal(contracts[0].Abi, []byte(`[{"name":"setFee"}]`)) {
+		t.Fatalf("contract 0: %+v", contracts[0])
+	}
+	if contracts[1].Address != counter || contracts[1].Kind != CodeKindApp {
+		t.Fatalf("contract 1: %+v", contracts[1])
+	}
+	facade := contracts[2]
+	if facade.Address != L2TokenAddress(l1Token) || facade.Kind != CodeKindToken ||
+		facade.Abi != nil || facade.L1Token == nil || *facade.L1Token != l1Token {
+		t.Fatalf("contract 2: %+v", facade)
+	}
+
+	if _, err := c.ContractsAt(ctx, common.HexToHash("0xdead")); !errors.Is(err, ErrNoSnapshot) {
+		t.Fatalf("unknown block: want ErrNoSnapshot, got %v", err)
+	}
 }
 
 // A machine with neither drive routes nothing the host can see: every

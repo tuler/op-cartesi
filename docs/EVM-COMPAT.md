@@ -668,12 +668,14 @@ and their interfaces — so the chain, or anyone holding a snapshot, knows
 what the machine speaks by reading drive bytes, with zero knowledge of the
 application's implementation. It is the natural bridge for outside
 communication: the shim serves contract discovery from the same
-read-memory path `AccountAt` already uses. *(done for `eth_getCode` —
-`chain/code.go` answers `0xEF 0xC7 0x51 <kind>` for every routed address:
-kind 0 system and 1 application from the ABI drive, 2 for token façades
-derived from the accounts drive. The `0xEF` prefix is EIP-3541-reserved, so
-no real EVM bytecode can collide with a marker. `cartesi_getContracts` is
-next.)*
+read-memory path `AccountAt` already uses. *(done — `eth_getCode`
+(`chain/code.go`) answers `0xEF 0xC7 0x51 <kind>` for every routed
+address: kind 0 system and 1 application from the ABI drive, 2 for token
+façades derived from the accounts drive; the `0xEF` prefix is
+EIP-3541-reserved, so no real EVM bytecode can collide with a marker. And
+`cartesi_getContracts` serves the full surface — recorded contracts with
+their ABIs embedded, façades with their L1 token — as of any retained
+block.)*
 
 ## 11. What changes where
 
@@ -681,7 +683,7 @@ next.)*
 |---|---|
 | **Consensus / wire** | **Nothing.** EvmAdvance unchanged, block format unchanged, outputs tree and voucher encodings unchanged, op-node/op-batcher/op-proposer untouched, L1 contracts untouched. |
 | **Guest** | The router (native, reference implementation of the standard) replaces `bank-app.sh`: CMIO loop, outputs accumulator, typed-tx sighash, enforcement, journal, manifest dispatch, built-in family. The accounts drive and its libraries: unchanged. *(done, as workspace libraries — `@cartesi/routed-guest` the runtime, `@cartesi/evm-compat` the wire vocabulary, `@cartesi/abis` the ABI drive; `ledger-app` is an application of them, §10a)* |
-| **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `engineapi/eth.go`)*; `eth_getCode` serves the routed-address markers from the ABI drive and the token registry *(done — `chain/code.go`, §10a)*; receipts try the `EvmLog` decode; `cartesi_getContracts` reads the same drive; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
+| **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `engineapi/eth.go`)*; `eth_getCode` serves the routed-address markers and `cartesi_getContracts` the full surface with ABIs, both from the drives *(done — `chain/code.go`, §10a)*; receipts try the `EvmLog` decode; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
 | **Devnet** | `build-snapshot.sh` ships the router; the dialect scripts collapse into standard tooling — `cast send $TOKEN "transfer(address,uint256)" …`, `cast call $TOKEN "balanceOf(address)" …`, `cast send $BRIDGE "withdrawEther(address)" --value …` — and `send-l2-tx.sh` drops `--legacy`. Scripts getting shorter is the acceptance test. |
 | **Tests** | The realmachine suite keeps its role with the new guest *(done — its inputs now speak the standard)*; enforcement (sighash, recovery, nonce) is covered by the router's vitest suite, retiring `test-guest.lua`; golden accounts-drive vectors already cover the ledger. |
 
@@ -765,10 +767,9 @@ guest did.
    (ledger, façade, bridge, config, L1Block, portal receiver). Port the
    enforcement vectors of the Lua guest's `test-guest.lua` (since retired
    in favor of the vitest suite).
-3. **The shim half**: `EvmCall` in `eth_call` + revert mapping and the ABI
-   drive's Go reader with `eth_getCode` markers are done; remaining:
-   `EvmLog` receipts and `cartesi_getContracts` from the same drive bytes
-   (§10a).
+3. **The shim half**: `EvmCall` in `eth_call` + revert mapping, the ABI
+   drive's Go reader with `eth_getCode` markers, and `cartesi_getContracts`
+   are done; remaining: `EvmLog` receipts (§10a).
 4. **Devnet swap**: router into `build-snapshot.sh`, dialect scripts
    replaced by `cast` one-liners, realmachine suite green.
 5. **Later, in this order of pull**: `EvmSimulate` under

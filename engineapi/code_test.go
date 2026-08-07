@@ -86,6 +86,28 @@ func TestGetCodeServesRoutedMarkers(t *testing.T) {
 			t.Fatalf("%s: eth_getCode = %s, want %s", tc.name, code, tc.want)
 		}
 	}
+
+	// cartesi_getContracts serves the same surface with the ABIs embedded as
+	// JSON, and names the L1 token behind each façade.
+	var listed Contracts
+	client.call("cartesi_getContracts", &listed)
+	if len(listed.Contracts) != 3 {
+		t.Fatalf("contracts %d, want 3: %+v", len(listed.Contracts), listed)
+	}
+	byAddr := map[common.Address]ContractEntry{}
+	for _, e := range listed.Contracts {
+		byAddr[e.Address] = e
+	}
+	if e := byAddr[config]; e.Kind != "system" || string(e.Abi) != `[{"name":"setFee"}]` {
+		t.Fatalf("config entry: %+v", e)
+	}
+	if e := byAddr[counter]; e.Kind != "app" || string(e.Abi) != `[{"name":"increment"}]` {
+		t.Fatalf("counter entry: %+v", e)
+	}
+	facade := byAddr[chain.L2TokenAddress(l1Token)]
+	if facade.Kind != "token" || facade.Abi != nil || facade.L1Token == nil || *facade.L1Token != l1Token {
+		t.Fatalf("façade entry: %+v", facade)
+	}
 }
 
 // A mock-machine dev node without drives keeps answering "0x" everywhere

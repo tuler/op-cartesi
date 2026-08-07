@@ -146,8 +146,10 @@ not in command lines.
 
 The scripts and the guest speak the same standard: `withdraw.ts` and
 `withdraw-erc20.ts` call the bridge predeploy, `balance.ts` reads the drive
-and the ERC-20 façades, and the guest they address is the one
-`build-snapshot.sh` builds — the routed guest
+and the ERC-20 façades, `contracts.ts` asks `cartesi_getContracts` what the
+guest routes — every recorded contract with its ABI, every token façade with
+its L1 token, straight off the machine's drives — and the guest they address
+is the one `build-snapshot.sh` builds — the routed guest
 ([ledger-app](../ledger-app/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md)).
 Nothing here speaks a private dialect anymore; an app that wants one still
 can, through `cartesi_inspect` and `send-l2-tx.ts` with raw payloads.
