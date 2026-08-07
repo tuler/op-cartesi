@@ -28,7 +28,7 @@ import {
     type Hex,
     type TransactionReceipt,
 } from "viem";
-import { getL2TransactionHashes, walletActionsL1 } from "viem/op-stack";
+import { getL2TransactionHashes } from "viem/op-stack";
 import { config, l1Public, l1Test, l1Wallet, l2Chain, l2Public, usage } from "./lib/env.ts";
 
 // Runtime bytecode for the emitter. It logs TransactionDeposited with
@@ -85,7 +85,7 @@ const code = await l1.getCode({ address: config.depositContract });
 if (code !== undefined && code !== "0x") {
     console.error(`depositing ${amount} wei to ${to} via OptimismPortal at ${config.depositContract}`);
     await report(
-        await wallet.extend(walletActionsL1()).depositTransaction({
+        await wallet.depositTransaction({
             request: { to, value: amount, mint: amount, gas: config.depositGasLimit },
             targetChain: l2Chain,
         }),
