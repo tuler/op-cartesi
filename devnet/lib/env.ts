@@ -3,10 +3,20 @@
 // two deliberately read the same variables, the same address files, and the
 // same defaults, so a value set for one is set for both.
 //
-// Precedence mirrors env.sh exactly: the address files deploy scripts write
-// (l1-addresses.env, outputs-addresses.env, token.env) are sourced over the
-// inherited environment (a bash `source` assigns unconditionally), and
-// defaults fill whatever remains.
+// User overrides can live in a `.env` at the repo root: bun loads it into
+// process.env before any script code runs (from the invocation cwd — so run
+// scripts from the repo root), and env.sh replays the same file with the
+// same env-wins rule, so both surfaces see it. No code here reads .env;
+// bun's auto-loading is the mechanism.
+//
+// Precedence, highest first, mirroring env.sh exactly:
+//   1. the address files deploy scripts write (l1-addresses.env,
+//      outputs-addresses.env, token.env) — machine-written deployment
+//      outputs, sourced over everything (a bash `source` assigns
+//      unconditionally);
+//   2. the environment — which is where bun's .env loading lands, below
+//      real exported variables;
+//   3. the defaults below.
 
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";

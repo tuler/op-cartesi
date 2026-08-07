@@ -10,6 +10,21 @@ set -euo pipefail
 DEVNET_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(dirname "$DEVNET_DIR")"
 
+# A .env at the repo root carries user overrides for both config surfaces:
+# bun auto-loads it for the TypeScript scripts (devnet/lib/env.ts), and this
+# loop replays it here with the same precedence — an already-exported
+# variable wins over the file, the opposite of a plain `source`. Keys are
+# validated before the eval so a stray line cannot execute anything.
+if [ -f "$REPO_DIR/.env" ]; then
+  while IFS='=' read -r k v; do
+    case "$k" in ''|\#*) continue ;; esac
+    if [[ "$k" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      v="${v%\"}" ; v="${v#\"}"                # strip optional quotes, as bun does
+      eval ": \"\${$k:=\$v}\""
+    fi
+  done < "$REPO_DIR/.env"
+fi
+
 # --- machine ---------------------------------------------------------------
 # Empty runs the deterministic in-memory mock. Point this at a
 # cartesi-jsonrpc-machine server to run a real Cartesi Machine.
