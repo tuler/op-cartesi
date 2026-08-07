@@ -111,6 +111,11 @@ bun install
 bun run test
 bun run typecheck
 
+# Biome formats and lints every TypeScript file in the workspace, from the
+# single biome.jsonc at the repository root.
+bun run check         # format + lint + import order, report only
+bun run check:fix     # ... and apply the safe fixes
+
 # Run with the in-memory mock machine (no emulator needed):
 go run ./cmd/op-cartesi run
 
