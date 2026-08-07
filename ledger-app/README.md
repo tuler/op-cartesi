@@ -60,9 +60,13 @@ cartesi build      # @cartesi/cli 2.0 alpha → snapshot under .cartesi/image
 ```
 
 `cartesi.toml` declares the accounts drive (raw, 1 MiB, unmounted, formatted
-by the guest at first boot, before the first yield). Genesis parameters
-(`CHAIN_ID`, `OWNER`) are Dockerfile `ENV`, which `cartesi build` passes into
-the machine; defaults match `devnet/env.sh`.
+by the guest at first boot, before the first yield, and handed to the app
+user with `user = "dapp"` — cartesi-init runs the entrypoint unprivileged).
+It also pins `machine.ram_image` to a machine-emulator-0.21.0-compatible
+kernel installed on the host (the macOS homebrew path; adjust for your OS)
+until the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are
+Dockerfile `ENV`, which `cartesi build` passes into the machine; defaults
+match `devnet/env.sh`.
 
 ## Not here yet
 
