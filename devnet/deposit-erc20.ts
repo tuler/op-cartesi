@@ -44,6 +44,13 @@ const depositor = wallet.account.address;
 // surface at the first read ("returned no data"). Check for code up front.
 const deployed = async (address: Address) => (await l1.getCode({ address })) !== undefined;
 
+// The same goes for the outputs suite itself: addresses recorded by an
+// earlier deploy-outputs.sh run outlive the anvil they were deployed to.
+if (!(await deployed(portal)) || !(await deployed(executor))) {
+    console.error(`the outputs suite (portal ${portal}, executor ${executor}) has no code on this L1 — rerun ./devnet/deploy-outputs.sh`);
+    process.exit(1);
+}
+
 let token: Address;
 if (tokenArg) {
     token = getAddress(tokenArg);

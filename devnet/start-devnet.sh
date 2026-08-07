@@ -253,6 +253,12 @@ REQUIRED_PORTS=("$L1_PORT" "$MACHINE_PORT" "$GENESIS_MACHINE_PORT" "$OPNODE_RPC_
 [ "$WITH_VERIFIER" = "1" ] && REQUIRED_PORTS+=("$VERIFIER_MACHINE_PORT" "$VERIFIER_OPNODE_RPC_PORT" "${VERIFIER_ENGINE_ADDR##*:}" "${VERIFIER_HTTP_ADDR##*:}")
 require_free_ports "${REQUIRED_PORTS[@]}"
 
+# A fresh anvil forgets every deployment, so the outputs-suite addresses
+# recorded by a previous deploy-outputs.sh run are stale the moment it boots.
+# Removing the file makes the scripts say "run ./devnet/deploy-outputs.sh
+# first" instead of no-op'ing transactions against codeless addresses.
+rm -f "$DEVNET_DIR/outputs-addresses.env"
+
 echo "starting anvil (L1, chain $L1_CHAIN_ID) on :$L1_PORT" >&2
 anvil --host "$L1_BIND_ADDR" --port "$L1_PORT" --chain-id "$L1_CHAIN_ID" --block-time 2 --silent \
   > "$LOG_DIR/anvil.log" 2>&1 &
