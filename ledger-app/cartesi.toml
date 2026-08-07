@@ -17,13 +17,25 @@
 # discovers the drive by its label via the machine config (ACCOUNTS.md §5.1),
 # so auto-placement works; pinning the start in the CLI is a wanted upstream
 # knob.
+#
+# `user` hands the raw device node to the entrypoint's user: cartesi-init
+# runs the app unprivileged (dapp), and an unmounted pmem device is
+# otherwise root-only — the app's direct open would die with EACCES.
 
 [drives.accounts]
 builder = "empty"
 format = "raw"
 size = 1048576
 mount = false
+user = "dapp"
 
 [drives.root]
 builder = "docker"
 context = ".."
+
+# machine-emulator 0.21.0 needs a matching kernel, and the CLI's bundled sdk
+# does not carry one yet, so point ram_image at a locally installed
+# compatible linux.bin. This is the macOS homebrew location; on linux the
+# emulator's images usually live at /usr/share/cartesi-machine/images/.
+[machine]
+ram_image = "/opt/homebrew/etc/cartesi/images/linux.bin"
