@@ -11,12 +11,7 @@
         "skipLibCheck": true,
         "strict": true,
         "target": "ES2022",
-        "types": [
-            "bun"
-        ]
+        "types": ["bun"]
     },
-    "include": [
-        "*.ts",
-        "lib"
-    ]
+    "include": ["*.ts", "lib"]
 }

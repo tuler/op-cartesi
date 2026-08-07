@@ -6,19 +6,33 @@
 // outputs tree where it can be proven (the same argument the Lua app made
 // for its notices).
 
-import { PORTAL_ERC20, PORTAL_ETHER, applyL1ToL2Alias, configAbi, errorRevert, sameAddress, tryDecodeCalldata } from "@cartesi/evm-compat";
 import {
+    applyL1ToL2Alias,
+    configAbi,
+    errorRevert,
+    PORTAL_ERC20,
+    PORTAL_ETHER,
+    sameAddress,
+    tryDecodeCalldata,
+} from "@cartesi/evm-compat";
+import {
+    type Address,
     encodeAbiParameters,
     encodeFunctionResult,
+    type Hex,
     keccak256,
     padHex,
-
     toHex,
-    type Address,
-    type Hex,
 } from "viem";
 import { AccountsDriveError, type Ledger } from "../ledger.ts";
-import type { AdvanceOutcome, CallContext, Handler, OutputsSink, TxContext, ViewOutcome } from "../types.ts";
+import type {
+    AdvanceOutcome,
+    CallContext,
+    Handler,
+    OutputsSink,
+    TxContext,
+    ViewOutcome,
+} from "../types.ts";
 
 const FEE_SET_TOPIC: Hex = keccak256(toHex("FeeSet(uint256)"));
 const PORTAL_REGISTERED_TOPIC: Hex = keccak256(toHex("PortalRegistered(uint8,address,address)"));
@@ -65,10 +79,18 @@ export class Config implements Handler {
             case "registerToken": {
                 const [l1Token, , name, symbol, decimals] = decoded.args;
                 try {
-                    const { id, l2Token } = await ledger.registerToken(l1Token, { name, symbol, decimals });
+                    const { id, l2Token } = await ledger.registerToken(l1Token, {
+                        name,
+                        symbol,
+                        decimals,
+                    });
                     out.log(
                         this.configAddress,
-                        [TOKEN_REGISTERED_TOPIC, padHex(l1Token, { size: 32 }), padHex(l2Token, { size: 32 })],
+                        [
+                            TOKEN_REGISTERED_TOPIC,
+                            padHex(l1Token, { size: 32 }),
+                            padHex(l2Token, { size: 32 }),
+                        ],
                         toHex(BigInt(id), { size: 32 }),
                     );
                     return { kind: "accept" };
@@ -87,7 +109,10 @@ export class Config implements Handler {
                 return { kind: "accept" };
             }
             default:
-                return { kind: "revert", data: errorRevert(`${decoded.functionName} is not a transaction`) };
+                return {
+                    kind: "revert",
+                    data: errorRevert(`${decoded.functionName} is not a transaction`),
+                };
         }
     }
 
@@ -98,15 +123,26 @@ export class Config implements Handler {
             case "fee":
                 return {
                     kind: "return",
-                    data: encodeFunctionResult({ abi: configAbi, functionName: "fee", result: ledger.fee }),
+                    data: encodeFunctionResult({
+                        abi: configAbi,
+                        functionName: "fee",
+                        result: ledger.fee,
+                    }),
                 };
             case "owner":
                 return {
                     kind: "return",
-                    data: encodeFunctionResult({ abi: configAbi, functionName: "owner", result: this.owner }),
+                    data: encodeFunctionResult({
+                        abi: configAbi,
+                        functionName: "owner",
+                        result: this.owner,
+                    }),
                 };
             default:
-                return { kind: "revert", data: errorRevert(`${decoded.functionName} is not a view`) };
+                return {
+                    kind: "revert",
+                    data: errorRevert(`${decoded.functionName} is not a view`),
+                };
         }
     }
 }

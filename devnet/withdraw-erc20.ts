@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Runs an ERC-20 withdrawal end to end.
 //
 //   bun devnet/withdraw-erc20.ts <recipient> <amount> [l1-token]
@@ -18,8 +19,8 @@
 // wants an MPT proof against an L2 state root that here is a Cartesi hash
 // tree. See DESIGN §7d.
 
-import { encodeFunctionData, getAddress, parseAbi } from "viem";
 import { BRIDGE_ADDRESS, bridgeAbi, l2TokenAddress } from "@cartesi/evm-compat";
+import { encodeFunctionData, getAddress, parseAbi } from "viem";
 import { config, l1Public, usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 import { executeVoucher } from "./lib/voucher.ts";
@@ -32,7 +33,9 @@ const to = getAddress(toArg);
 const amount = BigInt(amountArg);
 const token = tokenArg ? getAddress(tokenArg) : config.testToken;
 if (!token) {
-    console.error("no token given and no TEST_TOKEN_ADDRESS; run bun devnet/deposit-erc20.ts first");
+    console.error(
+        "no token given and no TEST_TOKEN_ADDRESS; run bun devnet/deposit-erc20.ts first",
+    );
     process.exit(1);
 }
 
@@ -48,7 +51,8 @@ const txHash = await sendL2Tx({
 console.error(`  L2 tx ${txHash}`);
 
 const l1 = l1Public();
-const balance = () => l1.readContract({ address: token, abi: balanceOfAbi, functionName: "balanceOf", args: [to] });
+const balance = () =>
+    l1.readContract({ address: token, abi: balanceOfAbi, functionName: "balanceOf", args: [to] });
 const before = await balance();
 await executeVoucher(txHash);
 const after = await balance();

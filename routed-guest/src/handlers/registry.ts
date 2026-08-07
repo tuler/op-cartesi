@@ -2,7 +2,7 @@
 // and the source the shim reads eth_getCode markers from.
 
 import { errorRevert, l2TokenAddress, registryAbi, tryDecodeCalldata } from "@cartesi/evm-compat";
-import { encodeFunctionResult, type Address } from "viem";
+import { type Address, encodeFunctionResult } from "viem";
 import type { Ledger } from "../ledger.ts";
 import type { CallContext, Handler, ViewOutcome } from "../types.ts";
 
@@ -19,7 +19,9 @@ export class Registry implements Handler {
         switch (decoded.functionName) {
             case "handlerAt": {
                 const [target] = decoded.args;
-                const h = this.lookup(target) ?? (ledger.tokenByL2Address(target) ? { payable: false } : undefined);
+                const h =
+                    this.lookup(target) ??
+                    (ledger.tokenByL2Address(target) ? { payable: false } : undefined);
                 return {
                     kind: "return",
                     data: encodeFunctionResult({
@@ -32,11 +34,17 @@ export class Registry implements Handler {
             case "handlers": {
                 const all = [
                     ...this.list(),
-                    ...ledger.drive.tokens().map((t) => l2TokenAddress(`0x${Buffer.from(t.address).toString("hex")}`)),
+                    ...ledger.drive
+                        .tokens()
+                        .map((t) => l2TokenAddress(`0x${Buffer.from(t.address).toString("hex")}`)),
                 ];
                 return {
                     kind: "return",
-                    data: encodeFunctionResult({ abi: registryAbi, functionName: "handlers", result: all }),
+                    data: encodeFunctionResult({
+                        abi: registryAbi,
+                        functionName: "handlers",
+                        result: all,
+                    }),
                 };
             }
             case "l2TokenOf": {

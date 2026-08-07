@@ -28,8 +28,20 @@ await drive.register(
     "0xC0DE000000000000000000000000000000000001",
     KIND_APP,
     JSON.stringify([
-        { type: "function", name: "increment", stateMutability: "nonpayable", inputs: [], outputs: [] },
-        { type: "function", name: "count", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "uint256" }] },
+        {
+            type: "function",
+            name: "increment",
+            stateMutability: "nonpayable",
+            inputs: [],
+            outputs: [],
+        },
+        {
+            type: "function",
+            name: "count",
+            stateMutability: "view",
+            inputs: [],
+            outputs: [{ name: "", type: "uint256" }],
+        },
     ]),
 );
 

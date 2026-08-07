@@ -17,7 +17,7 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { erc20Abi, getAddress, parseAbi, type Address } from "viem";
+import { type Address, erc20Abi, getAddress, parseAbi } from "viem";
 import { config, DEVNET_DIR, l1Public, l1Wallet, usage } from "./lib/env.ts";
 
 const portalAbi = parseAbi([
@@ -47,7 +47,9 @@ const deployed = async (address: Address) => (await l1.getCode({ address })) !==
 // The same goes for the outputs suite itself: addresses recorded by an
 // earlier deploy-outputs.sh run outlive the anvil they were deployed to.
 if (!(await deployed(portal)) || !(await deployed(executor))) {
-    console.error(`the outputs suite (portal ${portal}, executor ${executor}) has no code on this L1 — rerun ./devnet/deploy-outputs.sh`);
+    console.error(
+        `the outputs suite (portal ${portal}, executor ${executor}) has no code on this L1 — rerun ./devnet/deploy-outputs.sh`,
+    );
     process.exit(1);
 }
 
@@ -63,7 +65,9 @@ if (tokenArg) {
 } else {
     if (config.testToken) {
         // token.env outlives anvil, which forgets every deployment on restart.
-        console.error(`token.env's ${config.testToken} has no code on this L1 — deploying a fresh test token`);
+        console.error(
+            `token.env's ${config.testToken} has no code on this L1 — deploying a fresh test token`,
+        );
     } else {
         console.error("deploying a test token");
     }
@@ -119,11 +123,18 @@ const deposit = await wallet.writeContract({
 });
 const depositReceipt = await l1.waitForTransactionReceipt({ hash: deposit });
 if (depositReceipt.status !== "success") {
-    console.error(`depositERC20Tokens reverted in ${deposit} — does ${depositor} hold ${amount} of ${token}?`);
+    console.error(
+        `depositERC20Tokens reverted in ${deposit} — does ${depositor} hold ${amount} of ${token}?`,
+    );
     process.exit(1);
 }
 
-const escrowed = await l1.readContract({ address: token, abi: erc20Abi, functionName: "balanceOf", args: [executor] });
+const escrowed = await l1.readContract({
+    address: token,
+    abi: erc20Abi,
+    functionName: "balanceOf",
+    args: [executor],
+});
 console.error(`  escrowed in the application: ${escrowed}`);
 console.error("");
 console.error(`the guest credits ${depositor} once the chain derives the deposit; check with:`);

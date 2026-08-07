@@ -6,7 +6,13 @@
 // id pin, the low-s rule, and sender recovery from the signature — never from
 // the envelope's msgSender.
 
-import { recoverTransactionAddress, toHex, type Address, type Hex, type TransactionSerialized } from "viem";
+import {
+    type Address,
+    type Hex,
+    recoverTransactionAddress,
+    type TransactionSerialized,
+    toHex,
+} from "viem";
 import { parseTransaction } from "viem/op-stack";
 
 /** EIP-2's upper bound on s (secp256k1 n ÷ 2): the twin signature with the
@@ -123,7 +129,9 @@ export function parseInput(raw: Uint8Array): ParsedInput {
 
 /** Recovers the signer, enforcing low-s first. Returns null for anything
  * that does not verify. */
-export async function recoverSender(parsed: Extract<ParsedInput, { kind: "signed" }>): Promise<Address | null> {
+export async function recoverSender(
+    parsed: Extract<ParsedInput, { kind: "signed" }>,
+): Promise<Address | null> {
     if (BigInt(parsed.s) > HALF_N) return null;
     try {
         return await recoverTransactionAddress({ serializedTransaction: parsed.raw });

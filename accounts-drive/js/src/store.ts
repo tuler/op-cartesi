@@ -7,50 +7,59 @@
 // Implementations decide what backs it: a byte array, a device file inside
 // the guest, or a remote machine's memory on the host.
 
-import { open as fsOpen } from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
+import type { FileHandle } from "node:fs/promises";
+import { open as fsOpen } from "node:fs/promises";
 
 /**
  * Store is the byte-level access the drive library needs. Offsets are
  * relative to the drive's first byte.
  */
 export interface Store {
-  /** Reads `len` bytes at drive-relative offset `off`. */
-  readAt(off: number, len: number): Promise<Uint8Array>;
-  /** Writes `bytes` at drive-relative offset `off`. */
-  writeAt(off: number, bytes: Uint8Array): Promise<void>;
+    /** Reads `len` bytes at drive-relative offset `off`. */
+    readAt(off: number, len: number): Promise<Uint8Array>;
+    /** Writes `bytes` at drive-relative offset `off`. */
+    writeAt(off: number, bytes: Uint8Array): Promise<void>;
 }
 
 /** MemStore is an in-memory drive image: the whole drive as one Uint8Array,
  * exposed as `.bytes` so callers can hash or snapshot the image directly. */
 export class MemStore implements Store {
-  bytes: Uint8Array;
+    bytes: Uint8Array;
 
-  /** @param lengthOrBytes zeroed length to allocate, or an existing image */
-  constructor(lengthOrBytes: number | Uint8Array) {
-    this.bytes = lengthOrBytes instanceof Uint8Array
-      ? lengthOrBytes
-      : new Uint8Array(Number(lengthOrBytes));
-  }
-
-  #bounds(off: number, n: number): void {
-    if (!Number.isSafeInteger(off) || off < 0 || !Number.isSafeInteger(n) || n < 0 || off + n > this.bytes.length) {
-      throw new Error(`access [${off},${off + n}) outside drive of ${this.bytes.length} bytes`);
+    /** @param lengthOrBytes zeroed length to allocate, or an existing image */
+    constructor(lengthOrBytes: number | Uint8Array) {
+        this.bytes =
+            lengthOrBytes instanceof Uint8Array
+                ? lengthOrBytes
+                : new Uint8Array(Number(lengthOrBytes));
     }
-  }
 
-  async readAt(off: number, len: number): Promise<Uint8Array> {
-    off = Number(off);
-    len = Number(len);
-    this.#bounds(off, len);
-    return this.bytes.slice(off, off + len);
-  }
+    #bounds(off: number, n: number): void {
+        if (
+            !Number.isSafeInteger(off) ||
+            off < 0 ||
+            !Number.isSafeInteger(n) ||
+            n < 0 ||
+            off + n > this.bytes.length
+        ) {
+            throw new Error(
+                `access [${off},${off + n}) outside drive of ${this.bytes.length} bytes`,
+            );
+        }
+    }
 
-  async writeAt(off: number, bytes: Uint8Array): Promise<void> {
-    off = Number(off);
-    this.#bounds(off, bytes.length);
-    this.bytes.set(bytes, off);
-  }
+    async readAt(off: number, len: number): Promise<Uint8Array> {
+        off = Number(off);
+        len = Number(len);
+        this.#bounds(off, len);
+        return this.bytes.slice(off, off + len);
+    }
+
+    async writeAt(off: number, bytes: Uint8Array): Promise<void> {
+        off = Number(off);
+        this.#bounds(off, bytes.length);
+        this.bytes.set(bytes, off);
+    }
 }
 
 /** FileStore accesses the drive through a file — in the guest, the raw device
@@ -58,49 +67,55 @@ export class MemStore implements Store {
  * finishing each input (spec §10): file I/O goes through the guest kernel's
  * page cache, and un-synced bytes are not in machine state at the yield. */
 export class FileStore implements Store {
-  handle: FileHandle;
+    handle: FileHandle;
 
-  constructor(handle: FileHandle) {
-    this.handle = handle;
-  }
-
-  /** Opens a device or image file read-write. */
-  static async open(path: string): Promise<FileStore> {
-    return new FileStore(await fsOpen(path, 'r+'));
-  }
-
-  async readAt(off: number, len: number): Promise<Uint8Array> {
-    off = Number(off);
-    len = Number(len);
-    const buf = new Uint8Array(len);
-    let got = 0;
-    while (got < len) {
-      const { bytesRead } = await this.handle.read(buf, got, len - got, off + got);
-      if (bytesRead === 0) throw new Error(`short read at ${off}: got ${got} of ${len} bytes`);
-      got += bytesRead;
+    constructor(handle: FileHandle) {
+        this.handle = handle;
     }
-    return buf;
-  }
 
-  async writeAt(off: number, bytes: Uint8Array): Promise<void> {
-    off = Number(off);
-    let put = 0;
-    while (put < bytes.length) {
-      const { bytesWritten } = await this.handle.write(bytes, put, bytes.length - put, off + put);
-      if (bytesWritten === 0) throw new Error(`short write at ${off}`);
-      put += bytesWritten;
+    /** Opens a device or image file read-write. */
+    static async open(path: string): Promise<FileStore> {
+        return new FileStore(await fsOpen(path, "r+"));
     }
-  }
 
-  /** Flushes written bytes to the device (fdatasync). Per spec §10 a guest
-   * MUST call this before finishing each input on a pmem-backed drive. */
-  async sync(): Promise<void> {
-    await this.handle.datasync();
-  }
+    async readAt(off: number, len: number): Promise<Uint8Array> {
+        off = Number(off);
+        len = Number(len);
+        const buf = new Uint8Array(len);
+        let got = 0;
+        while (got < len) {
+            const { bytesRead } = await this.handle.read(buf, got, len - got, off + got);
+            if (bytesRead === 0)
+                throw new Error(`short read at ${off}: got ${got} of ${len} bytes`);
+            got += bytesRead;
+        }
+        return buf;
+    }
 
-  async close(): Promise<void> {
-    await this.handle.close();
-  }
+    async writeAt(off: number, bytes: Uint8Array): Promise<void> {
+        off = Number(off);
+        let put = 0;
+        while (put < bytes.length) {
+            const { bytesWritten } = await this.handle.write(
+                bytes,
+                put,
+                bytes.length - put,
+                off + put,
+            );
+            if (bytesWritten === 0) throw new Error(`short write at ${off}`);
+            put += bytesWritten;
+        }
+    }
+
+    /** Flushes written bytes to the device (fdatasync). Per spec §10 a guest
+     * MUST call this before finishing each input on a pmem-backed drive. */
+    async sync(): Promise<void> {
+        await this.handle.datasync();
+    }
+
+    async close(): Promise<void> {
+        await this.handle.close();
+    }
 }
 
 /** ReadMemory is the machine client's read_memory: bytes at an absolute
@@ -114,27 +129,27 @@ export type ReadMemory = (address: bigint, length: number) => Promise<Uint8Array
  * client's machine.read_memory. Read-only; per spec §11 use it only against
  * a quiescent (parked or stored) machine. */
 export class MachineStore implements Store {
-  readMemory: ReadMemory;
-  base: bigint;
+    readMemory: ReadMemory;
+    base: bigint;
 
-  /**
-   * @param readMemory the machine client's read_memory: bytes at an absolute machine address
-   * @param baseAddress the drive's start address in the machine's address space
-   */
-  constructor(readMemory: ReadMemory, baseAddress: number | bigint) {
-    this.readMemory = readMemory;
-    this.base = BigInt(baseAddress);
-  }
-
-  async readAt(off: number, len: number): Promise<Uint8Array> {
-    const data = await this.readMemory(this.base + BigInt(off), Number(len));
-    if (data.length !== Number(len)) {
-      throw new Error(`read_memory returned ${data.length} bytes, want ${len}`);
+    /**
+     * @param readMemory the machine client's read_memory: bytes at an absolute machine address
+     * @param baseAddress the drive's start address in the machine's address space
+     */
+    constructor(readMemory: ReadMemory, baseAddress: number | bigint) {
+        this.readMemory = readMemory;
+        this.base = BigInt(baseAddress);
     }
-    return data;
-  }
 
-  async writeAt(_off: number, _bytes: Uint8Array): Promise<void> {
-    throw new Error('store is read-only');
-  }
+    async readAt(off: number, len: number): Promise<Uint8Array> {
+        const data = await this.readMemory(this.base + BigInt(off), Number(len));
+        if (data.length !== Number(len)) {
+            throw new Error(`read_memory returned ${data.length} bytes, want ${len}`);
+        }
+        return data;
+    }
+
+    async writeAt(_off: number, _bytes: Uint8Array): Promise<void> {
+        throw new Error("store is read-only");
+    }
 }

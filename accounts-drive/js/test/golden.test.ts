@@ -4,136 +4,145 @@
 // check, then hash the entire drive image and compare with the scenario's
 // SHA-256 — six independent writers, one byte-identical drive.
 
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
-import { MemStore, format, AccountsDriveError, bytesToHex } from '../src/index.ts';
-import type { Config } from '../src/index.ts';
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+import type { Config } from "../src/index.ts";
+import { AccountsDriveError, bytesToHex, format, MemStore } from "../src/index.ts";
 
 interface GoldenOp {
-  op: string;
-  addr?: string;
-  token?: string;
-  nonce?: number | string;
-  value?: string;
-  force?: boolean;
-  width?: number;
-  id?: number;
-  expect: string;
+    op: string;
+    addr?: string;
+    token?: string;
+    nonce?: number | string;
+    value?: string;
+    force?: boolean;
+    width?: number;
+    id?: number;
+    expect: string;
 }
 
 interface GoldenCheck {
-  check: string;
-  addr?: string;
-  id?: number;
-  found?: boolean;
-  nonce?: number | string;
-  value?: string;
-  table?: string;
-  count?: number;
-  index?: number;
-  hex?: string;
+    check: string;
+    addr?: string;
+    id?: number;
+    found?: boolean;
+    nonce?: number | string;
+    value?: string;
+    table?: string;
+    count?: number;
+    index?: number;
+    hex?: string;
 }
 
 interface GoldenScenario {
-  name: string;
-  config: Config & { driveLength: number };
-  ops: GoldenOp[];
-  checks: GoldenCheck[];
-  sha256: string;
+    name: string;
+    config: Config & { driveLength: number };
+    ops: GoldenOp[];
+    checks: GoldenCheck[];
+    sha256: string;
 }
 
 interface GoldenFile {
-  scenarios: GoldenScenario[];
+    scenarios: GoldenScenario[];
 }
 
-const goldenPath = fileURLToPath(new URL('../../testdata/golden.json', import.meta.url));
-const golden = JSON.parse(readFileSync(goldenPath, 'utf8')) as GoldenFile;
+const goldenPath = fileURLToPath(new URL("../../testdata/golden.json", import.meta.url));
+const golden = JSON.parse(readFileSync(goldenPath, "utf8")) as GoldenFile;
 
-assert.ok(Array.isArray(golden.scenarios) && golden.scenarios.length > 0, 'golden file has no scenarios');
+assert.ok(
+    Array.isArray(golden.scenarios) && golden.scenarios.length > 0,
+    "golden file has no scenarios",
+);
 
 function be32(v: bigint): string {
-  return v.toString(16).padStart(64, '0');
+    return v.toString(16).padStart(64, "0");
 }
 
 function hexToBig(s?: string): bigint {
-  return s ? BigInt('0x' + s) : 0n;
+    return s ? BigInt(`0x${s}`) : 0n;
 }
 
 async function kindOf(promise: Promise<unknown>): Promise<string> {
-  try {
-    await promise;
-    return 'ok';
-  } catch (e) {
-    if (e instanceof AccountsDriveError) return e.kind;
-    return 'error: ' + (e as Error).message;
-  }
+    try {
+        await promise;
+        return "ok";
+    } catch (e) {
+        if (e instanceof AccountsDriveError) return e.kind;
+        return `error: ${(e as Error).message}`;
+    }
 }
 
 for (const sc of golden.scenarios) {
-  test(`golden: ${sc.name}`, async () => {
-    const store = new MemStore(sc.config.driveLength);
-    const d = await format(store, sc.config);
-    for (let i = 0; i < sc.ops.length; i++) {
-      const op = sc.ops[i];
-      let outcome: string;
-      switch (op.op) {
-        case 'setAccount':
-          outcome = await kindOf(d.setAccount(op.addr!, BigInt(op.nonce ?? 0), hexToBig(op.value)));
-          break;
-        case 'deleteAccount':
-          outcome = await kindOf(d.deleteAccount(op.addr!, op.force ?? false));
-          break;
-        case 'registerToken':
-          outcome = await kindOf(d.registerToken(op.token!, op.width ?? 0));
-          break;
-        case 'setTokenBalance':
-          outcome = await kindOf(d.setTokenBalance(op.addr!, op.id ?? 0, hexToBig(op.value)));
-          break;
-        default:
-          assert.fail(`op ${i}: unknown op ${op.op}`);
-      }
-      assert.equal(outcome, op.expect, `op ${i} (${op.op} ${op.addr ?? op.token ?? ''})`);
-    }
-    for (let i = 0; i < sc.checks.length; i++) {
-      const c = sc.checks[i];
-      const where = `check ${i} (${c.check})`;
-      switch (c.check) {
-        case 'account': {
-          const a = await d.getAccount(c.addr!);
-          assert.equal(a !== null, c.found ?? false, `${where}: found`);
-          if (a !== null) {
-            assert.equal(a.nonce, BigInt(c.nonce ?? 0), `${where}: nonce`);
-            assert.equal(be32(a.balance), c.value, `${where}: balance`);
-          }
-          break;
+    test(`golden: ${sc.name}`, async () => {
+        const store = new MemStore(sc.config.driveLength);
+        const d = await format(store, sc.config);
+        for (let i = 0; i < sc.ops.length; i++) {
+            const op = sc.ops[i];
+            let outcome: string;
+            switch (op.op) {
+                case "setAccount":
+                    outcome = await kindOf(
+                        d.setAccount(op.addr!, BigInt(op.nonce ?? 0), hexToBig(op.value)),
+                    );
+                    break;
+                case "deleteAccount":
+                    outcome = await kindOf(d.deleteAccount(op.addr!, op.force ?? false));
+                    break;
+                case "registerToken":
+                    outcome = await kindOf(d.registerToken(op.token!, op.width ?? 0));
+                    break;
+                case "setTokenBalance":
+                    outcome = await kindOf(
+                        d.setTokenBalance(op.addr!, op.id ?? 0, hexToBig(op.value)),
+                    );
+                    break;
+                default:
+                    assert.fail(`op ${i}: unknown op ${op.op}`);
+            }
+            assert.equal(outcome, op.expect, `op ${i} (${op.op} ${op.addr ?? op.token ?? ""})`);
         }
-        case 'tokenBalance': {
-          const v = await d.getTokenBalance(c.addr!, c.id ?? 0);
-          assert.equal(be32(v), c.value, where);
-          break;
+        for (let i = 0; i < sc.checks.length; i++) {
+            const c = sc.checks[i];
+            const where = `check ${i} (${c.check})`;
+            switch (c.check) {
+                case "account": {
+                    const a = await d.getAccount(c.addr!);
+                    assert.equal(a !== null, c.found ?? false, `${where}: found`);
+                    if (a !== null) {
+                        assert.equal(a.nonce, BigInt(c.nonce ?? 0), `${where}: nonce`);
+                        assert.equal(be32(a.balance), c.value, `${where}: balance`);
+                    }
+                    break;
+                }
+                case "tokenBalance": {
+                    const v = await d.getTokenBalance(c.addr!, c.id ?? 0);
+                    assert.equal(be32(v), c.value, where);
+                    break;
+                }
+                case "liveCount": {
+                    const n =
+                        c.table === "sparse" ? await d.sparseLiveCount() : await d.liveCount();
+                    assert.equal(n, BigInt(c.count ?? 0), where);
+                    break;
+                }
+                case "slot": {
+                    const cfg = d.config();
+                    const [base, slotSize] =
+                        c.table === "sparse"
+                            ? [cfg.sparseOffset, cfg.sparseSlotSize]
+                            : [cfg.tableOffset, cfg.slotSize];
+                    const slot = await store.readAt(base + slotSize * (c.index ?? 0), slotSize);
+                    assert.equal(bytesToHex(slot), c.hex, where);
+                    break;
+                }
+                default:
+                    assert.fail(`${where}: unknown check`);
+            }
         }
-        case 'liveCount': {
-          const n = c.table === 'sparse' ? await d.sparseLiveCount() : await d.liveCount();
-          assert.equal(n, BigInt(c.count ?? 0), where);
-          break;
-        }
-        case 'slot': {
-          const cfg = d.config();
-          const [base, slotSize] = c.table === 'sparse'
-            ? [cfg.sparseOffset, cfg.sparseSlotSize]
-            : [cfg.tableOffset, cfg.slotSize];
-          const slot = await store.readAt(base + slotSize * (c.index ?? 0), slotSize);
-          assert.equal(bytesToHex(slot), c.hex, where);
-          break;
-        }
-        default:
-          assert.fail(`${where}: unknown check`);
-      }
-    }
-    const sum = createHash('sha256').update(store.bytes).digest('hex');
-    assert.equal(sum, sc.sha256, 'drive image sha256');
-  });
+        const sum = createHash("sha256").update(store.bytes).digest("hex");
+        assert.equal(sum, sc.sha256, "drive image sha256");
+    });
 }

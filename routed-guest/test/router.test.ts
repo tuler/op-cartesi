@@ -1,9 +1,9 @@
 // Router core: enforcement, native transfers, deposits, and the outcome
 // model — the EVM-COMPAT §5 behaviors.
 
-import { describe, expect, it } from "vitest";
 import { parseTransaction, serializeTransaction, toBytes, toHex } from "viem";
-import { block, depositTx, makeRouter, signedLegacyTx, signedTx, user, owner } from "./helpers.ts";
+import { describe, expect, it } from "vitest";
+import { block, depositTx, makeRouter, owner, signedLegacyTx, signedTx, user } from "./helpers.ts";
 
 const EOA = "0x00000000000000000000000000000000000000aa";
 
@@ -21,20 +21,29 @@ describe("deposits", () => {
 
     it("does not bump nonces for deposits", async () => {
         const { router, ledger } = await makeRouter();
-        await router.advance(block(), depositTx({ from: user.address, to: user.address, mint: 10n, value: 10n }));
+        await router.advance(
+            block(),
+            depositTx({ from: user.address, to: user.address, mint: 10n, value: 10n }),
+        );
         expect((await ledger.account(user.address)).nonce).toBe(0n);
     });
 });
 
 describe("enforcement", () => {
     async function fund(router: Awaited<ReturnType<typeof makeRouter>>["router"], amount: bigint) {
-        await router.advance(block(), depositTx({ from: user.address, to: user.address, mint: amount, value: amount }));
+        await router.advance(
+            block(),
+            depositTx({ from: user.address, to: user.address, mint: amount, value: amount }),
+        );
     }
 
     it("accepts a signed 1559 transfer and bumps the nonce", async () => {
         const { router, ledger } = await makeRouter();
         await fund(router, 100n);
-        const res = await router.advance(block(), await signedTx(user, { to: EOA, nonce: 0, value: 30n }));
+        const res = await router.advance(
+            block(),
+            await signedTx(user, { to: EOA, nonce: 0, value: 30n }),
+        );
         expect(res.accept).toBe(true);
         expect(res.outcome).toBe("accept");
         expect((await ledger.account(user.address)).balance).toBe(70n);
@@ -46,11 +55,20 @@ describe("enforcement", () => {
         const { router, ledger } = await makeRouter();
         await fund(router, 100n);
         expect(
-            (await router.advance(block(), await signedLegacyTx(user, { to: EOA, nonce: 0, value: 1n }))).accept,
+            (
+                await router.advance(
+                    block(),
+                    await signedLegacyTx(user, { to: EOA, nonce: 0, value: 1n }),
+                )
+            ).accept,
         ).toBe(true);
         expect(
-            (await router.advance(block(), await signedLegacyTx(user, { to: EOA, nonce: 1, value: 1n }, false)))
-                .accept,
+            (
+                await router.advance(
+                    block(),
+                    await signedLegacyTx(user, { to: EOA, nonce: 1, value: 1n }, false),
+                )
+            ).accept,
         ).toBe(true);
         expect((await ledger.account(user.address)).nonce).toBe(2n);
     });
@@ -86,7 +104,10 @@ describe("enforcement", () => {
     it("rejects value beyond the balance", async () => {
         const { router } = await makeRouter();
         await fund(router, 10n);
-        const res = await router.advance(block(), await signedTx(user, { to: EOA, nonce: 0, value: 11n }));
+        const res = await router.advance(
+            block(),
+            await signedTx(user, { to: EOA, nonce: 0, value: 11n }),
+        );
         expect(res.accept).toBe(false);
         expect(res.reason).toContain("balance");
     });
@@ -100,7 +121,14 @@ describe("enforcement", () => {
         const highS = toHex(N - BigInt(tx.s!), { size: 32 });
         const flippedV = tx.v === 27n ? 28n : 27n;
         const malleated = serializeTransaction(
-            { type: "legacy", nonce: tx.nonce, gasPrice: tx.gasPrice, gas: tx.gas, to: tx.to, value: tx.value },
+            {
+                type: "legacy",
+                nonce: tx.nonce,
+                gasPrice: tx.gasPrice,
+                gas: tx.gas,
+                to: tx.to,
+                value: tx.value,
+            },
             { v: flippedV, r: tx.r!, s: highS },
         );
         const res = await router.advance(block(), toBytes(malleated));
@@ -160,15 +188,24 @@ describe("fees", () => {
 
     it("a reverted transaction still consumes nonce and fee", async () => {
         const { router, ledger } = await makeRouter();
-        await router.advance(block(), depositTx({ from: user.address, to: user.address, mint: 100n, value: 100n }));
+        await router.advance(
+            block(),
+            depositTx({ from: user.address, to: user.address, mint: 100n, value: 100n }),
+        );
         const { encodeFunctionData } = await import("viem");
         const { configAbi } = await import("@cartesi/evm-compat");
         const { CONFIG_ADDRESS } = await import("@cartesi/evm-compat");
         const setFee = encodeFunctionData({ abi: configAbi, functionName: "setFee", args: [5n] });
-        await router.advance(block(), await signedTx(owner, { to: CONFIG_ADDRESS, nonce: 0, data: setFee }));
+        await router.advance(
+            block(),
+            await signedTx(owner, { to: CONFIG_ADDRESS, nonce: 0, data: setFee }),
+        );
 
         // A non-owner calling the config contract reverts...
-        const res = await router.advance(block(), await signedTx(user, { to: CONFIG_ADDRESS, nonce: 0, data: setFee }));
+        const res = await router.advance(
+            block(),
+            await signedTx(user, { to: CONFIG_ADDRESS, nonce: 0, data: setFee }),
+        );
         expect(res.accept).toBe(true);
         expect(res.outcome).toBe("revert");
         // ...but is not free: nonce bumped, fee paid, config untouched.

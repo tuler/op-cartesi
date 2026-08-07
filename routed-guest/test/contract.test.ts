@@ -4,16 +4,18 @@
 // the discovery record.
 
 import { KIND_APP, KIND_SYSTEM } from "@cartesi/abis";
+import { CONFIG_ADDRESS, encodeEvmCall, errorRevert, L1BLOCK_ADDRESS } from "@cartesi/evm-compat";
 import {
-    CONFIG_ADDRESS,
-    L1BLOCK_ADDRESS,
-    encodeEvmCall,
-    errorRevert,
-} from "@cartesi/evm-compat";
-import { decodeFunctionResult, encodeFunctionData, parseAbi, toBytes, type Address, type Hex } from "viem";
+    type Address,
+    decodeFunctionResult,
+    encodeFunctionData,
+    type Hex,
+    parseAbi,
+    toBytes,
+} from "viem";
 import { describe, expect, it } from "vitest";
 import { AccountsDriveError, Fail, Guest, Revert } from "../src/index.ts";
-import { CHAIN_ID, block, depositTx, owner, signedTx, user } from "./helpers.ts";
+import { block, CHAIN_ID, depositTx, owner, signedTx, user } from "./helpers.ts";
 
 const COUNTER: Address = "0xc0de000000000000000000000000000000000001";
 /** Somewhere for a callback's ledger effect to land, so a test can see
@@ -109,7 +111,10 @@ async function countOf(guest: Guest): Promise<bigint> {
 }
 
 async function fund(guest: Guest, who: Address): Promise<void> {
-    await guest.router.advance(block(), depositTx({ from: who, to: who, mint: 1000n, value: 1000n }));
+    await guest.router.advance(
+        block(),
+        depositTx({ from: who, to: who, mint: 1000n, value: 1000n }),
+    );
 }
 
 describe("application contracts", () => {
@@ -126,7 +131,10 @@ describe("application contracts", () => {
 
         // Typed args flow through: reset(7).
         const reset = encodeFunctionData({ abi: counterAbi, functionName: "reset", args: [7n] });
-        await guest.router.advance(block(), await signedTx(user, { to: COUNTER, nonce: 1, data: reset }));
+        await guest.router.advance(
+            block(),
+            await signedTx(user, { to: COUNTER, nonce: 1, data: reset }),
+        );
         expect(await countOf(guest)).toBe(7n);
     });
 
@@ -162,7 +170,10 @@ describe("application contracts", () => {
         expect(res.outcome).toBe("revert");
         expect((await guest.ledger.account(PAYEE)).balance).toBe(0n);
         expect(read()).toBe(0n);
-        expect(reportOf(res.emissions)).toEqual({ tag: "0x02", payload: errorRevert("politely declined") });
+        expect(reportOf(res.emissions)).toEqual({
+            tag: "0x02",
+            payload: errorRevert("politely declined"),
+        });
     });
 
     it("Fail keeps both halves and still charges", async () => {
@@ -243,8 +254,14 @@ describe("application contracts", () => {
     it("refuses reserved and already-routed addresses", async () => {
         const { guest } = await makeCounter();
         const spec = { abi: counterAbi, transactions: {}, views: {} };
-        await expect(guest.contract({ ...spec, address: CONFIG_ADDRESS })).rejects.toThrowError(/reserved/);
-        await expect(guest.contract({ ...spec, address: L1BLOCK_ADDRESS })).rejects.toThrowError(/reserved/);
-        await expect(guest.contract({ ...spec, address: COUNTER })).rejects.toThrowError(/already routed/);
+        await expect(guest.contract({ ...spec, address: CONFIG_ADDRESS })).rejects.toThrowError(
+            /reserved/,
+        );
+        await expect(guest.contract({ ...spec, address: L1BLOCK_ADDRESS })).rejects.toThrowError(
+            /reserved/,
+        );
+        await expect(guest.contract({ ...spec, address: COUNTER })).rejects.toThrowError(
+            /already routed/,
+        );
     });
 });

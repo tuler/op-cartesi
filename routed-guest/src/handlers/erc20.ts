@@ -3,10 +3,22 @@
 // sparse table. approve/allowance/transferFrom are deferred — every v1 money
 // path debits msg.sender, which the signature already authorizes.
 
-import { erc20FacadeAbi as erc20Abi, errorRevert, transferLog, tryDecodeCalldata } from "@cartesi/evm-compat";
+import {
+    erc20FacadeAbi as erc20Abi,
+    errorRevert,
+    transferLog,
+    tryDecodeCalldata,
+} from "@cartesi/evm-compat";
 import { encodeFunctionResult } from "viem";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
-import type { AdvanceOutcome, CallContext, Handler, OutputsSink, TxContext, ViewOutcome } from "../types.ts";
+import type {
+    AdvanceOutcome,
+    CallContext,
+    Handler,
+    OutputsSink,
+    TxContext,
+    ViewOutcome,
+} from "../types.ts";
 
 export class Erc20Facade implements Handler {
     payable = false;
@@ -17,7 +29,10 @@ export class Erc20Facade implements Handler {
         const decoded = tryDecodeCalldata(erc20Abi, ctx.data);
         if (!decoded) return { kind: "revert", data: errorRevert("unknown function") };
         if (decoded.functionName !== "transfer") {
-            return { kind: "revert", data: errorRevert(`${decoded.functionName} is not a transaction`) };
+            return {
+                kind: "revert",
+                data: errorRevert(`${decoded.functionName} is not a transaction`),
+            };
         }
         const [to, value] = decoded.args;
         try {
@@ -25,7 +40,10 @@ export class Erc20Facade implements Handler {
             await ledger.creditToken(to, token.id, value);
         } catch (e) {
             if (e instanceof InsufficientFunds) {
-                return { kind: "revert", data: errorRevert("ERC20: transfer amount exceeds balance") };
+                return {
+                    kind: "revert",
+                    data: errorRevert("ERC20: transfer amount exceeds balance"),
+                };
             }
             throw e; // tableFull etc. — the router turns it into a revert
         }
@@ -88,7 +106,10 @@ export class Erc20Facade implements Handler {
                     }),
                 };
             default:
-                return { kind: "revert", data: errorRevert(`${decoded.functionName} is not a view`) };
+                return {
+                    kind: "revert",
+                    data: errorRevert(`${decoded.functionName} is not a view`),
+                };
         }
     }
 }

@@ -1,7 +1,13 @@
 // The runtime's handler contract, plus a re-export of the wire vocabulary —
 // so runtime-internal modules say `../types.ts` for both.
 
-import type { AdvanceOutcome, CallContext, OutputsSink, TxContext, ViewOutcome } from "@cartesi/evm-compat";
+import type {
+    AdvanceOutcome,
+    CallContext,
+    OutputsSink,
+    TxContext,
+    ViewOutcome,
+} from "@cartesi/evm-compat";
 import type { Ledger } from "./ledger.ts";
 
 export type {

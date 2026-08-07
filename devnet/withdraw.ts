@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Runs an ether withdrawal end to end: ask the guest for one, then prove and
 // execute the voucher it emits.
 //
@@ -12,8 +13,8 @@
 // goes into the block's withdrawalsRoot, op-proposer's claim commits to it,
 // and Cartesi's own proof libraries verify the voucher against it on L1.
 
-import { encodeFunctionData, getAddress } from "viem";
 import { BRIDGE_ADDRESS, bridgeAbi } from "@cartesi/evm-compat";
+import { encodeFunctionData, getAddress } from "viem";
 import { l1Public, usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 import { executeVoucher } from "./lib/voucher.ts";

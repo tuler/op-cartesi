@@ -5,15 +5,15 @@
 // CartesiOutput form.
 
 import {
+    type Address,
     concat,
     encodeAbiParameters,
+    type Hex,
     keccak256,
     padHex,
     parseAbiParameters,
     toFunctionSelector,
     toHex,
-    type Address,
-    type Hex,
 } from "viem";
 
 export const EVM_LOG_SIGNATURE = "EvmLog(address,bytes32[],bytes)";
@@ -28,7 +28,11 @@ export function encodeEvmLog(emitter: Address, topics: Hex[], data: Hex): Hex {
 /** ERC-20 Transfer(address indexed from, address indexed to, uint256 value). */
 export const TRANSFER_TOPIC: Hex = keccak256(toHex("Transfer(address,address,uint256)"));
 
-export function transferLog(from: Address, to: Address, value: bigint): { topics: Hex[]; data: Hex } {
+export function transferLog(
+    from: Address,
+    to: Address,
+    value: bigint,
+): { topics: Hex[]; data: Hex } {
     return {
         topics: [TRANSFER_TOPIC, padHex(from, { size: 32 }), padHex(to, { size: 32 })],
         data: toHex(value, { size: 32 }),

@@ -6,7 +6,7 @@
 // arguments with no casts; malformed calldata comes back as null instead of
 // a throw, because unknown selectors are a revert, not a crash.
 
-import { decodeFunctionData, toHex, type Abi, type DecodeFunctionDataReturnType } from "viem";
+import { type Abi, type DecodeFunctionDataReturnType, decodeFunctionData, toHex } from "viem";
 
 export function tryDecodeCalldata<const abi extends Abi>(
     abi: abi,

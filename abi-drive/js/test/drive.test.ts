@@ -15,7 +15,13 @@ const BRIDGE = "0xC751000000000000000000000000000000000001";
 const APP = "0xC0DE000000000000000000000000000000000001";
 
 const bridgeAbi = JSON.stringify([
-    { type: "function", name: "withdrawEther", stateMutability: "payable", inputs: [{ name: "to", type: "address" }], outputs: [] },
+    {
+        type: "function",
+        name: "withdrawEther",
+        stateMutability: "payable",
+        inputs: [{ name: "to", type: "address" }],
+        outputs: [],
+    },
 ]);
 const appAbi = JSON.stringify([
     { type: "function", name: "increment", stateMutability: "nonpayable", inputs: [], outputs: [] },
@@ -35,7 +41,10 @@ describe("abi drive", () => {
         const reopened = await AbiDrive.open(mem);
         expect(reopened.size).toBe(2);
         const entries = await reopened.entries();
-        expect(entries.map((e) => e.address.toLowerCase())).toEqual([BRIDGE.toLowerCase(), APP.toLowerCase()]);
+        expect(entries.map((e) => e.address.toLowerCase())).toEqual([
+            BRIDGE.toLowerCase(),
+            APP.toLowerCase(),
+        ]);
         expect(entries.map((e) => e.kind)).toEqual([KIND_SYSTEM, KIND_APP]);
         expect(await reopened.abiOf(APP)).toBe(appAbi);
     });
@@ -58,11 +67,21 @@ describe("abi drive", () => {
     });
 
     it("refuses past capacity and past the heap", async () => {
-        const tiny = await AbiDrive.format(store(), { driveLength: 262144, capacity: 1, heapOffset: 4096 });
+        const tiny = await AbiDrive.format(store(), {
+            driveLength: 262144,
+            capacity: 1,
+            heapOffset: 4096,
+        });
         await tiny.register(APP, KIND_APP, appAbi);
-        await expect(tiny.register(BRIDGE, KIND_SYSTEM, bridgeAbi)).rejects.toThrowError(/registryFull/);
+        await expect(tiny.register(BRIDGE, KIND_SYSTEM, bridgeAbi)).rejects.toThrowError(
+            /registryFull/,
+        );
 
-        const shallow = await AbiDrive.format(store(), { driveLength: 4106, capacity: 2, heapOffset: 4096 });
+        const shallow = await AbiDrive.format(store(), {
+            driveLength: 4106,
+            capacity: 2,
+            heapOffset: 4096,
+        });
         await expect(shallow.register(APP, KIND_APP, appAbi)).rejects.toThrowError(/heapFull/);
     });
 
@@ -75,8 +94,8 @@ describe("abi drive", () => {
     });
 
     it("refuses a heap that would overlap the index", async () => {
-        await expect(AbiDrive.format(store(), { driveLength: 262144, capacity: 64, heapOffset: 64 })).rejects.toThrowError(
-            /badGeometry/,
-        );
+        await expect(
+            AbiDrive.format(store(), { driveLength: 262144, capacity: 64, heapOffset: 64 }),
+        ).rejects.toThrowError(/badGeometry/);
     });
 });

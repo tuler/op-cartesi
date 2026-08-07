@@ -36,7 +36,7 @@
 //   tightly packed in registration order.
 
 import { FileStore, type Store } from "@cartesi/accounts";
-import { getAddress, toBytes, toHex, type Address } from "viem";
+import { type Address, getAddress, toBytes, toHex } from "viem";
 
 export const ABI_DRIVE_MAGIC = "ctsiabis";
 export const ABI_DRIVE_VERSION = 1;
@@ -56,7 +56,10 @@ export type AbiDriveErrorKind =
     | "duplicate";
 
 export class AbiDriveError extends Error {
-    constructor(readonly kind: AbiDriveErrorKind, detail?: string) {
+    constructor(
+        readonly kind: AbiDriveErrorKind,
+        detail?: string,
+    ) {
         super(detail ? `${kind}: ${detail}` : kind);
         this.name = "AbiDriveError";
     }
@@ -111,10 +114,16 @@ export class AbiDrive {
         private heapUsed: number,
     ) {}
 
-    static async format(store: Store, cfg: AbiDriveConfig = DEVNET_ABI_DRIVE_CONFIG): Promise<AbiDrive> {
+    static async format(
+        store: Store,
+        cfg: AbiDriveConfig = DEVNET_ABI_DRIVE_CONFIG,
+    ): Promise<AbiDrive> {
         const indexEnd = HEADER_LENGTH + cfg.capacity * ENTRY_LENGTH;
         if (cfg.heapOffset < indexEnd || cfg.heapOffset >= cfg.driveLength) {
-            throw new AbiDriveError("badGeometry", `heap at ${cfg.heapOffset}, index ends at ${indexEnd}`);
+            throw new AbiDriveError(
+                "badGeometry",
+                `heap at ${cfg.heapOffset}, index ends at ${indexEnd}`,
+            );
         }
         const header = new Uint8Array(HEADER_LENGTH);
         header.set(new TextEncoder().encode(ABI_DRIVE_MAGIC), 0);
@@ -126,7 +135,15 @@ export class AbiDrive {
         putU32(header, 28, cfg.driveLength - cfg.heapOffset);
         putU32(header, 32, 0);
         await store.writeAt(0, header);
-        return new AbiDrive(store, cfg.capacity, 0, HEADER_LENGTH, cfg.heapOffset, cfg.driveLength - cfg.heapOffset, 0);
+        return new AbiDrive(
+            store,
+            cfg.capacity,
+            0,
+            HEADER_LENGTH,
+            cfg.heapOffset,
+            cfg.driveLength - cfg.heapOffset,
+            0,
+        );
     }
 
     static async open(store: Store): Promise<AbiDrive> {
@@ -150,9 +167,14 @@ export class AbiDrive {
 
     /** Open a formatted drive, or format a blank one — the guest's first-boot
      * entry point, mirroring the accounts drive's. */
-    static async openOrFormat(store: Store, cfg: AbiDriveConfig = DEVNET_ABI_DRIVE_CONFIG): Promise<AbiDrive> {
+    static async openOrFormat(
+        store: Store,
+        cfg: AbiDriveConfig = DEVNET_ABI_DRIVE_CONFIG,
+    ): Promise<AbiDrive> {
         const magic = await store.readAt(0, 8);
-        return new TextDecoder().decode(magic) === ABI_DRIVE_MAGIC ? AbiDrive.open(store) : AbiDrive.format(store, cfg);
+        return new TextDecoder().decode(magic) === ABI_DRIVE_MAGIC
+            ? AbiDrive.open(store)
+            : AbiDrive.format(store, cfg);
     }
 
     get size(): number {

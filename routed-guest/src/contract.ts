@@ -16,22 +16,22 @@
 // the ledger and the outputs stand rather than being rolled back under it.
 
 import {
-    errorRevert,
-    tryDecodeCalldata,
     type AdvanceOutcome,
     type CallContext,
+    errorRevert,
     type OutputsSink,
     type TxContext,
+    tryDecodeCalldata,
     type ViewOutcome,
 } from "@cartesi/evm-compat";
 import {
-    encodeFunctionResult,
     type Abi,
     type AbiStateMutability,
     type Address,
     type ContractFunctionArgs,
     type ContractFunctionName,
     type ContractFunctionReturnType,
+    encodeFunctionResult,
     type Hex,
 } from "viem";
 import type { Ledger } from "./ledger.ts";
@@ -94,9 +94,10 @@ type ArgsOf<
     abi extends Abi,
     mutability extends AbiStateMutability,
     name extends ContractFunctionName<abi, mutability>,
-> = ContractFunctionArgs<abi, mutability, name> extends readonly unknown[]
-    ? ContractFunctionArgs<abi, mutability, name>
-    : readonly unknown[];
+> =
+    ContractFunctionArgs<abi, mutability, name> extends readonly unknown[]
+        ? ContractFunctionArgs<abi, mutability, name>
+        : readonly unknown[];
 
 export type TransactionCallbacks<abi extends Abi> = {
     [name in ContractFunctionName<abi, Mutable>]?: (

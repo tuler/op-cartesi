@@ -2,10 +2,17 @@
 // Keys are the anvil dev accounts the devnet already uses (env.sh: the guest
 // owner defaults to anvil #3).
 
-import { keccak256, toBytes, toHex, type Address, type Hex, type TransactionSerializableLegacy } from "viem";
-import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
-import { serializeTransaction as serializeOpStack } from "viem/op-stack";
 import { MemStore } from "@cartesi/accounts";
+import {
+    type Address,
+    type Hex,
+    keccak256,
+    type TransactionSerializableLegacy,
+    toBytes,
+    toHex,
+} from "viem";
+import { type PrivateKeyAccount, privateKeyToAccount } from "viem/accounts";
+import { serializeTransaction as serializeOpStack } from "viem/op-stack";
 import { Ledger } from "../src/ledger.ts";
 import { Router } from "../src/router.ts";
 import type { BlockContext, Emission } from "../src/types.ts";
@@ -126,6 +133,7 @@ export function reports(emissions: Emission[]): Extract<Emission, { kind: "repor
 
 /** The drive image, for byte-identity assertions. */
 export function driveBytes(ledger: Ledger): Uint8Array {
-    if (!(ledger.backing instanceof MemStore)) throw new Error("driveBytes wants an in-memory ledger");
+    if (!(ledger.backing instanceof MemStore))
+        throw new Error("driveBytes wants an in-memory ledger");
     return ledger.backing.bytes.slice();
 }

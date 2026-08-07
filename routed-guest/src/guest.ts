@@ -8,23 +8,23 @@
 // by the genesis root. Registration is therefore a boot-time act: contracts
 // are declared between boot() and run(), never during an input.
 
-import { AbiDrive, KIND_APP, KIND_SYSTEM, type AbiDriveConfig } from "@cartesi/abis";
+import { AbiDrive, type AbiDriveConfig, KIND_APP, KIND_SYSTEM } from "@cartesi/abis";
 import { FileStore, MemStore, type Store } from "@cartesi/accounts";
 import {
+    type BlockContext,
     BRIDGE_ADDRESS,
-    CONFIG_ADDRESS,
-    L1BLOCK_ADDRESS,
-    REGISTRY_ADDRESS,
     bridgeAbi,
+    CONFIG_ADDRESS,
     configAbi,
+    L1BLOCK_ADDRESS,
     l1BlockAbi,
+    REGISTRY_ADDRESS,
     registryAbi,
     sameAddress,
-    type BlockContext,
 } from "@cartesi/evm-compat";
-import { Rollup, type AdvanceRequest } from "@deroll/cmio";
-import { getAddress, numberToHex, type Abi, type Address } from "viem";
-import { contractHandler, type ContractSpec } from "./contract.ts";
+import { type AdvanceRequest, Rollup } from "@deroll/cmio";
+import { type Abi, type Address, getAddress, numberToHex } from "viem";
+import { type ContractSpec, contractHandler } from "./contract.ts";
 import { Ledger } from "./ledger.ts";
 import { Router } from "./router.ts";
 
@@ -61,7 +61,11 @@ export class Guest {
         private readonly abiDrive: AbiDrive,
     ) {}
 
-    private static async assemble(ledger: Ledger, abiStore: Store, opts: GuestOptions): Promise<Guest> {
+    private static async assemble(
+        ledger: Ledger,
+        abiStore: Store,
+        opts: GuestOptions,
+    ): Promise<Guest> {
         const abiDrive = await AbiDrive.openOrFormat(abiStore, opts.abiDriveConfig);
         const router = new Router(ledger, { chainId: opts.chainId, owner: opts.owner });
         for (const b of BUILTINS) {

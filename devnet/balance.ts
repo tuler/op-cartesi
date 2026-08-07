@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Reads a balance out of the guest's ledger.
 //
 //   bun devnet/balance.ts <address> [l1-token]
@@ -11,8 +12,8 @@
 // ordinary ERC-20 — reverts included, surfaced as execution-reverted errors
 // with the reason.
 
-import { erc20Abi, getAddress } from "viem";
 import { l2TokenAddress } from "@cartesi/evm-compat";
+import { erc20Abi, getAddress } from "viem";
 import { l2Public, usage } from "./lib/env.ts";
 
 const [whoArg, tokenArg] = process.argv.slice(2);

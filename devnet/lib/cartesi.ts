@@ -4,7 +4,16 @@
 // wire's hex quantities converted at the boundary so call sites speak
 // bigint.
 
-import { numberToHex, type Abi, type Account, type Address, type Chain, type Client, type Hex, type Transport } from "viem";
+import {
+    type Abi,
+    type Account,
+    type Address,
+    type Chain,
+    type Client,
+    type Hex,
+    numberToHex,
+    type Transport,
+} from "viem";
 
 /** What cartesi_getTransactionEmissions returns: the transaction's provable
  * outputs with their chain-wide indices, and its diagnostic reports. */

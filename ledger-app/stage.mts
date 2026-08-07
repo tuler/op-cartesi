@@ -20,12 +20,12 @@ const fromCmio = createRequire(join(cmio, "package.json"));
 mkdirSync(join(out, "node_modules"), { recursive: true });
 cpSync(join(here, "dist", "index.js"), join(out, "index.js"));
 for (const [name, dir] of [
-	["@deroll/cmio", cmio],
-	["node-gyp-build", dirname(fromCmio.resolve("node-gyp-build/package.json"))],
-	["node-addon-api", dirname(fromCmio.resolve("node-addon-api/package.json"))],
+    ["@deroll/cmio", cmio],
+    ["node-gyp-build", dirname(fromCmio.resolve("node-gyp-build/package.json"))],
+    ["node-addon-api", dirname(fromCmio.resolve("node-addon-api/package.json"))],
 ]) {
-	cpSync(dir, join(out, "node_modules", name), {
-		recursive: true,
-		dereference: true,
-	});
+    cpSync(dir, join(out, "node_modules", name), {
+        recursive: true,
+        dereference: true,
+    });
 }

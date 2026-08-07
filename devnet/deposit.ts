@@ -13,7 +13,7 @@
 // the deposit path a real user takes, and the only one — the contract-less
 // mode has no deposits.
 
-import { getAddress, type Hex, type TransactionReceipt } from "viem";
+import { getAddress, type TransactionReceipt } from "viem";
 import { getL2TransactionHashes } from "viem/op-stack";
 import { config, l1Public, l1Wallet, l2Chain, l2Public, usage } from "./lib/env.ts";
 
