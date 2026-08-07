@@ -1,6 +1,7 @@
 // The application API: ABI-driven dispatch to registered callbacks, the
-// EVM's exception-is-revert rule, revert-safe app state through the shared
-// journal, the namespace guards, and the ABI drive as the discovery record.
+// EVM's exception-is-revert rule, the Revert/Fail choice an application makes
+// over its own un-journaled RAM, the namespace guards, and the ABI drive as
+// the discovery record.
 
 import { KIND_APP, KIND_SYSTEM } from "@cartesi/abis";
 import {
@@ -11,61 +12,83 @@ import {
 } from "@cartesi/evm-compat";
 import { decodeFunctionResult, encodeFunctionData, parseAbi, toBytes, type Address, type Hex } from "viem";
 import { describe, expect, it } from "vitest";
-import { Guest, Revert } from "../src/index.ts";
+import { AccountsDriveError, Fail, Guest, Revert } from "../src/index.ts";
 import { CHAIN_ID, block, depositTx, owner, signedTx, user } from "./helpers.ts";
 
 const COUNTER: Address = "0xc0de000000000000000000000000000000000001";
+/** Somewhere for a callback's ledger effect to land, so a test can see
+ * whether the journal kept it or rolled it back. */
+const PAYEE: Address = "0x00000000000000000000000000000000000000e1";
 
 const counterAbi = parseAbi([
     "function increment()",
     "function reset(uint64 to)",
     "function boom()",
     "function refuse()",
+    "function halfDone()",
+    "function driveRefusal()",
     "function count() view returns (uint256)",
 ]);
 
 async function makeCounter() {
     const guest = await Guest.inMemory({ chainId: CHAIN_ID, owner: owner.address });
-    const state = guest.store(8);
 
-    const read = async () => {
-        const b = await state.readAt(0, 8);
-        return new DataView(b.buffer, b.byteOffset, b.byteLength).getBigUint64(0, true);
-    };
-    const write = async (v: bigint) => {
-        const b = new Uint8Array(8);
-        new DataView(b.buffer).setBigUint64(0, v, true);
-        await state.writeAt(0, b);
-    };
+    // Application state is a variable. It is machine state — covered by the
+    // state root, deterministic — but the journal does not reach it, which is
+    // what the Revert/Fail choice below is about.
+    let count = 0n;
 
     await guest.contract({
         address: COUNTER,
         abi: counterAbi,
         transactions: {
-            increment: async () => {
-                await write((await read()) + 1n);
+            increment: () => {
+                count += 1n;
             },
-            reset: async (to) => {
-                await write(to);
+            reset: (to) => {
+                count = to;
             },
-            boom: async () => {
-                // Writes, then dies: the write must roll back with the revert.
-                await write(999n);
+            boom: async ({ ledger }) => {
+                // The hazard, deliberately: writes RAM and the ledger, then
+                // dies. The ledger half rolls back and the RAM half does not.
+                count = 999n;
+                await ledger.creditEther(PAYEE, 7n);
                 throw new Error("kaboom");
             },
-            refuse: () => {
+            refuse: async ({ ledger }) => {
+                // Nothing of its own written yet, so a revert is honest.
+                await ledger.creditEther(PAYEE, 7n);
                 throw new Revert("politely declined");
+            },
+            halfDone: async ({ ledger }) => {
+                // The same shape as boom, declared properly: Fail keeps both
+                // halves rather than tearing them apart.
+                count = 500n;
+                await ledger.creditEther(PAYEE, 7n);
+                throw new Fail("half done");
+            },
+            driveRefusal: () => {
+                throw new AccountsDriveError("tableFull", "table at load limit");
             },
         },
         views: {
-            count: async () => read(),
+            count: () => count,
         },
     });
-    return { guest, read };
+    return { guest, read: () => count };
 }
 
-function calldata(functionName: "increment" | "boom" | "refuse"): Hex {
+type NoArgFn = "increment" | "boom" | "refuse" | "halfDone" | "driveRefusal";
+
+function calldata(functionName: NoArgFn): Hex {
     return encodeFunctionData({ abi: counterAbi, functionName });
+}
+
+/** The first report's tag byte and payload, as the shim would read them. */
+function reportOf(emissions: { kind: string; payload?: Hex }[]): { tag: string; payload: Hex } {
+    const r = emissions.find((e) => e.kind === "report");
+    const hex = r!.payload!;
+    return { tag: hex.slice(0, 4), payload: `0x${hex.slice(4)}` };
 }
 
 async function countOf(guest: Guest): Promise<bigint> {
@@ -107,24 +130,72 @@ describe("application contracts", () => {
         expect(await countOf(guest)).toBe(7n);
     });
 
-    it("an exception is a revert, and journaled app state rolls back", async () => {
+    it("an exception is a revert: the ledger rolls back, application RAM does not", async () => {
         const { guest, read } = await makeCounter();
         await fund(guest, user.address);
-        await guest.router.advance(
-            block(),
-            await signedTx(user, { to: COUNTER, nonce: 0, data: calldata("increment") }),
-        );
 
         const res = await guest.router.advance(
             block(),
-            await signedTx(user, { to: COUNTER, nonce: 1, data: calldata("boom") }),
+            await signedTx(user, { to: COUNTER, nonce: 0, data: calldata("boom") }),
         );
-        // The input is accepted (fee and nonce consumed), the effect undone.
+        // The input is accepted — nonce and fee consumed, no free retry.
         expect(res.outcome).toBe("revert");
-        expect(await read()).toBe(1n);
+        // The journal's half is undone...
+        expect((await guest.ledger.account(PAYEE)).balance).toBe(0n);
+        // ...and the application's own half is not. This is the hazard the
+        // model makes explicit rather than papering over: a callback that
+        // writes RAM before it can still throw must use Fail, not Revert.
+        expect(read()).toBe(999n);
+        expect((await guest.ledger.account(user.address)).nonce).toBe(1n);
         // The revert data carries the exception message, Error(string)-coded.
-        const revertReport = res.emissions.find((e) => e.kind === "report");
-        expect(revertReport?.payload).toBe(`0x02${errorRevert("kaboom").slice(2)}`);
+        expect(reportOf(res.emissions)).toEqual({ tag: "0x02", payload: errorRevert("kaboom") });
+    });
+
+    it("a revert before the callback writes anything undoes the ledger cleanly", async () => {
+        const { guest, read } = await makeCounter();
+        await fund(guest, user.address);
+
+        const res = await guest.router.advance(
+            block(),
+            await signedTx(user, { to: COUNTER, nonce: 0, data: calldata("refuse") }),
+        );
+        expect(res.outcome).toBe("revert");
+        expect((await guest.ledger.account(PAYEE)).balance).toBe(0n);
+        expect(read()).toBe(0n);
+        expect(reportOf(res.emissions)).toEqual({ tag: "0x02", payload: errorRevert("politely declined") });
+    });
+
+    it("Fail keeps both halves and still charges", async () => {
+        const { guest, read } = await makeCounter();
+        await fund(guest, user.address);
+
+        const res = await guest.router.advance(
+            block(),
+            await signedTx(user, { to: COUNTER, nonce: 0, data: calldata("halfDone") }),
+        );
+        expect(res.outcome).toBe("fail");
+        // Both halves stand — the point of Fail.
+        expect((await guest.ledger.account(PAYEE)).balance).toBe(7n);
+        expect(read()).toBe(500n);
+        expect((await guest.ledger.account(user.address)).nonce).toBe(1n);
+        // Tagged apart from a revert, because it means the opposite to a
+        // caller reading the receipt.
+        expect(reportOf(res.emissions)).toEqual({ tag: "0x03", payload: errorRevert("half done") });
+    });
+
+    it("a drive refusal inside an application reverts and charges, never rejects", async () => {
+        const { guest } = await makeCounter();
+        await fund(guest, user.address);
+
+        const res = await guest.router.advance(
+            block(),
+            await signedTx(user, { to: COUNTER, nonce: 0, data: calldata("driveRefusal") }),
+        );
+        // Resource exhaustion used to escalate to reject, which left the
+        // transaction free and infinitely replayable. Now the sender pays.
+        expect(res.outcome).toBe("revert");
+        expect(res.accept).toBe(true);
+        expect((await guest.ledger.account(user.address)).nonce).toBe(1n);
     });
 
     it("Revert carries chosen data; unknown functions and wrong sides revert", async () => {

@@ -3,11 +3,17 @@
 //
 // Everything a handler does to the ledger runs inside the journal, so REVERT
 // can undo the handler and the value transfer while still committing the
-// nonce bump and the fee — failed transactions are not free. REJECT is the
-// consensus-mandated refusal: the whole input rolls back (in the machine, by
-// finishing rejected; in host-side tests, the journal performs the same
-// rollback on the bytes). Nothing a handler throws escapes: a crashed
-// handler is a deterministic reject, never a halted machine.
+// nonce bump and the fee — failed transactions are not free. FAIL commits
+// the same as ACCEPT and reports the error: it is what a handler returns
+// once it has written state the journal does not cover.
+//
+// REJECT is the router's alone, and means one thing: the charge cannot be
+// recorded. That is either because there is no charge (a deposit — its
+// failure mode is unchanged, EVM-COMPAT §5), because the transaction never
+// passed enforcement, or because the nonce bump and fee debit themselves
+// refused. Nothing a handler does can produce it: a handler that throws
+// reverts, and a handler that crashes reverts, so a broken application
+// costs its sender a nonce and a fee instead of a free retry.
 
 import { BRIDGE_ADDRESS, CONFIG_ADDRESS, L1BLOCK_ADDRESS, REGISTRY_ADDRESS, addrKey, decodeEvmCall, encodeEvmLog, errorRevert, parseInput, recoverSender, sameAddress } from "@cartesi/evm-compat";
 import { concat, toHex, type Address, type Hex } from "viem";
@@ -20,6 +26,7 @@ import { Registry } from "./handlers/registry.ts";
 import { AccountsDriveError, InsufficientFunds, type Ledger } from "./ledger.ts";
 import {
     TAG_APP,
+    TAG_FAIL,
     TAG_RETURN,
     TAG_REVERT,
     type AdvanceOutcome,
@@ -40,7 +47,7 @@ export interface AdvanceResult {
     /** What actually gets emitted, in order, after the outcome was applied. */
     emissions: Emission[];
     /** For observability and tests; not part of the wire. */
-    outcome: "accept" | "revert" | "reject" | "opaque";
+    outcome: "accept" | "revert" | "fail" | "reject" | "opaque";
     reason?: string;
 }
 
@@ -227,8 +234,13 @@ export class Router {
     }
 
     /** Value transfer + dispatch + outcome, from a journal mark that revert
-     * rolls back to. `chargeable` is the signer to bump-and-charge on accept
-     * and revert (null for deposits, which are enforcement-exempt). */
+     * rolls back to. `chargeable` is the signer to bump-and-charge on accept,
+     * revert and fail (null for deposits, which are enforcement-exempt).
+     *
+     * `chargeable` is also what decides whether a thrown failure can revert:
+     * with someone to charge, it can, and the sender pays for the attempt.
+     * Without — a deposit — there is nothing to keep, so it rejects, which is
+     * the deposit semantics EVM-COMPAT §5 leaves unchanged. */
     private async execute(
         ctx: TxContext,
         mark: number,
@@ -250,33 +262,56 @@ export class Router {
                 outcome = await handler.advance(ctx, sink, this.ledger);
             }
         } catch (e) {
-            outcome = { kind: "reject", reason: describe(e) };
+            // Drive refusals (tableFull, overflow, registryFull) land here
+            // along with anything else that escaped. They are a revert when
+            // the sender can be charged for the attempt: the write never
+            // happened, so rolling back to the mark leaves the drive as it
+            // was, and the sender pays rather than retrying for free.
+            outcome = chargeable
+                ? { kind: "revert", data: errorRevert(describe(e)) }
+                : { kind: "reject", reason: describe(e) };
         }
+
+        // The charge is the last thing to move, and the only thing that can
+        // still turn an accepted input into a rejected one: if the nonce bump
+        // and fee cannot be written, there is no honest way to finish.
+        const charge = async (): Promise<AdvanceResult | null> => {
+            if (!chargeable) return null;
+            try {
+                await this.ledger.bumpNonceAndCharge(chargeable.address, chargeable.fee);
+                return null;
+            } catch (e) {
+                await this.rollbackAll();
+                return { accept: false, outcome: "reject", reason: describe(e), emissions: [] };
+            }
+        };
 
         switch (outcome.kind) {
             case "accept": {
-                if (chargeable) {
-                    try {
-                        await this.ledger.bumpNonceAndCharge(chargeable.address, chargeable.fee);
-                    } catch (e) {
-                        await this.rollbackAll();
-                        return { accept: false, outcome: "reject", reason: describe(e), emissions: [] };
-                    }
-                }
+                const refused = await charge();
+                if (refused) return refused;
                 this.ledger.journal.commit();
                 return { accept: true, outcome: "accept", emissions: sink.emissions };
+            }
+            case "fail": {
+                // Committed exactly like accept, outputs included — the
+                // handler told us it had already written state the journal
+                // cannot undo, so undoing the half it *can* would tear the
+                // two apart. The error reaches the caller as a report.
+                const refused = await charge();
+                if (refused) return refused;
+                this.ledger.journal.commit();
+                const emissions: Emission[] = [
+                    ...sink.emissions,
+                    { kind: "report", payload: tagged(TAG_FAIL, outcome.data) },
+                ];
+                return { accept: true, outcome: "fail", emissions };
             }
             case "revert": {
                 await this.ledger.journal.rollbackTo(mark);
                 await this.ledger.afterRollback();
-                if (chargeable) {
-                    try {
-                        await this.ledger.bumpNonceAndCharge(chargeable.address, chargeable.fee);
-                    } catch (e) {
-                        await this.rollbackAll();
-                        return { accept: false, outcome: "reject", reason: describe(e), emissions: [] };
-                    }
-                }
+                const refused = await charge();
+                if (refused) return refused;
                 this.ledger.journal.commit();
                 // Outputs are dropped — nothing provable came of this input —
                 // but diagnostic reports survive, plus the revert data.
@@ -358,9 +393,12 @@ export class Router {
         }
         await this.ledger.journal.rollbackTo(mark);
         await this.ledger.afterRollback();
-        return outcome.kind === "revert"
-            ? { accept: false, reports: [tagged(TAG_REVERT, outcome.data)] }
-            : { accept: true, reports: [tagged(TAG_RETURN, "0x")] };
+        // A fail answers with its own tag: the simulation says not only "this
+        // would not succeed" but "running it for real would still change
+        // state", which a caller weighing whether to send it needs to know.
+        if (outcome.kind === "revert") return { accept: false, reports: [tagged(TAG_REVERT, outcome.data)] };
+        if (outcome.kind === "fail") return { accept: false, reports: [tagged(TAG_FAIL, outcome.data)] };
+        return { accept: true, reports: [tagged(TAG_RETURN, "0x")] };
     }
 
     /** The parked machine's last-seen context, which for the machine at

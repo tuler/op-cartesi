@@ -27,7 +27,7 @@ export class Erc20Facade implements Handler {
             if (e instanceof InsufficientFunds) {
                 return { kind: "revert", data: errorRevert("ERC20: transfer amount exceeds balance") };
             }
-            throw e; // tableFull etc. — the router escalates to reject
+            throw e; // tableFull etc. — the router turns it into a revert
         }
         const { topics, data } = transferLog(ctx.sender, to, value);
         out.log(ctx.to, topics, data);

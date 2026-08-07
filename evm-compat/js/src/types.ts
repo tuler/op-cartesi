@@ -43,17 +43,30 @@ export interface CallContext {
     data: Uint8Array;
 }
 
-/** The three-outcome model of EVM-COMPAT §5.
+/** The outcome model of EVM-COMPAT §5.
+ *
+ * The three a handler may return:
  *
  * - accept: commit everything.
- * - revert: roll back the handler's ledger writes and the value transfer,
- *   keep the nonce bump and the fee, finish the input accepted, drop the
- *   handler's outputs, report the revert data.
- * - reject: consensus-mandated refusal; the whole input rolls back.
+ * - revert: "nothing of mine changed" — roll back the handler's ledger
+ *   writes and the value transfer, keep the nonce bump and the fee, finish
+ *   the input accepted, drop the handler's outputs, report the revert data.
+ * - fail: "I already changed something" — commit exactly as accept does,
+ *   outputs included, and report the error data. For a handler that has
+ *   mutated state the journal does not cover (its own RAM), which revert
+ *   could not undo.
+ *
+ * Plus the one only the router produces:
+ *
+ * - reject: the input finishes rejected and the machine rolls back
+ *   wholesale. Reserved for enforcement failure, for deposits (which have
+ *   no charge to keep), and for the case where the nonce bump and fee
+ *   themselves cannot be recorded. A handler cannot ask for it.
  */
 export type AdvanceOutcome =
     | { kind: "accept" }
     | { kind: "revert"; data: Hex }
+    | { kind: "fail"; data: Hex }
     | { kind: "reject"; reason: string };
 
 export type ViewOutcome =
@@ -82,8 +95,14 @@ export interface OutputsSink {
  * app-level diagnostics):
  *   0x00 app report (handler passthrough / record-and-accept echo)
  *   0x01 return data (inspect)
- *   0x02 revert data (inspect reject, or advance revert)
+ *   0x02 revert data (inspect reject, or advance revert) — no state changed
+ *   0x03 failure data (advance fail) — state changed and was kept
+ *
+ * 0x02 and 0x03 are distinct because they mean opposite things to a caller
+ * reading a receipt: a revert is safe to treat as "nothing happened", a
+ * failure is not.
  */
 export const TAG_APP = 0x00;
 export const TAG_RETURN = 0x01;
 export const TAG_REVERT = 0x02;
+export const TAG_FAIL = 0x03;

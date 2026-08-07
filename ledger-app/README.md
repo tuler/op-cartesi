@@ -4,13 +4,14 @@ The devnet's application, and deliberately small: it boots
 [`@cartesi/routed-guest`](../routed-guest) with the devnet genesis
 (`CHAIN_ID`, `OWNER` from the image environment) and registers the one
 app-specific contract — a counter at `0xc0de…01`, the smallest honest
-demonstration of the standard's fall-through: an ABI, callbacks, and
-revert-safe state in a journaled store.
+demonstration of the standard's fall-through: an ABI, callbacks, and state
+that is simply a variable, because application RAM belongs to the
+application (EVM-COMPAT §10a).
 
 Everything standard lives in the workspace libraries:
 
 - [`@cartesi/routed-guest`](../routed-guest) — the runtime: router,
-  admission, the three-outcome model, the journaled ledger, the built-in
+  admission, the outcome model, the journaled ledger, the built-in
   handlers, and the application API (`guest.contract({ address, abi,
   transactions, views })`).
 - [`@cartesi/evm-compat`](../evm-compat/js) — the wire-level vocabulary:

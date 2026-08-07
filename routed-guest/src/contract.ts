@@ -6,11 +6,14 @@
 // Dispatch is ABI-driven: calldata decodes against the registered ABI, the
 // function's stateMutability decides which side may run it (transactions
 // for nonpayable/payable, views for view/pure), and view results are
-// ABI-encoded from plain return values. Errors follow the EVM's own rule —
-// an exception inside a contract is a revert, not a consensus reject — with
-// two deliberate exceptions: an explicit `Revert` carries chosen revert
-// data, and a drive-format refusal (AccountsDriveError) escalates to the
-// router, which rejects, as the spec mandates for resource exhaustion.
+// ABI-encoded from plain return values.
+//
+// Errors follow the EVM's own rule — an exception inside a contract is a
+// revert — and an application can never do worse than that: nothing thrown
+// from a callback rejects the input (EVM-COMPAT §5). A callback that has
+// already written state the journal does not cover, i.e. its own RAM,
+// throws `Fail` instead of `Revert`: same error report to the caller, but
+// the ledger and the outputs stand rather than being rolled back under it.
 
 import {
     errorRevert,
@@ -31,7 +34,7 @@ import {
     type ContractFunctionReturnType,
     type Hex,
 } from "viem";
-import { AccountsDriveError, type Ledger } from "./ledger.ts";
+import type { Ledger } from "./ledger.ts";
 import type { Handler } from "./types.ts";
 
 /** Thrown by a callback to revert with chosen data (or an Error(string)
@@ -42,6 +45,24 @@ export class Revert extends Error {
     constructor(reason: string | { data: Hex }) {
         super(typeof reason === "string" ? reason : "revert");
         this.name = "Revert";
+        this.data = typeof reason === "string" ? errorRevert(reason) : reason.data;
+    }
+}
+
+/** Thrown by a callback that has already mutated its own RAM and therefore
+ * cannot honestly revert: the ledger writes, the value transfer and the
+ * outputs are all kept, and the error data is reported under TAG_FAIL.
+ *
+ * The rule for choosing (EVM-COMPAT §5): a callback that has written
+ * nothing of its own throws `Revert`; one that has throws `Fail`. Ordering
+ * the callback so every fallible step precedes the first RAM write keeps it
+ * in `Revert` territory, which is the safer half. */
+export class Fail extends Error {
+    readonly data: Hex;
+
+    constructor(reason: string | { data: Hex }) {
+        super(typeof reason === "string" ? reason : "fail");
+        this.name = "Fail";
         this.data = typeof reason === "string" ? errorRevert(reason) : reason.data;
     }
 }
@@ -109,7 +130,11 @@ function mutabilityOf(abi: Abi, functionName: string): AbiStateMutability | unde
     return undefined;
 }
 
-function revertOutcome(e: unknown): { kind: "revert"; data: Hex } {
+/** Every exception out of a callback becomes revert — or fail, when the
+ * callback said it had already written. Never reject: applications do not
+ * get to roll the machine back (EVM-COMPAT §5). */
+function failureOutcome(e: unknown): { kind: "revert" | "fail"; data: Hex } {
+    if (e instanceof Fail) return { kind: "fail", data: e.data };
     if (e instanceof Revert) return { kind: "revert", data: e.data };
     if (e instanceof Error) return { kind: "revert", data: errorRevert(e.message) };
     return { kind: "revert", data: errorRevert(String(e)) };
@@ -156,8 +181,7 @@ export function contractHandler<const abi extends Abi>(spec: ContractSpec<abi>):
                 await callback(...argsOf(decoded), { tx: ctx, ledger, out });
                 return { kind: "accept" };
             } catch (e) {
-                if (e instanceof AccountsDriveError) throw e; // resource exhaustion → reject (spec §8)
-                return revertOutcome(e);
+                return failureOutcome(e);
             }
         },
 
@@ -177,7 +201,9 @@ export function contractHandler<const abi extends Abi>(spec: ContractSpec<abi>):
                 const result = await callback(...argsOf(decoded), { call, ledger });
                 return { kind: "return", data: encodeResult(spec.abi, name, result) };
             } catch (e) {
-                return revertOutcome(e);
+                // A view has nothing to keep, so Fail and Revert read alike
+                // here: the query answers with the error data either way.
+                return { kind: "revert", data: failureOutcome(e).data };
             }
         },
     };

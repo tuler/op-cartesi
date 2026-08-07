@@ -13,7 +13,7 @@ export type {
     TxContext,
     ViewOutcome,
 } from "@cartesi/evm-compat";
-export { TAG_APP, TAG_RETURN, TAG_REVERT } from "@cartesi/evm-compat";
+export { TAG_APP, TAG_FAIL, TAG_RETURN, TAG_REVERT } from "@cartesi/evm-compat";
 
 /** A handler: native guest code at an address. Either entry is optional —
  * an advance-only handler reverts calls, a view-only handler reverts
