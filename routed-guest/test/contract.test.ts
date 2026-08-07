@@ -45,7 +45,7 @@ async function makeCounter() {
             increment: async () => {
                 await write((await read()) + 1n);
             },
-            reset: async ([to]) => {
+            reset: async (to) => {
                 await write(to);
             },
             boom: async () => {
