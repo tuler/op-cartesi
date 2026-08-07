@@ -29,15 +29,20 @@ fi
 # Empty runs the deterministic in-memory mock. Point this at a
 # cartesi-jsonrpc-machine server to run a real Cartesi Machine.
 : "${MACHINE_REMOTE:=}"
-# Directory of a stored machine for the server to load. Produced by
-# ./devnet/build-snapshot.sh.
+# Directory of a stored machine for the server to load. The devnet guest is
+# ledger-app (the routed guest of docs/EVM-COMPAT.md), built by
+# ./devnet/build-snapshot.sh into ledger-app/.cartesi/image.
 : "${MACHINE_SNAPSHOT:=}"
-# The address the guest accepts configuration from — currently just which L1
-# portals it will credit deposits from. It is baked into the snapshot, so it is
-# consensus-relevant, and it has to be known before anything is deployed, which
-# is the point: the portals are not. Default is anvil account 5, the key the
-# deploy scripts use.
+# The address the guest accepts configuration from — portal registrations and
+# the fee, through the config contract at GUEST_CONFIG_ADDRESS. It is baked
+# into the snapshot (a Dockerfile ARG of ledger-app, this same default), so
+# it is consensus-relevant, and it has to be known before anything is
+# deployed, which is the point: the portals are not. Default is anvil
+# account 3, the key the deploy scripts use.
 : "${GUEST_OWNER:=0x90F79bf6EB2c4f870365E785982E1f101E93b906}"
+# The routed guest's config contract (EVM-COMPAT §6): the system-namespace
+# address owner configuration is sent to.
+: "${GUEST_CONFIG_ADDRESS:=0xc751000000000000000000000000000000000002}"
 
 # --- chain identity (consensus-relevant) -----------------------------------
 : "${L1_CHAIN_ID:=900}"

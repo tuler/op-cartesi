@@ -17,7 +17,8 @@ You do not need to build op-node or op-batcher: `start-devnet.sh` will run the o
 execution engine, and op-node sequencing on top:
 
 ```sh
-./devnet/build-snapshot.sh     # once, needs the guest images (see that script)
+bun install                    # once, at the repo root (bun workspace)
+./devnet/build-snapshot.sh     # once — `cartesi build` of ledger-app (see that script)
 ./devnet/start-devnet.sh
 ```
 
@@ -56,10 +57,11 @@ worth knowing:
   other by container name. Publishing op-node's RPC to the host's loopback is
   not enough — loopback is not reachable from the bridge gateway.
 
-`build-snapshot.sh` builds the ledger guest (`bank-app.sh`) by default. Pass
-`GUEST_APP=$PWD/devnet/echo-app.sh` for one that only echoes, or `probe-app.sh`
-to see the raw request JSON a guest receives — which is how the other two were
-written.
+The guest is [`ledger-app`](../ledger-app/README.md) — the routed guest of
+[docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md), TypeScript on `@deroll/cmio`,
+its ledger on the accounts drive. `build-snapshot.sh` wraps `cartesi build`,
+which stores the booted machine under `ledger-app/.cartesi/image`; that
+directory is the chain's genesis state.
 
 op-node then drives block production: every L2 block carries the L1-attributes
 deposit it injects, that deposit is wrapped in an `EvmAdvance` envelope and fed
@@ -142,15 +144,13 @@ file. The machine-written address files (`l1-addresses.env`,
 deployment outputs, not preferences. `.env` is gitignored; keys live there,
 not in command lines.
 
-One seam to know about: `withdraw.ts`, `withdraw-erc20.ts` and the token
-path of `balance.ts` speak the **routed guest**
-([ledger-app](../ledger-app/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md))
-— bridge predeploy calls and ERC-20 façades — while `build-snapshot.sh`
-still builds the Lua bank app and its private dialect by default. Deposits,
-`execute-voucher.ts` and the ether path of `balance.ts` work against either
-guest; the Lua dialect can still be driven by hand through `send-l2-tx.ts`
-with a raw payload. Pointing the devnet at the ledger-app snapshot
-(`cartesi build` → `.cartesi/image`) is the step that closes the seam.
+The scripts and the guest speak the same standard: `withdraw.ts` and
+`withdraw-erc20.ts` call the bridge predeploy, `balance.ts` reads the drive
+and the ERC-20 façades, and the guest they address is the one
+`build-snapshot.sh` builds — the routed guest
+([ledger-app](../ledger-app/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md)).
+Nothing here speaks a private dialect anymore; an app that wants one still
+can, through `cartesi_inspect` and `send-l2-tx.ts` with raw payloads.
 
 ### Deposits
 
@@ -172,9 +172,9 @@ learned EVM-COMPAT §7's envelope, `eth_call` wraps every query as
 `EvmCall(chainId, from, to, value, data)` and unwraps the guest's tagged
 reports — return data on accept, a code-3 revert error with data on reject —
 which is what lets `readContract` and `cast call` treat guest handlers as
-ordinary contracts. Guests speaking their own inspect dialect (the Lua bank
-app) are reached through `cartesi_inspect`, which stays a raw passthrough in
-both directions.
+ordinary contracts. An app-private inspect dialect is still reachable
+through `cartesi_inspect`, which stays a raw passthrough in both
+directions.
 
 This calls `OptimismPortal.depositTransaction` — the path a real user takes —
 and requires the deployed contract suite; on a `WITH_CONTRACTS=0` devnet
@@ -236,19 +236,19 @@ contract mint claims against tokens the application really holds.
 
 ### Testing the guest
 
-The guest never runs on the host, but its logic can:
+The guest never runs a machine on the host, but its logic does:
 
 ```sh
-lua5.4 devnet/test-guest.lua
+cd ledger-app && bun run test
 ```
 
-This lifts the Lua out of `bank-app.sh`, stubs the calls it makes into the
-machine (the `rollup` tool, and the accounts-drive device, which becomes a
-temp file), and drives it with hand-built deposits and transactions — including
-malformed ones, since an error inside the guest halts the machine, and a halted
-machine is a halted chain.
+The vitest suite drives the router with hand-built deposits and signed
+transactions over an in-memory accounts drive — including malformed ones,
+since an error inside the guest halts the machine, and a halted machine is a
+halted chain. (Its Lua predecessor had the same discipline in
+`test-guest.lua`, retired with the bank app.)
 
-Two operational notes the script encodes, both easy to trip over by hand:
+Two operational notes, both easy to trip over by hand:
 
 - A machine server holds exactly one machine, and `machine.load` refuses to
   replace it. Config generation and the node each need their own server.

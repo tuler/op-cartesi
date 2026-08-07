@@ -431,10 +431,10 @@ matters — a page with any record in it is hashed as a page however many
 of its bytes are zero, and zero runs cost almost nothing in a stored
 image.
 
-The devnet bank app is a sparse-profile app in miniature: its ledger is
-already keyed `token ‖ account` with the zero address for ether. The
-migration maps its ether keys onto the account record and its token keys
-into the sparse table.
+The devnet guest is a sparse-profile app in miniature — ledger-app today,
+exactly as the Lua bank app before it: the ledger keyed `token ‖ account`
+with the zero address for ether, ether in the account record, tokens in
+the sparse table.
 
 ### 5.6 Other extensions, named but not specified
 

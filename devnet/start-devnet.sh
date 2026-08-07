@@ -34,7 +34,9 @@ source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
 : "${WITH_CONTRACTS:=1}"
 : "${WITH_PROPOSER:=1}"
 : "${PROPOSER_RPC_PORT:=8560}"
-: "${SNAPSHOT_DIR:=$DEVNET_DIR/snapshot}"
+# The routed guest's snapshot, as `cartesi build` stores it
+# (./devnet/build-snapshot.sh wraps that build).
+: "${SNAPSHOT_DIR:=$REPO_DIR/ledger-app/.cartesi/image}"
 : "${LOG_DIR:=$DEVNET_DIR/logs}"
 : "${L1_CHAIN_CONFIG:=$DEVNET_DIR/l1-chain-config.json}"
 

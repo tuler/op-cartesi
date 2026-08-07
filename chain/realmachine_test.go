@@ -2,6 +2,7 @@ package chain
 
 import (
 	"context"
+	"math/big"
 	"net"
 	"os"
 	"os/exec"
@@ -123,7 +124,13 @@ func TestRealMachineBuildsBlocks(t *testing.T) {
 
 	var stateRoots, outputsRoots []common.Hash
 	for i := range 2 {
-		env := buildBlock(c, t, attrsOn(c.HeadBlock(), [][]byte{depositTx(t, string(rune('a'+i)))}, true))
+		// Owner registrations rather than plain deposits: the routed guest
+		// answers each with a provable notice, which is what lets this test
+		// watch the outputs commitment advance.
+		portal := common.BigToAddress(big.NewInt(int64(0x907a70 + i)))
+		env := buildBlock(c, t, attrsOn(c.HeadBlock(), [][]byte{
+			registerPortalDeposit(t, string(rune('a'+i)), 0, portal),
+		}, true))
 		p := env.ExecutionPayload
 		stateRoots = append(stateRoots, common.Hash(p.StateRoot))
 		outputsRoots = append(outputsRoots, *p.WithdrawalsRoot)
@@ -152,7 +159,11 @@ func TestRealMachineOutputsRootAgrees(t *testing.T) {
 	ctx := context.Background()
 	c := newRealChain(t)
 
-	env := buildBlock(c, t, attrsOn(c.HeadBlock(), [][]byte{depositTx(t, "one")}, true))
+	// A registration input, so the routed guest emits a provable output for
+	// the trees to disagree about.
+	env := buildBlock(c, t, attrsOn(c.HeadBlock(), [][]byte{
+		registerPortalDeposit(t, "one", 0, common.HexToAddress("0x907a70")),
+	}, true))
 	hostTree, ok := c.OutputTreeAt(env.ExecutionPayload.BlockHash)
 	if !ok {
 		t.Fatal("no accumulator for the block")

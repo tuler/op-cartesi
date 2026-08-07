@@ -250,6 +250,26 @@ describe("the token path", () => {
         expect((await ledger.account(BRIDGE_ADDRESS)).balance).toBe(0n); // burned, not held
     });
 
+    it("routes a portal deposit by its registered sender, whatever the to", async () => {
+        // The devnet cannot know the application contract address at
+        // genesis (the portals and the app contract are deployed after the
+        // chain starts), so a deposit from a registered portal routes to
+        // the receiver even when `to` is not the envelope's appContract.
+        const { router, ledger } = await setup();
+        const res = await router.advance(
+            block(),
+            depositTx({
+                from: applyL1ToL2Alias(ERC20_PORTAL),
+                to: RECIPIENT, // deliberately not APP_CONTRACT
+                data: encodePacked(["address", "address", "uint256"], [L1_TOKEN, user.address, 500n]),
+            }),
+        );
+        expect(res.accept).toBe(true);
+        const token = ledger.tokenByL1Address(L1_TOKEN);
+        expect(token).not.toBeNull();
+        expect(await ledger.tokenBalance(user.address, token!.id)).toBe(500n);
+    });
+
     it("refuses a deposit from an unregistered portal", async () => {
         const { router, ledger } = await makeRouter(); // no portal registered
         const res = await router.advance(block(), erc20Deposit(1000n));
