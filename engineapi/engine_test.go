@@ -77,6 +77,48 @@ func (c *rpcClient) call(method string, result any, params ...any) *json.RawMess
 	return &rr.Result
 }
 
+// rpcError is a JSON-RPC error object, for tests asserting the error itself.
+type rpcError struct {
+	Code    int             `json:"code"`
+	Message string          `json:"message"`
+	Data    json.RawMessage `json:"data"`
+}
+
+// callError performs a call expected to fail and returns the error object.
+func (c *rpcClient) callError(method string, params ...any) *rpcError {
+	c.t.Helper()
+	c.nextID++
+	body, err := json.Marshal(map[string]any{
+		"jsonrpc": "2.0", "id": c.nextID, "method": method, "params": params,
+	})
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	req, err := http.NewRequest(http.MethodPost, c.url, bytes.NewReader(body))
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.secret != nil {
+		req.Header.Set("Authorization", "Bearer "+makeJWT(c.t, c.secret, time.Now()))
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		c.t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var rr struct {
+		Error *rpcError `json:"error"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&rr); err != nil {
+		c.t.Fatal(err)
+	}
+	if rr.Error == nil {
+		c.t.Fatalf("%s: expected an rpc error, got success", method)
+	}
+	return rr.Error
+}
+
 func makeJWT(t *testing.T, secret []byte, at time.Time) string {
 	t.Helper()
 	enc := func(v any) string {

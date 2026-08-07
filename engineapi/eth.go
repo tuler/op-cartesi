@@ -1,12 +1,14 @@
 package engineapi
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
 
+	"github.com/ethereum/go-ethereum/accounts/abi"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/common/math"
@@ -89,11 +91,14 @@ func (e *EthAPI) GetBlockReceipts(_ context.Context, id rpc.BlockNumberOrHash) (
 }
 
 // CallArgs is the subset of the eth_call / eth_estimateGas argument object
-// this chain can act on. The machine has no notion of caller, value or gas, so
-// only the payload is meaningful; the other fields are accepted and ignored so
-// that standard tooling can call without special-casing.
+// this chain can act on: the caller, the target, the value and the calldata
+// all travel to the guest inside the EvmCall envelope. Gas fields are
+// accepted and ignored so that standard tooling can call without
+// special-casing — there is no fee market to price a read.
 type CallArgs struct {
+	From  *common.Address `json:"from"`
 	To    *common.Address `json:"to"`
+	Value *hexutil.Big    `json:"value"`
 	Data  *hexutil.Bytes  `json:"data"`
 	Input *hexutil.Bytes  `json:"input"`
 }
@@ -108,13 +113,48 @@ func (a CallArgs) payload() []byte {
 	return nil
 }
 
+// revertError is the standard Ethereum JSON-RPC shape for a reverted call:
+// code 3, "execution reverted" (with the decoded Error(string) reason when
+// there is one), and the raw revert bytes in the data field — which is what
+// lets viem, ethers and cast surface require-style messages verbatim.
+type revertError struct {
+	reason string
+	data   hexutil.Bytes
+}
+
+func (e *revertError) Error() string  { return e.reason }
+func (e *revertError) ErrorCode() int { return 3 }
+func (e *revertError) ErrorData() any { return e.data }
+
+// errorStringSelector is keccak("Error(string)")[:4], the require-style
+// revert payload.
+var errorStringSelector = []byte{0x08, 0xc3, 0x79, 0xa0}
+
+func newRevertError(data []byte) *revertError {
+	reason := "execution reverted"
+	if len(data) > 4 && bytes.Equal(data[:4], errorStringSelector) {
+		stringTy, err := abi.NewType("string", "", nil)
+		if err == nil {
+			if vals, err := (abi.Arguments{{Type: stringTy}}).Unpack(data[4:]); err == nil && len(vals) == 1 {
+				if s, ok := vals[0].(string); ok {
+					reason = "execution reverted: " + s
+				}
+			}
+		}
+	}
+	return &revertError{reason: reason, data: data}
+}
+
 // Call answers a read-only query by running the machine's inspect protocol
 // against the state at the requested block, on a fork that is then discarded.
 //
-// This is the natural counterpart of eth_call: it reads state without changing
-// it. The reply is the concatenation of the reports the guest emitted, since
-// eth_call has a single return value; cartesi_inspect returns them
-// individually for callers that emit more than one.
+// This is the shim half of EVM-COMPAT §7: the call travels to the guest as
+// the EvmCall envelope — EvmCall(chainId, from, to, value, data) — and the
+// guest answers with tagged reports. An accepted inspect's return-tagged
+// report is eth_call's return value; a rejected inspect's revert-tagged
+// report becomes the standard revert error, code 3 with the revert bytes in
+// the data field. Application dialects that predate the envelope keep the
+// raw path: cartesi_inspect passes payloads through untouched, both ways.
 func (e *EthAPI) Call(ctx context.Context, args CallArgs, id *rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	b, err := e.blockFromOptional(id)
 	if err != nil {
@@ -123,16 +163,38 @@ func (e *EthAPI) Call(ctx context.Context, args CallArgs, id *rpc.BlockNumberOrH
 	if b == nil {
 		return nil, fmt.Errorf("unknown block")
 	}
-	res, err := e.chain.Inspect(ctx, b.Hash(), args.payload())
+	if args.To == nil {
+		return nil, fmt.Errorf("eth_call requires 'to': there is no contract creation to simulate")
+	}
+	var from common.Address
+	if args.From != nil {
+		from = *args.From
+	}
+	envelope, err := chain.EncodeEvmCall(e.chain.Config().ChainID, from, *args.To, (*big.Int)(args.Value), args.payload())
+	if err != nil {
+		return nil, err
+	}
+	res, err := e.chain.Inspect(ctx, b.Hash(), envelope)
 	if err != nil {
 		return nil, err
 	}
 	if !res.Accepted {
+		// The revert data rides the last revert-tagged report.
+		for i := len(res.Reports) - 1; i >= 0; i-- {
+			if r := res.Reports[i]; len(r) >= 1 && r[0] == chain.ReportTagRevert {
+				return nil, newRevertError(r[1:])
+			}
+		}
 		return nil, fmt.Errorf("inspect rejected the query")
 	}
+	// Return data is the return-tagged report (the guest emits exactly one;
+	// concatenation degenerates to it). App-tagged diagnostics are not
+	// eth_call's to return.
 	var out []byte
 	for _, report := range res.Reports {
-		out = append(out, report...)
+		if len(report) >= 1 && report[0] == chain.ReportTagReturn {
+			out = append(out, report[1:]...)
+		}
 	}
 	return out, nil
 }

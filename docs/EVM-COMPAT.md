@@ -624,7 +624,7 @@ handlers never see the device at all.
 |---|---|
 | **Consensus / wire** | **Nothing.** EvmAdvance unchanged, block format unchanged, outputs tree and voucher encodings unchanged, op-node/op-batcher/op-proposer untouched, L1 contracts untouched. |
 | **Guest** | The router (native, reference implementation of the standard) replaces `bank-app.sh`: CMIO loop, outputs accumulator, typed-tx sighash, enforcement, journal, manifest dispatch, built-in family. The accounts drive and its libraries: unchanged. |
-| **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data; receipts try the `EvmLog` decode; `eth_getCode` serves markers from the registry view; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
+| **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `engineapi/eth.go`)*; receipts try the `EvmLog` decode; `eth_getCode` serves markers from the registry view; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
 | **Devnet** | `build-snapshot.sh` ships the router; the dialect scripts collapse into standard tooling — `cast send $TOKEN "transfer(address,uint256)" …`, `cast call $TOKEN "balanceOf(address)" …`, `cast send $BRIDGE "withdrawEther(address)" --value …` — and `send-l2-tx.sh` drops `--legacy`. Scripts getting shorter is the acceptance test. |
 | **Tests** | The realmachine suite keeps its role with the new guest; `test-guest.lua`'s enforcement vectors (sighash, ecrecover, nonce) port to the router's language; golden accounts-drive vectors already cover the ledger. |
 
