@@ -15,8 +15,20 @@
 // reverts, and a handler that crashes reverts, so a broken application
 // costs its sender a nonce and a fee instead of a free retry.
 
-import { BRIDGE_ADDRESS, CONFIG_ADDRESS, L1BLOCK_ADDRESS, REGISTRY_ADDRESS, addrKey, decodeEvmCall, encodeEvmLog, errorRevert, parseInput, recoverSender, sameAddress } from "@cartesi/evm-compat";
-import { concat, toHex, type Address, type Hex } from "viem";
+import {
+    addrKey,
+    BRIDGE_ADDRESS,
+    CONFIG_ADDRESS,
+    decodeEvmCall,
+    encodeEvmLog,
+    errorRevert,
+    L1BLOCK_ADDRESS,
+    parseInput,
+    REGISTRY_ADDRESS,
+    recoverSender,
+    sameAddress,
+} from "@cartesi/evm-compat";
+import { type Address, concat, type Hex, toHex } from "viem";
 import { Bridge } from "./handlers/bridge.ts";
 import { Config } from "./handlers/config.ts";
 import { Erc20Facade } from "./handlers/erc20.ts";
@@ -25,16 +37,17 @@ import { PortalReceiver } from "./handlers/portal.ts";
 import { Registry } from "./handlers/registry.ts";
 import { AccountsDriveError, InsufficientFunds, type Ledger } from "./ledger.ts";
 import {
-    TAG_APP,
-    TAG_FAIL,
-    TAG_RETURN,
-    TAG_REVERT,
     type AdvanceOutcome,
     type BlockContext,
     type Emission,
     type Handler,
     type OutputsSink,
+    TAG_APP,
+    TAG_FAIL,
+    TAG_RETURN,
+    TAG_REVERT,
     type TxContext,
+    type ViewOutcome,
 } from "./types.ts";
 
 export interface RouterConfig {
@@ -64,11 +77,19 @@ class BufferSink implements OutputsSink {
     }
 
     voucher(v: { destination: Address; value?: bigint; payload?: Hex }): void {
-        this.emissions.push({ kind: "voucher", destination: v.destination, value: v.value ?? 0n, payload: v.payload ?? "0x" });
+        this.emissions.push({
+            kind: "voucher",
+            destination: v.destination,
+            value: v.value ?? 0n,
+            payload: v.payload ?? "0x",
+        });
     }
 
     report(payload: Hex): void {
-        this.emissions.push({ kind: "report", payload: concat([toHex(new Uint8Array([TAG_APP])), payload]) });
+        this.emissions.push({
+            kind: "report",
+            payload: concat([toHex(new Uint8Array([TAG_APP])), payload]),
+        });
     }
 
     log(emitter: Address, topics: Hex[], data: Hex): void {
@@ -127,11 +148,16 @@ export class Router {
      * know the application contract address at genesis: on the devnet the
      * portals and the app contract are deployed after the chain starts, and
      * the owner's registration input is what makes them real. */
-    private resolve(to: Address, block: BlockContext | null, deposit?: { sender: Address }): Handler | undefined {
+    private resolve(
+        to: Address,
+        block: BlockContext | null,
+        deposit?: { sender: Address },
+    ): Handler | undefined {
         const fixed = this.manifest.get(addrKey(to));
         if (fixed) return fixed;
         if (block && sameAddress(to, block.appContract)) return this.portalReceiver;
-        if (deposit && this.ledger.portalKind(deposit.sender) !== undefined) return this.portalReceiver;
+        if (deposit && this.ledger.portalKind(deposit.sender) !== undefined)
+            return this.portalReceiver;
         if (this.ledger.tokenByL2Address(to)) return this.erc20;
         return undefined;
     }
@@ -188,7 +214,12 @@ export class Router {
             await this.ledger.creditEther(d.from, d.mint);
         } catch {
             await this.rollbackAll();
-            return { accept: false, outcome: "reject", reason: "mint refused (drive full)", emissions: [] };
+            return {
+                accept: false,
+                outcome: "reject",
+                reason: "mint refused (drive full)",
+                emissions: [],
+            };
         }
         // The mint survives a revert (OP's deposit guarantee); everything
         // after this mark does not.
@@ -200,7 +231,12 @@ export class Router {
         block: BlockContext,
         tx: Extract<ReturnType<typeof parseInput>, { kind: "signed" }>,
     ): Promise<AdvanceResult> {
-        const reject = (reason: string): AdvanceResult => ({ accept: false, outcome: "reject", reason, emissions: [] });
+        const reject = (reason: string): AdvanceResult => ({
+            accept: false,
+            outcome: "reject",
+            reason,
+            emissions: [],
+        });
         if (!tx.to) return reject("contract creation is not supported");
         // The chain id pin (EVM-COMPAT §4): EIP-155 signatures must name this
         // chain. Pre-155 legacy transactions carry none and pass, as they do
@@ -251,7 +287,11 @@ export class Router {
         try {
             await this.ledger.debitEther(ctx.sender, ctx.value);
             await this.ledger.creditEther(ctx.to, ctx.value);
-            const handler = this.resolve(ctx.to, ctx.block, ctx.isDeposit ? { sender: ctx.sender } : undefined);
+            const handler = this.resolve(
+                ctx.to,
+                ctx.block,
+                ctx.isDeposit ? { sender: ctx.sender } : undefined,
+            );
             if (!handler) {
                 outcome = { kind: "accept" }; // plain transfer; calldata ignored
             } else if (ctx.value > 0n && !handler.payable) {
@@ -340,7 +380,10 @@ export class Router {
     async inspect(payload: Uint8Array): Promise<InspectResult> {
         const call = decodeEvmCall(payload);
         if (!call) {
-            return { accept: false, reports: [tagged(TAG_REVERT, errorRevert("not an EvmCall query"))] };
+            return {
+                accept: false,
+                reports: [tagged(TAG_REVERT, errorRevert("not an EvmCall query"))],
+            };
         }
         if (!call.simulate) {
             const handler = this.resolve(call.to, null);
@@ -349,9 +392,12 @@ export class Router {
                 return { accept: true, reports: [tagged(TAG_RETURN, "0x")] };
             }
             if (!handler.view) {
-                return { accept: false, reports: [tagged(TAG_REVERT, errorRevert("not a view target"))] };
+                return {
+                    accept: false,
+                    reports: [tagged(TAG_REVERT, errorRevert("not a view target"))],
+                };
             }
-            let outcome;
+            let outcome: ViewOutcome;
             try {
                 outcome = await handler.view(
                     { sender: call.from, to: call.to, value: call.value, data: call.data },
@@ -385,8 +431,10 @@ export class Router {
             await this.ledger.creditEther(ctx.to, ctx.value);
             const handler = this.resolve(ctx.to, ctx.block);
             if (!handler) outcome = { kind: "accept" };
-            else if (ctx.value > 0n && !handler.payable) outcome = { kind: "revert", data: errorRevert("not payable") };
-            else if (!handler.advance) outcome = { kind: "revert", data: errorRevert("not a transaction target") };
+            else if (ctx.value > 0n && !handler.payable)
+                outcome = { kind: "revert", data: errorRevert("not payable") };
+            else if (!handler.advance)
+                outcome = { kind: "revert", data: errorRevert("not a transaction target") };
             else outcome = await handler.advance(ctx, sink, this.ledger);
         } catch (e) {
             outcome = { kind: "revert", data: errorRevert(describe(e)) };
@@ -396,8 +444,10 @@ export class Router {
         // A fail answers with its own tag: the simulation says not only "this
         // would not succeed" but "running it for real would still change
         // state", which a caller weighing whether to send it needs to know.
-        if (outcome.kind === "revert") return { accept: false, reports: [tagged(TAG_REVERT, outcome.data)] };
-        if (outcome.kind === "fail") return { accept: false, reports: [tagged(TAG_FAIL, outcome.data)] };
+        if (outcome.kind === "revert")
+            return { accept: false, reports: [tagged(TAG_REVERT, outcome.data)] };
+        if (outcome.kind === "fail")
+            return { accept: false, reports: [tagged(TAG_FAIL, outcome.data)] };
         return { accept: true, reports: [tagged(TAG_RETURN, "0x")] };
     }
 

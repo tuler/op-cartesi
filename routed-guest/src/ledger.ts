@@ -16,15 +16,15 @@
 
 import {
     AccountsDriveError,
-    Drive,
+    type Drive,
     FileStore,
-    MemStore,
-    ProfileSparse,
     format as formatDrive,
+    MemStore,
     open as openDrive,
+    ProfileSparse,
     type Store,
 } from "@cartesi/accounts";
-import { addrKey, l2TokenAddress, type Address } from "@cartesi/evm-compat";
+import { type Address, addrKey, l2TokenAddress } from "@cartesi/evm-compat";
 import { getAddress, toBytes } from "viem";
 
 /** A debit that the balance cannot cover. Distinct from AccountsDriveError:
@@ -207,7 +207,10 @@ export class Ledger {
     /** Registers a token (width 32: arbitrary devnet ERC-20s get the full
      * uint256, as the Lua app chose), with optional metadata. Throws
      * AccountsDriveError duplicateToken / registryFull. */
-    async registerToken(l1Token: Address, metadata?: TokenMetadata): Promise<{ id: number; l2Token: Address }> {
+    async registerToken(
+        l1Token: Address,
+        metadata?: TokenMetadata,
+    ): Promise<{ id: number; l2Token: Address }> {
         const id = await this.drive.registerToken(toBytes(l1Token), 32);
         const l2Token = l2TokenAddress(l1Token);
         this.facades.set(addrKey(l2Token), id);
@@ -278,7 +281,13 @@ export class Ledger {
     /** Loud placeholders until the owner sets truth (EVM-COMPAT §9): a
      * wrong-decimals default misprices real balances in every wallet. */
     metadataOf(id: number): TokenMetadata {
-        return this.metadata.get(id) ?? { name: `UNREGISTERED-${id}`, symbol: `UNREG-${id}`, decimals: 0 };
+        return (
+            this.metadata.get(id) ?? {
+                name: `UNREGISTERED-${id}`,
+                symbol: `UNREG-${id}`,
+                decimals: 0,
+            }
+        );
     }
 
     // -------------------------------------------------------------- config

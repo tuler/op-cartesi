@@ -15,9 +15,16 @@
 // Isthmus appends: 160 uint32 operatorFeeScalar, 164 uint64 operatorFeeConstant.
 
 import { errorRevert, l1BlockAbi, tryDecodeCalldata } from "@cartesi/evm-compat";
-import { encodeFunctionResult, toFunctionSelector, toHex, type Hex } from "viem";
+import { encodeFunctionResult, type Hex, toFunctionSelector, toHex } from "viem";
 import type { Ledger } from "../ledger.ts";
-import type { AdvanceOutcome, CallContext, Handler, OutputsSink, TxContext, ViewOutcome } from "../types.ts";
+import type {
+    AdvanceOutcome,
+    CallContext,
+    Handler,
+    OutputsSink,
+    TxContext,
+    ViewOutcome,
+} from "../types.ts";
 
 const SET_ECOTONE: Hex = toFunctionSelector("setL1BlockValuesEcotone()");
 const SET_ISTHMUS: Hex = toFunctionSelector("setL1BlockValuesIsthmus()");
@@ -75,17 +82,41 @@ export class L1Block implements Handler {
         const ok = (data: Hex): ViewOutcome => ({ kind: "return", data });
         switch (decoded.functionName) {
             case "number":
-                return ok(encodeFunctionResult({ abi: l1BlockAbi, functionName: "number", result: a.number }));
+                return ok(
+                    encodeFunctionResult({
+                        abi: l1BlockAbi,
+                        functionName: "number",
+                        result: a.number,
+                    }),
+                );
             case "timestamp":
-                return ok(encodeFunctionResult({ abi: l1BlockAbi, functionName: "timestamp", result: a.timestamp }));
+                return ok(
+                    encodeFunctionResult({
+                        abi: l1BlockAbi,
+                        functionName: "timestamp",
+                        result: a.timestamp,
+                    }),
+                );
             case "basefee":
-                return ok(encodeFunctionResult({ abi: l1BlockAbi, functionName: "basefee", result: a.basefee }));
+                return ok(
+                    encodeFunctionResult({
+                        abi: l1BlockAbi,
+                        functionName: "basefee",
+                        result: a.basefee,
+                    }),
+                );
             case "blobBaseFee":
                 return ok(
-                    encodeFunctionResult({ abi: l1BlockAbi, functionName: "blobBaseFee", result: a.blobBaseFee }),
+                    encodeFunctionResult({
+                        abi: l1BlockAbi,
+                        functionName: "blobBaseFee",
+                        result: a.blobBaseFee,
+                    }),
                 );
             case "hash":
-                return ok(encodeFunctionResult({ abi: l1BlockAbi, functionName: "hash", result: a.hash }));
+                return ok(
+                    encodeFunctionResult({ abi: l1BlockAbi, functionName: "hash", result: a.hash }),
+                );
             case "sequenceNumber":
                 return ok(
                     encodeFunctionResult({
@@ -96,11 +127,19 @@ export class L1Block implements Handler {
                 );
             case "batcherHash":
                 return ok(
-                    encodeFunctionResult({ abi: l1BlockAbi, functionName: "batcherHash", result: a.batcherHash }),
+                    encodeFunctionResult({
+                        abi: l1BlockAbi,
+                        functionName: "batcherHash",
+                        result: a.batcherHash,
+                    }),
                 );
             case "baseFeeScalar":
                 return ok(
-                    encodeFunctionResult({ abi: l1BlockAbi, functionName: "baseFeeScalar", result: a.baseFeeScalar }),
+                    encodeFunctionResult({
+                        abi: l1BlockAbi,
+                        functionName: "baseFeeScalar",
+                        result: a.baseFeeScalar,
+                    }),
                 );
             case "blobBaseFeeScalar":
                 return ok(

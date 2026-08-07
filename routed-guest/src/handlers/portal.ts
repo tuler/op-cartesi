@@ -17,8 +17,8 @@
 // handler's own balance; crediting the named beneficiary is the handler
 // moving its own funds — the capability rule, satisfied naturally.
 
-import { PORTAL_ERC20, PORTAL_ETHER, errorRevert, l2TokenAddress, transferLog } from "@cartesi/evm-compat";
-import { getAddress, toHex, type Address } from "viem";
+import { errorRevert, l2TokenAddress, PORTAL_ETHER, transferLog } from "@cartesi/evm-compat";
+import { type Address, getAddress, toHex } from "viem";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, Handler, OutputsSink, TxContext } from "../types.ts";
 
@@ -46,7 +46,8 @@ export class PortalReceiver implements Handler {
             return { kind: "revert", data: errorRevert("unregistered portal") };
         }
         if (kind === PORTAL_ETHER) {
-            if (ctx.data.length < 52) return { kind: "revert", data: errorRevert("short ether deposit") };
+            if (ctx.data.length < 52)
+                return { kind: "revert", data: errorRevert("short ether deposit") };
             const beneficiary = addressAt(ctx.data, 0);
             const amount = uint256At(ctx.data, 20);
             try {
@@ -56,14 +57,18 @@ export class PortalReceiver implements Handler {
                 await ledger.creditEther(beneficiary, amount);
             } catch (e) {
                 if (e instanceof InsufficientFunds) {
-                    return { kind: "revert", data: errorRevert("deposit value does not cover the credit") };
+                    return {
+                        kind: "revert",
+                        data: errorRevert("deposit value does not cover the credit"),
+                    };
                 }
                 throw e; // tableFull etc. — a deposit has no charge to keep, so the router rejects
             }
             return { kind: "accept" };
         }
         // PORTAL_ERC20
-        if (ctx.data.length < 72) return { kind: "revert", data: errorRevert("short erc20 deposit") };
+        if (ctx.data.length < 72)
+            return { kind: "revert", data: errorRevert("short erc20 deposit") };
         const l1Token = addressAt(ctx.data, 0);
         const beneficiary = addressAt(ctx.data, 20);
         const amount = uint256At(ctx.data, 40);

@@ -1,10 +1,9 @@
 // The inspect surface: EvmCall return/revert framing, EOA semantics,
 // EvmSimulate's no-mutation guarantee, and the adopted L1Block predeploy.
 
+import { encodeEvmCall, L1BLOCK_ADDRESS, l1BlockAbi } from "@cartesi/evm-compat";
+import { concat, encodeFunctionData, type Hex, toBytes, toFunctionSelector, toHex } from "viem";
 import { describe, expect, it } from "vitest";
-import { concat, encodeFunctionData, toBytes, toFunctionSelector, toHex, type Hex } from "viem";
-import { L1BLOCK_ADDRESS, l1BlockAbi } from "@cartesi/evm-compat";
-import { encodeEvmCall } from "@cartesi/evm-compat";
 import { block, CHAIN_ID, depositTx, driveBytes, makeRouter, user } from "./helpers.ts";
 
 const EOA = "0x00000000000000000000000000000000000000aa";
@@ -13,7 +12,9 @@ const EOA = "0x00000000000000000000000000000000000000aa";
 const L1_INFO_DEPOSITOR = "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001";
 
 function call(to: `0x${string}`, data: Uint8Array, simulate = false, value = 0n): Uint8Array {
-    return toBytes(encodeEvmCall({ chainId: CHAIN_ID, from: user.address, to, value, data, simulate }));
+    return toBytes(
+        encodeEvmCall({ chainId: CHAIN_ID, from: user.address, to, value, data, simulate }),
+    );
 }
 
 describe("EvmCall", () => {
@@ -33,7 +34,10 @@ describe("EvmCall", () => {
 
     it("EvmSimulate reports success without mutating the drive", async () => {
         const { router, ledger } = await makeRouter();
-        await router.advance(block(), depositTx({ from: user.address, to: user.address, mint: 100n, value: 100n }));
+        await router.advance(
+            block(),
+            depositTx({ from: user.address, to: user.address, mint: 100n, value: 100n }),
+        );
         const before = driveBytes(ledger);
         const res = await router.inspect(call(EOA, new Uint8Array(0), true, 40n));
         expect(res.accept).toBe(true);
@@ -79,18 +83,27 @@ describe("L1Block", () => {
         expect(res.outcome).toBe("accept");
 
         const num = await router.inspect(
-            call(L1BLOCK_ADDRESS, toBytes(encodeFunctionData({ abi: l1BlockAbi, functionName: "number" }))),
+            call(
+                L1BLOCK_ADDRESS,
+                toBytes(encodeFunctionData({ abi: l1BlockAbi, functionName: "number" })),
+            ),
         );
         expect(num.accept).toBe(true);
         expect(BigInt(`0x${num.reports[0]!.slice(4)}`)).toBe(123456n);
 
         const ts = await router.inspect(
-            call(L1BLOCK_ADDRESS, toBytes(encodeFunctionData({ abi: l1BlockAbi, functionName: "timestamp" }))),
+            call(
+                L1BLOCK_ADDRESS,
+                toBytes(encodeFunctionData({ abi: l1BlockAbi, functionName: "timestamp" })),
+            ),
         );
         expect(BigInt(`0x${ts.reports[0]!.slice(4)}`)).toBe(1720009999n);
 
         const basefee = await router.inspect(
-            call(L1BLOCK_ADDRESS, toBytes(encodeFunctionData({ abi: l1BlockAbi, functionName: "basefee" }))),
+            call(
+                L1BLOCK_ADDRESS,
+                toBytes(encodeFunctionData({ abi: l1BlockAbi, functionName: "basefee" })),
+            ),
         );
         expect(BigInt(`0x${basefee.reports[0]!.slice(4)}`)).toBe(7n);
     });
@@ -98,7 +111,10 @@ describe("L1Block", () => {
     it("reverts views before the first attributes deposit", async () => {
         const { router } = await makeRouter();
         const res = await router.inspect(
-            call(L1BLOCK_ADDRESS, toBytes(encodeFunctionData({ abi: l1BlockAbi, functionName: "number" }))),
+            call(
+                L1BLOCK_ADDRESS,
+                toBytes(encodeFunctionData({ abi: l1BlockAbi, functionName: "number" })),
+            ),
         );
         expect(res.accept).toBe(false);
         expect(res.reports[0]!.slice(0, 4)).toBe("0x02");

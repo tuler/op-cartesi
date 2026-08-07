@@ -22,18 +22,18 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+    type Address,
+    type Chain,
     createPublicClient,
     createWalletClient,
     defineChain,
+    type Hex,
     http,
     rpcSchema,
-    type Address,
-    type Chain,
-    type Hex,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
 import { publicActionsL1, walletActionsL1 } from "viem/op-stack";
-import { cartesiActions, type CartesiRpcSchema } from "./cartesi.ts";
+import { type CartesiRpcSchema, cartesiActions } from "./cartesi.ts";
 
 export const DEVNET_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -107,7 +107,10 @@ export const config = {
         "0x7c852118294e51e653712a81e05800f419141751be58f605c371e15141b007a6",
     ),
     depositGasLimit: BigInt(env("DEPOSIT_GAS_LIMIT", "1000000")),
-    depositContract: addressEnv("DEPOSIT_CONTRACT_ADDRESS", "0x6900000000000000000000000000000000000001"),
+    depositContract: addressEnv(
+        "DEPOSIT_CONTRACT_ADDRESS",
+        "0x6900000000000000000000000000000000000001",
+    ),
     disputeGameFactory: optionalAddress("DISPUTE_GAME_FACTORY_ADDRESS"),
     outputsValidator: optionalAddress("OUTPUTS_VALIDATOR_ADDRESS"),
     outputExecutor: optionalAddress("OUTPUT_EXECUTOR_ADDRESS"),

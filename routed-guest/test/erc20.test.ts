@@ -2,19 +2,32 @@
 // first-seen registration, the façade over EvmCall, transfers with Transfer
 // events, the byte-identical revert journal, and withdrawals as vouchers.
 
-import { describe, expect, it } from "vitest";
 import {
+    applyL1ToL2Alias,
+    BRIDGE_ADDRESS,
+    bridgeAbi,
+    CONFIG_ADDRESS,
+    configAbi,
+    EVM_LOG_SELECTOR,
+    encodeEvmCall,
+    erc20FacadeAbi as erc20Abi,
+    l2TokenAddress,
+    PORTAL_ERC20,
+    PORTAL_ETHER,
+    REGISTRY_ADDRESS,
+    registryAbi,
+    TRANSFER_TOPIC,
+} from "@cartesi/evm-compat";
+import {
+    type Address,
     decodeAbiParameters,
     decodeFunctionResult,
     encodeFunctionData,
     encodePacked,
-    toBytes,
-    type Address,
     type Hex,
+    toBytes,
 } from "viem";
-import { applyL1ToL2Alias, BRIDGE_ADDRESS, bridgeAbi, CONFIG_ADDRESS, configAbi, erc20FacadeAbi as erc20Abi, l2TokenAddress, PORTAL_ERC20, PORTAL_ETHER, REGISTRY_ADDRESS, registryAbi } from "@cartesi/evm-compat";
-import { EVM_LOG_SELECTOR, TRANSFER_TOPIC } from "@cartesi/evm-compat";
-import { encodeEvmCall } from "@cartesi/evm-compat";
+import { describe, expect, it } from "vitest";
 import {
     APP_CONTRACT,
     block,
@@ -70,9 +83,21 @@ function erc20Deposit(amount: bigint): Uint8Array {
     });
 }
 
-async function callView(router: Awaited<ReturnType<typeof makeRouter>>["router"], to: Address, data: Hex) {
+async function callView(
+    router: Awaited<ReturnType<typeof makeRouter>>["router"],
+    to: Address,
+    data: Hex,
+) {
     const res = await router.inspect(
-        toBytes(encodeEvmCall({ chainId: CHAIN_ID, from: user.address, to, value: 0n, data: toBytes(data) })),
+        toBytes(
+            encodeEvmCall({
+                chainId: CHAIN_ID,
+                from: user.address,
+                to,
+                value: 0n,
+                data: toBytes(data),
+            }),
+        ),
     );
     return res;
 }
@@ -108,7 +133,9 @@ describe("the token path", () => {
         // Reports carry the one-byte framing tag; 0x01 is return data.
         expect(bal.reports[0]!.slice(0, 4)).toBe("0x01");
         const returned: Hex = `0x${bal.reports[0]!.slice(4)}`;
-        expect(decodeFunctionResult({ abi: erc20Abi, functionName: "balanceOf", data: returned })).toBe(1000n);
+        expect(
+            decodeFunctionResult({ abi: erc20Abi, functionName: "balanceOf", data: returned }),
+        ).toBe(1000n);
 
         const derived = await callView(
             router,
@@ -133,7 +160,11 @@ describe("the token path", () => {
             await signedTx(user, {
                 to: facade,
                 nonce: 0,
-                data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [RECIPIENT, 300n] }),
+                data: encodeFunctionData({
+                    abi: erc20Abi,
+                    functionName: "transfer",
+                    args: [RECIPIENT, 300n],
+                }),
             }),
         );
         expect(res.accept).toBe(true);
@@ -152,7 +183,10 @@ describe("the token path", () => {
         const facade = l2TokenAddress(L1_TOKEN);
         // Materialize the sender's account record first: otherwise the
         // nonce bump's insert (address + liveCount) dominates the diff.
-        await router.advance(block(), depositTx({ from: user.address, to: user.address, mint: 1n, value: 1n }));
+        await router.advance(
+            block(),
+            depositTx({ from: user.address, to: user.address, mint: 1n, value: 1n }),
+        );
 
         const before = driveBytes(ledger);
         const res = await router.advance(
@@ -160,7 +194,11 @@ describe("the token path", () => {
             await signedTx(user, {
                 to: facade,
                 nonce: 0,
-                data: encodeFunctionData({ abi: erc20Abi, functionName: "transfer", args: [RECIPIENT, 101n] }),
+                data: encodeFunctionData({
+                    abi: erc20Abi,
+                    functionName: "transfer",
+                    args: [RECIPIENT, 101n],
+                }),
             }),
         );
         expect(res.accept).toBe(true);
@@ -218,7 +256,10 @@ describe("the token path", () => {
             functionName: "registerPortal",
             args: [PORTAL_ETHER, ETHER_PORTAL],
         });
-        await router.advance(block(), await signedTx(owner, { to: CONFIG_ADDRESS, nonce: 1, data: register }));
+        await router.advance(
+            block(),
+            await signedTx(owner, { to: CONFIG_ADDRESS, nonce: 1, data: register }),
+        );
         const deposit = depositTx({
             from: applyL1ToL2Alias(ETHER_PORTAL),
             to: APP_CONTRACT,
@@ -235,7 +276,11 @@ describe("the token path", () => {
                 to: BRIDGE_ADDRESS,
                 nonce: 0,
                 value: 200n,
-                data: encodeFunctionData({ abi: bridgeAbi, functionName: "withdrawEther", args: [RECIPIENT] }),
+                data: encodeFunctionData({
+                    abi: bridgeAbi,
+                    functionName: "withdrawEther",
+                    args: [RECIPIENT],
+                }),
             }),
         );
         expect(res.accept).toBe(true);
@@ -257,7 +302,10 @@ describe("the token path", () => {
             depositTx({
                 from: applyL1ToL2Alias(ERC20_PORTAL),
                 to: RECIPIENT, // deliberately not APP_CONTRACT
-                data: encodePacked(["address", "address", "uint256"], [L1_TOKEN, user.address, 500n]),
+                data: encodePacked(
+                    ["address", "address", "uint256"],
+                    [L1_TOKEN, user.address, 500n],
+                ),
             }),
         );
         expect(res.accept).toBe(true);

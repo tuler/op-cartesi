@@ -9,7 +9,7 @@
 // application contract that has escrowed it since the deposit.
 
 import { bridgeAbi, errorRevert, transferLog, tryDecodeCalldata } from "@cartesi/evm-compat";
-import { encodeFunctionData, parseAbi, type Address } from "viem";
+import { type Address, encodeFunctionData, parseAbi } from "viem";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, Handler, OutputsSink, TxContext } from "../types.ts";
 
@@ -43,13 +43,20 @@ export class Bridge implements Handler {
                     await ledger.debitToken(ctx.sender, token.id, amount);
                 } catch (e) {
                     if (e instanceof InsufficientFunds) {
-                        return { kind: "revert", data: errorRevert("withdrawERC20: amount exceeds balance") };
+                        return {
+                            kind: "revert",
+                            data: errorRevert("withdrawERC20: amount exceeds balance"),
+                        };
                     }
                     throw e;
                 }
                 out.voucher({
                     destination: token.l1Token,
-                    payload: encodeFunctionData({ abi: erc20TransferAbi, functionName: "transfer", args: [to, amount] }),
+                    payload: encodeFunctionData({
+                        abi: erc20TransferAbi,
+                        functionName: "transfer",
+                        args: [to, amount],
+                    }),
                 });
                 // The burn convention indexers expect: Transfer(sender → 0x0)
                 // from the token façade's own address.

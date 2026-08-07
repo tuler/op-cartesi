@@ -69,9 +69,7 @@ export type AdvanceOutcome =
     | { kind: "fail"; data: Hex }
     | { kind: "reject"; reason: string };
 
-export type ViewOutcome =
-    | { kind: "return"; data: Hex }
-    | { kind: "revert"; data: Hex };
+export type ViewOutcome = { kind: "return"; data: Hex } | { kind: "revert"; data: Hex };
 
 /** Buffered emissions: the router collects these during dispatch and flushes
  * only what the outcome allows (outputs on accept; reports always). */

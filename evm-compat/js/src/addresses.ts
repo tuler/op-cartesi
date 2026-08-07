@@ -1,6 +1,14 @@
 // The address map of EVM-COMPAT §6.
 
-import { concat, getAddress, keccak256, stringToBytes, toBytes, type Address, type Hex } from "viem";
+import {
+    type Address,
+    concat,
+    getAddress,
+    type Hex,
+    keccak256,
+    stringToBytes,
+    toBytes,
+} from "viem";
 
 /** The system namespace: 0xC751 (leet CTSI) ‖ 16 zero bytes ‖ uint16 index —
  * 65,536 slots, mirroring OP's 0x4200…xxxx shape. The reservation is the

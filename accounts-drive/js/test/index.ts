@@ -2,7 +2,7 @@
 // argument as a script through test/package.json's "main", and importing
 // the test modules registers every test with node:test.
 
-import './keccak.test.ts';
-import './drive.test.ts';
-import './store.test.ts';
-import './golden.test.ts';
+import "./keccak.test.ts";
+import "./drive.test.ts";
+import "./store.test.ts";
+import "./golden.test.ts";

@@ -4,22 +4,28 @@
 // the advance path minus enforcement, on the inspect fork the host discards.
 
 import {
+    type Address,
     concat,
     decodeAbiParameters,
     encodeAbiParameters,
     encodeErrorResult,
+    type Hex,
     parseAbiParameters,
     toFunctionSelector,
-    type Address,
-    type Hex,
 } from "viem";
 
-export const EVM_CALL_SELECTOR: Hex = toFunctionSelector("EvmCall(uint256,address,address,uint256,bytes)");
-export const EVM_SIMULATE_SELECTOR: Hex = toFunctionSelector("EvmSimulate(uint256,address,address,uint256,bytes)");
+export const EVM_CALL_SELECTOR: Hex = toFunctionSelector(
+    "EvmCall(uint256,address,address,uint256,bytes)",
+);
+export const EVM_SIMULATE_SELECTOR: Hex = toFunctionSelector(
+    "EvmSimulate(uint256,address,address,uint256,bytes)",
+);
 
 // parseAbiParameters keeps the tuple precisely typed (decode returns
 // [bigint, Address, Address, bigint, Hex]) with no const assertion.
-const PARAMS = parseAbiParameters("uint256 chainId, address from, address to, uint256 value, bytes data");
+const PARAMS = parseAbiParameters(
+    "uint256 chainId, address from, address to, uint256 value, bytes data",
+);
 
 export interface DecodedCall {
     simulate: boolean;

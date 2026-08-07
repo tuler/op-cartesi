@@ -1,31 +1,31 @@
 {
-  "name": "@cartesi/accounts",
-  "version": "0.1.0",
-  "description": "TypeScript implementation of the Cartesi Accounts Drive Format v1 (docs/ACCOUNTS-DRIVE-SPEC.md).",
-  "type": "module",
-  "main": "./dist/index.cjs",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
+    "name": "@cartesi/accounts",
+    "version": "0.1.0",
+    "description": "TypeScript implementation of the Cartesi Accounts Drive Format v1 (docs/ACCOUNTS-DRIVE-SPEC.md).",
+    "type": "module",
+    "main": "./dist/index.cjs",
+    "module": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./src/index.ts",
+            "default": "./src/index.ts"
+        }
+    },
+    "files": [
+        "dist"
+    ],
+    "scripts": {
+        "build": "tsdown",
+        "test": "node --test test/",
+        "typecheck": "tsc --noEmit"
+    },
+    "dependencies": {
+        "@noble/hashes": "^2.2.0"
+    },
+    "devDependencies": {
+        "@types/node": "^22.18.14",
+        "tsdown": "^0.15.9",
+        "typescript": "^5.9.3"
     }
-  },
-  "files": [
-    "dist"
-  ],
-  "scripts": {
-    "build": "tsdown",
-    "test": "node --test test/",
-    "typecheck": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@noble/hashes": "^2.2.0"
-  },
-  "devDependencies": {
-    "@types/node": "^22.18.14",
-    "tsdown": "^0.15.9",
-    "typescript": "^5.9.3"
-  }
 }

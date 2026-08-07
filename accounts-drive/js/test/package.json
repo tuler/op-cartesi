@@ -1,4 +1,4 @@
 {
-  "type": "module",
-  "main": "index.ts"
+    "type": "module",
+    "main": "index.ts"
 }
