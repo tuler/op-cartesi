@@ -79,6 +79,23 @@ EOF
 
 ENV PATH="/opt/cartesi/bin:${PATH}"
 
+# cartesi-init runs the entrypoint as the unprivileged dapp user and grants
+# that user's group only the cmio device; the raw accounts drive stays a
+# root-only device node, so the app's open would die with EACCES. Scripts in
+# /etc/cartesi-init.d are sourced as root before the privilege drop — this
+# one extends the same group grant to the drive.
+RUN <<EOF
+set -e
+mkdir -p /etc/cartesi-init.d
+cat > /etc/cartesi-init.d/accounts-drive <<'INIT'
+accounts_drive="${ACCOUNTS_DRIVE:-/dev/pmem1}"
+[ -b "$accounts_drive" ] && \
+    busybox chown ":$(busybox id -g "${USER:-dapp}")" "$accounts_drive" && \
+    busybox chmod g+rw "$accounts_drive"
+INIT
+chmod +x /etc/cartesi-init.d/accounts-drive
+EOF
+
 # Genesis parameters of the routed guest (docs/EVM-COMPAT.md): baked into the
 # image environment, which `cartesi build` passes to the machine
 # (use_docker_env defaults to true), so they are covered by the genesis state
