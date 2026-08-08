@@ -9,7 +9,7 @@
 //   bun devnet/deposit.ts <recipient> [wei]
 //
 // Requires the devnet to be running with the contract suite deployed
-// (./devnet/start-devnet.sh, the WITH_CONTRACTS=1 default): the portal is
+// (./devnet/start-devnet.ts, the WITH_CONTRACTS=1 default): the portal is
 // the deposit path a real user takes, and the only one — the contract-less
 // mode has no deposits.
 

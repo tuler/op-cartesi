@@ -47,7 +47,7 @@ pins `machine.ram_image` to a machine-emulator-0.21.0-compatible kernel
 installed on the host (the macOS homebrew path; adjust for your OS) until
 the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are
 Dockerfile `ENV`, which `cartesi build` passes into the machine; defaults
-match `devnet/env.sh`.
+match `devnet/lib/env.ts`.
 
 `@deroll/cmio` stays a direct dependency although only the library uses it:
 it is the native addon `stage.mts` stages next to the bundle, and the

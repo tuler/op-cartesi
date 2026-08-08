@@ -17,8 +17,11 @@
         "build": "bun run --filter ledger-app build",
         "check": "biome check",
         "check:fix": "biome check --write",
+        "devnet": "bun devnet/start-devnet.ts",
+        "devnet:stop": "bun devnet/stop-devnet.ts",
         "format": "biome format --write",
         "lint": "biome lint",
+        "snapshot": "bun devnet/build-snapshot.ts",
         "test": "bun run --filter '*' test",
         "typecheck": "bun run --filter '*' typecheck"
     },

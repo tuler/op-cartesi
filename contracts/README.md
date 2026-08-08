@@ -57,7 +57,7 @@ Nothing here forks or modifies an OP contract. The validator reads
 
 ## Deploying
 
-`../devnet/deploy-outputs.sh` runs `script/DeployOutputs.s.sol` against the
+`../devnet/deploy-outputs.ts` runs `script/DeployOutputs.s.sol` against the
 devnet's L1, records the addresses in `devnet/outputs-addresses.env`, funds the
 executor, and registers both portals with the guest.
 

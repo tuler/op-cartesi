@@ -9,17 +9,17 @@ Running op-cartesi as a real OP Stack L2 needs four pieces:
 
 Steps 1 and 2 are ordinary OP Stack chain-bringup and are not automated here: `op-deployer` needs a funded L1 deployer key and produces the addresses that go into `rollup.json`. What *is* automated is step 3 and the configuration that ties it to step 4, which is where op-cartesi differs from an op-geth chain.
 
-You do not need to build op-node or op-batcher: `start-devnet.sh` will run the official docker images if the binaries are not on your `PATH`. See [below](#where-op-node-and-op-batcher-come-from).
+You do not need to build op-node or op-batcher: `start-devnet.ts` will run the official docker images if the binaries are not on your `PATH`. See [below](#where-op-node-and-op-batcher-come-from).
 
 ## Quick start: the whole stack on anvil
 
-`start-devnet.sh` brings up anvil as L1, a Cartesi Machine, op-cartesi as the
+`start-devnet.ts` brings up anvil as L1, a Cartesi Machine, op-cartesi as the
 execution engine, and op-node sequencing on top:
 
 ```sh
 bun install                    # once, at the repo root (bun workspace)
-./devnet/build-snapshot.sh     # once — `cartesi build` of ledger-app (see that script)
-./devnet/start-devnet.sh
+./devnet/build-snapshot.ts     # once — `cartesi build` of ledger-app (see that script)
+./devnet/start-devnet.ts
 ```
 
 Every piece runs in a pane of its own under
@@ -55,7 +55,7 @@ stay down: `l1-contracts` (op-deployer), `genesis` (the rollup config), and
 
 The OP monorepo publishes **no binaries** — its releases carry source archives
 only — so unless you want to compile Go, docker is the official way to get
-them. `start-devnet.sh` uses whichever is available:
+them. `start-devnet.ts` uses whichever is available:
 
 | `OP_RUNTIME` | Behaviour |
 |---|---|
@@ -64,10 +64,10 @@ them. `start-devnet.sh` uses whichever is available:
 | `docker` | the images below, pulled on first use |
 
 ```sh
-OP_RUNTIME=docker ./devnet/start-devnet.sh
+OP_RUNTIME=docker ./devnet/start-devnet.ts
 ```
 
-The images are pinned in `env.sh` and versioned independently upstream, so the
+The images are pinned in `lib/env.ts` and versioned independently upstream, so the
 tags do not match:
 
 ```
@@ -88,7 +88,7 @@ worth knowing:
 
 The guest is [`ledger-app`](../ledger-app/README.md) — the routed guest of
 [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md), TypeScript on `@deroll/cmio`,
-its ledger on the accounts drive. `build-snapshot.sh` wraps `cartesi build`,
+its ledger on the accounts drive. `build-snapshot.ts` wraps `cartesi build`,
 which stores the booted machine under `ledger-app/.cartesi/image`; that
 directory is the chain's genesis state.
 
@@ -113,24 +113,24 @@ cast block 10 --rpc-url http://127.0.0.1:8565 | grep -E 'hash|stateRoot'
 
 ### How the bring-up is organized
 
-`start-devnet.sh` starts nothing. It checks that the run can succeed — the
+`start-devnet.ts` starts nothing. It checks that the run can succeed — the
 tools on `PATH`, the snapshot, the ports, the JWT secret — compiles
 op-cartesi once into `bin/`, clears what a previous run left behind, writes
 an mprocs config for the panes this run wants, and hands over. One script per
-process, under `devnet/procs/`, each sourcing `devnet/lib/devnet.sh`:
+process, under `devnet/procs/`:
 
 | pane | what it is |
 |---|---|
 | `info` | the endpoint summary; prints and stays down |
 | `l1` | anvil, not `--silent`: L1 blocks and transactions as they land |
-| `l1-contracts` | `deploy-l1.sh` (op-deployer). Optional, runs once |
+| `l1-contracts` | `deploy-l1.ts` (op-deployer). Optional, runs once |
 | `genesis` | anchors the rollup and writes `rollup.json`. Runs once |
 | `machine` | `cartesi-jsonrpc-machine`: the guest's console |
 | `engine` | op-cartesi, the sequencer's engine |
 | `guest` | what the guest says about each transaction — its reports |
 | `op-node` `op-batcher` `op-proposer` | the OP tools, native or in docker |
 | `verifier-*` | the second node's machine, engine and op-node |
-| `outputs` | `deploy-outputs.sh`. Does not autostart — press `s` |
+| `outputs` | `deploy-outputs.ts`. Does not autostart — press `s` |
 
 mprocs starts every pane at once and has no notion of dependencies, so the
 ordering the old single script did by hand each process now does for itself:
@@ -154,19 +154,23 @@ server.
 
 The one thing that has to travel between panes is consensus-relevant:
 `genesis` writes the L1 anchor and the L2 genesis timestamp to
-`devnet/chain-genesis.env`, which `env.sh` sources — that is how the engine,
-started from a different pane, ends up on exactly the genesis the rollup
-config was generated with.
+`devnet/chain-genesis.env`, which `lib/env.ts` reads back — that is how the
+engine, started from a different pane, ends up on exactly the genesis the
+rollup config was generated with. The deployment outputs travel the same way,
+and are re-read rather than cached, so a process that started before the
+deploy it waited for sees what the deploy wrote.
 
 Quitting mprocs stops every process it started, killing each one's whole
 process group, which is what the machine servers need: op-cartesi forks a
 server per block and the ones it prunes reparent to init, out of reach of any
-parent-to-child walk but never out of their process group. If mprocs is
-killed rather than quit, `start-devnet.sh` runs `stop-devnet.sh` on its way
-out; run it yourself if a terminal died and left the stack behind:
+parent-to-child walk but never out of their process group. (bun's children
+share their parent's group, so a pane is one group however many processes
+deep it goes.) If mprocs is killed rather than quit, `start-devnet.ts` tears
+the stack down on its way out; run `stop-devnet.ts` yourself if a terminal
+died and left the stack behind:
 
 ```sh
-./devnet/stop-devnet.sh
+./devnet/stop-devnet.ts
 ```
 
 ### Watching the guest
@@ -216,7 +220,7 @@ or tokens. Set `WITH_PROPOSER=0` to deploy but not propose.
 Two things about a devnet L1 that the standard path does not handle:
 
 - Its chain id is not one `op-deployer` knows, and the standard intent resolves
-  OPCM from a per-chain table. `deploy-l1.sh` uses `--intent-type custom`,
+  OPCM from a per-chain table. `deploy-l1.ts` uses `--intent-type custom`,
   which deploys the superchain contracts and implementations along the way —
   so the separate `op-deployer bootstrap` step turns out not to be needed.
 - Only the L1 half of the output is used. `inspect genesis` and `inspect
@@ -244,36 +248,54 @@ L2ToL1MessagePasser account against the L2 state root, and ours is a Cartesi
 hash tree. Withdrawals go through Cartesi vouchers instead — see below and
 [DESIGN.md §4 and §7c](../docs/DESIGN.md).
 
-### Client scripts: TypeScript on bun
+### Everything is TypeScript on bun
 
-The transactional scripts are TypeScript (viem, run with `bun`), part of the
-repo's bun workspace — `bun install` at the repo root once, then invoke them
-directly. The Ethereum plumbing the shell versions did with `cast` and hex
-string surgery (ABI encoding, receipt polling, deposit payload packing) is
-what viem is for. Orchestration — `start-devnet.sh`, `stop-devnet.sh`,
-`lib/devnet.sh`, `procs/*.sh`, `deploy-l1.sh`, `deploy-outputs.sh`,
-`build-snapshot.sh`, `start-shim.sh`, `generate-config.sh` — stays shell: it
-is process supervision around external binaries, and it still sources
-`env.sh`, which `lib/env.ts` mirrors variable for variable (same names, same
-address files, same defaults). The one client script that is not
-transactional is `guest-log.ts`, which drives the `guest` pane.
+There is no shell in `devnet/` anymore — not the client scripts, not the
+orchestration. Both are part of the repo's bun workspace (`bun install` at
+the repo root once), and every file is directly executable:
 
-User overrides go in a `.env` at the repo root — `SENDER_KEY=…`,
-`L1_RPC=…`, anything `env.sh` reads. Bun loads it automatically for the
-TypeScript scripts (from the invocation cwd, so run them from the repo
-root), and `env.sh` replays the same file for the shell orchestration with
-the same rule: a variable already exported in the environment wins over the
-file. The machine-written address files (`l1-addresses.env`,
+| | |
+|---|---|
+| `start-devnet.ts` `stop-devnet.ts` `procs/*.ts` | the stack |
+| `deploy-l1.ts` `deploy-outputs.ts` `build-snapshot.ts` | the deploys |
+| `generate-config.ts` `start-shim.ts` | op-cartesi on its own |
+| `deposit.ts` `withdraw.ts` `balance.ts` … | the transactional scripts |
+| `guest-log.ts` | the `guest` pane, and a tail for any node |
+| `lib/env.ts` | all configuration |
+| `lib/proc.ts` `lib/optools.ts` `lib/opcartesi.ts` | running and waiting |
+
+For the transactional half this was always the argument: the Ethereum
+plumbing the shell did with `cast` and hex string surgery — ABI encoding,
+receipt polling, deposit payload packing — is what viem is for. The
+orchestration half followed for a different reason. It had grown a second
+language of its own: `python3` inline for JSON and TOML, `cast` subprocesses
+for what viem does in a line, and a configuration file (`env.sh`) that
+existed only because the shell could not read the TypeScript one. Deploying
+the L1 suite now reads `SystemConfig.scalar()` with `readContract` instead
+of shelling out to `cast call` and decoding the result in a heredoc of
+Python, and `devnet/lib/env.ts` is the only place any variable is named.
+
+What is left of the shell's job — spawning a program, waiting for a port,
+signalling a process group — is `lib/proc.ts`, and it is smaller than the
+shell version: bun's children share their parent's process group, so the
+teardown that mattered most comes for free.
+
+User overrides go in a `.env` at the repo root — `SENDER_KEY=…`, `L1_RPC=…`,
+anything `lib/env.ts` reads. It is loaded from the repo root explicitly
+rather than left to bun's cwd-relative auto-loading, so it applies wherever a
+script is run from, and it sits below real environment variables. The
+machine-written files (`l1-addresses.env`, `chain-genesis.env`,
 `outputs-addresses.env`, `token.env`) stay separate and stronger — they are
-deployment outputs, not preferences. `.env` is gitignored; keys live there,
-not in command lines.
+deployment outputs, not preferences, and they are re-read rather than cached,
+so a process that started before a deploy still sees what it wrote. `.env` is
+gitignored; keys live there, not in command lines.
 
 The scripts and the guest speak the same standard: `withdraw.ts` and
 `withdraw-erc20.ts` call the bridge predeploy, `balance.ts` reads the drive
 and the ERC-20 façades, `contracts.ts` asks `cartesi_getContracts` what the
 guest routes — every recorded contract with its ABI, every token façade with
 its L1 token, straight off the machine's drives — and the guest they address
-is the one `build-snapshot.sh` builds — the routed guest
+is the one `build-snapshot.ts` builds — the routed guest
 ([ledger-app](../ledger-app/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md)).
 Nothing here speaks a private dialect anymore; an app that wants one still
 can, through `cartesi_inspect` and `send-l2-tx.ts` with raw payloads.
@@ -313,7 +335,7 @@ funded — retired once `WITH_CONTRACTS=1` became the default.)
 
 ### Withdrawals
 
-`deploy-outputs.sh` puts the L1 half in place: the validator that opens an OP
+`deploy-outputs.ts` puts the L1 half in place: the validator that opens an OP
 proposal's root claim, the executor that runs a proven output, and the two
 portals. It also funds the executor and registers the portals with the guest.
 
@@ -322,7 +344,7 @@ than for another process, since not every run wants to move assets. Select it
 and press `s`, or run it yourself:
 
 ```sh
-./devnet/deploy-outputs.sh
+./devnet/deploy-outputs.ts
 bun devnet/withdraw.ts 0x00000000000000000000000000000000000a11ce 500000000000000000
 ```
 
@@ -384,7 +406,7 @@ Two operational notes, both easy to trip over by hand — and both handled by
 - A machine server holds exactly one machine, and `machine.load` refuses to
   replace it. Config generation and the node each need their own server,
   which is why `genesis` starts one of its own and stops it again.
-- op-node must not be started before the engine is serving. `procs/op-node.sh`
+- op-node must not be started before the engine is serving. `procs/op-node.ts`
   waits for the engine's port, which op-cartesi binds only once the chain is
   open.
 
@@ -393,7 +415,7 @@ Two operational notes, both easy to trip over by hand — and both handled by
 `DATA_DIR` gives each node a store, and the chain survives a restart:
 
 ```sh
-DATA_DIR=/tmp/op-cartesi-data CHECKPOINT_INTERVAL=25 ./devnet/start-devnet.sh
+DATA_DIR=/tmp/op-cartesi-data CHECKPOINT_INTERVAL=25 ./devnet/start-devnet.ts
 ls /tmp/op-cartesi-data/checkpoints
 ```
 
@@ -412,7 +434,7 @@ so the verifier gets `$DATA_DIR-verifier` automatically.
 
 ## The snapshot is stored already booted
 
-`build-snapshot.sh` stores the machine where `cartesi-machine --store` leaves
+`build-snapshot.ts` stores the machine where `cartesi-machine --store` leaves
 it: booted, and parked at its first input yield. This is how Cartesi Rollups
 distributes templates, and op-cartesi requires it — it refuses a machine stored
 at mcycle 0 rather than booting one itself:
@@ -435,10 +457,10 @@ Node startup drops from tens of seconds to about one as a side effect.
 
 ## Quick start (no L1, no contracts)
 
-`start-shim.sh` runs op-cartesi alone against the in-memory mock machine. Nothing derives from L1, but the Engine API is live and can be driven by hand, which is enough to explore the RPC surface:
+`start-shim.ts` runs op-cartesi alone against the in-memory mock machine. Nothing derives from L1, but the Engine API is live and can be driven by hand, which is enough to explore the RPC surface:
 
 ```sh
-./devnet/start-shim.sh
+./devnet/start-shim.ts
 ```
 
 It writes a JWT secret to `devnet/jwt.hex`, starts the engine port on `:8551` and the public `eth_*` port on `:8545`, and prints the genesis block hash.
@@ -458,10 +480,10 @@ anvil --host 0.0.0.0 --port 8545 --chain-id 900 --block-time 4
 
 # 3. Generate rollup.json. The chain flags here MUST match the ones given to
 #    `run` below, since they determine the genesis block hash.
-./devnet/generate-config.sh
+./devnet/generate-config.ts
 
 # 4. Start op-cartesi
-./devnet/start-shim.sh
+./devnet/start-shim.ts
 
 # 5. Start op-node in sequencer mode
 op-node \

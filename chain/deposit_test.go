@@ -17,7 +17,7 @@ import (
 // guest of ledger-app (docs/EVM-COMPAT.md), which keeps its ledger on the
 // accounts drive and routes every input by its `to` address:
 //
-//	./devnet/build-snapshot.sh
+//	./devnet/build-snapshot.ts
 //	OP_CARTESI_TEST_LEDGER_SNAPSHOT=./ledger-app/.cartesi/image go test ./chain/
 //
 // It is separate from OP_CARTESI_TEST_SNAPSHOT because the other real-machine
@@ -35,7 +35,7 @@ func newLedgerChain(t *testing.T) *Chain {
 }
 
 // The routed guest's standard addresses and genesis parameters, as the
-// devnet snapshot bakes them (ledger-app defaults, matching devnet/env.sh).
+// devnet snapshot bakes them (ledger-app defaults, matching devnet/lib/env.ts).
 var (
 	guestConfigAddress = common.HexToAddress("0xc751000000000000000000000000000000000002")
 	guestOwner         = common.HexToAddress("0x90F79bf6EB2c4f870365E785982E1f101E93b906")
@@ -64,7 +64,7 @@ func ethDeposit(t *testing.T, source string, to common.Address, amount *big.Int)
 // registerPortalDeposit is an owner configuration input: a deposit from the
 // guest owner's EOA to the config contract carrying
 // registerPortal(uint8 kind, address portal) — how the devnet's
-// deploy-outputs.sh tells the guest which L1 contracts to credit deposits
+// deploy-outputs.ts tells the guest which L1 contracts to credit deposits
 // from. It is also the one input a fresh routed guest answers with a
 // provable output (the registration notice), which several real-machine
 // tests lean on.

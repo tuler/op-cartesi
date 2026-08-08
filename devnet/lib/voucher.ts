@@ -29,7 +29,7 @@ export async function executeVoucher(txHash: Hex): Promise<bigint> {
     const validator = config.outputsValidator;
     const executor = config.outputExecutor;
     if (!factory || !validator || !executor) {
-        throw new Error("run ./devnet/deploy-l1.sh and ./devnet/deploy-outputs.sh first");
+        throw new Error("run ./devnet/deploy-l1.ts and ./devnet/deploy-outputs.ts first");
     }
     const l1 = l1Public();
     const l2 = l2Public();

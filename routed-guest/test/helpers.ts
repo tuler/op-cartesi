@@ -1,5 +1,5 @@
 // Test rig: the router over an in-memory drive, plus transaction builders.
-// Keys are the anvil dev accounts the devnet already uses (env.sh: the guest
+// Keys are the anvil dev accounts the devnet already uses (lib/env.ts: the guest
 // owner defaults to anvil #3).
 
 import { MemStore } from "@cartesi/accounts";

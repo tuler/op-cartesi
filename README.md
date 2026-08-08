@@ -13,24 +13,24 @@ Compatibility is verified against **op-node's own types** rather than hand-writt
 The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client is pinned to machine-emulator 0.21.0 by probing a running server, and `chain` and `machine` carry tests that load a real machine, build blocks on it, re-execute them as a verifier, and check that the outputs commitment the host computes is byte-identical to the one the guest maintains. They are skipped unless a snapshot is supplied:
 
 ```sh
-./devnet/build-snapshot.sh
+./devnet/build-snapshot.ts
 OP_CARTESI_TEST_SNAPSHOT=./ledger-app/.cartesi/image \
 OP_CARTESI_TEST_LEDGER_SNAPSHOT=./ledger-app/.cartesi/image go test ./...
 ```
 
 The second variable turns on the deposit and token tests, which need a guest that means something by its inputs rather than merely consuming them — the routed guest of [`ledger-app`](ledger-app/README.md) (docs/EVM-COMPAT.md), which is what the snapshot script builds.
 
-**The chain round-trips through L1.** `./devnet/start-devnet.sh` brings up anvil as L1, a Cartesi Machine, op-cartesi, and op-node in sequencer mode; op-node sequences L2 blocks continuously, each carrying the L1-attributes deposit it injects, wrapped in the `EvmAdvance` envelope and executed by the machine. The block's state root is the machine's Merkle root and its `withdrawalsRoot` is the outputs commitment. Each piece runs in its own [mprocs](https://github.com/pvolok/mprocs) pane — including the machine's console and the guest's own per-transaction reports — so the whole stack is one screen you can watch, stop and restart a piece at a time. See [devnet/README.md](devnet/README.md).
+**The chain round-trips through L1.** `./devnet/start-devnet.ts` brings up anvil as L1, a Cartesi Machine, op-cartesi, and op-node in sequencer mode; op-node sequences L2 blocks continuously, each carrying the L1-attributes deposit it injects, wrapped in the `EvmAdvance` envelope and executed by the machine. The block's state root is the machine's Merkle root and its `withdrawalsRoot` is the outputs commitment. Each piece runs in its own [mprocs](https://github.com/pvolok/mprocs) pane — including the machine's console and the guest's own per-transaction reports — so the whole stack is one screen you can watch, stop and restart a piece at a time. See [devnet/README.md](devnet/README.md).
 
 `op-batcher` posts those blocks to L1 as calldata batches, which advances the safe head. A **second node** then runs alongside — its own machine, engine and op-node, sequencing nothing — and rebuilds the chain purely from what the batcher put on L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
 
-The stack has been run against the **official released images** — op-node v1.19.3 and op-batcher v1.16.11 — as well as against locally built binaries. The OP monorepo ships no binaries of its own, so `./devnet/start-devnet.sh` falls back to docker when they are not on your `PATH`; nothing needs compiling but op-cartesi itself.
+The stack has been run against the **official released images** — op-node v1.19.3 and op-batcher v1.16.11 — as well as against locally built binaries. The OP monorepo ships no binaries of its own, so `./devnet/start-devnet.ts` falls back to docker when they are not on your `PATH`; nothing needs compiling but op-cartesi itself.
 
 **Deposits reach the guest.** `bun devnet/deposit.ts <address> <wei>` calls `OptimismPortal.depositTransaction` on L1; op-node derives it into an L2 deposit transaction, and the guest — the routed [`ledger-app`](ledger-app/README.md) — credits the recipient on its accounts drive. The balance is machine state, so the state root commits to it, and `eth_getBalance` reads it straight out of machine memory. The verifier, deriving from L1 alone, arrives at the same balance.
 
 **Proposals land on L1.** The devnet deploys the full OP Stack L1 suite with `op-deployer` and runs `op-proposer` against the `DisputeGameFactory`. The claim it submits is `keccak(0³² ‖ stateRoot ‖ withdrawalsRoot ‖ blockHash)` — recomputed independently and matched against the on-chain game — so the root claim on L1 commits to the machine's Merkle root *and* the Cartesi outputs tree. Deposits go through the real `OptimismPortal.depositTransaction`.
 
-**Withdrawals work, through Cartesi vouchers.** `./devnet/withdraw.sh <address> <wei>` asks the guest to withdraw; it emits a Cartesi `Voucher`, the voucher enters the outputs tree, `op-proposer` proposes the block, and an L1 contract proves the voucher against that proposal and executes it — moving real ETH. Verified end to end on the devnet, including that a voucher is single-use.
+**Withdrawals work, through Cartesi vouchers.** `bun devnet/withdraw.ts <address> <wei>` asks the guest to withdraw; it emits a Cartesi `Voucher`, the voucher enters the outputs tree, `op-proposer` proposes the block, and an L1 contract proves the voucher against that proposal and executes it — moving real ETH. Verified end to end on the devnet, including that a voucher is single-use.
 
 The bridge is one small contract. A Cartesi `Application` asks one question before executing an output — `isOutputsMerkleRootValid` — and an OP proposal already commits to the answer, since op-node's root claim is `keccak(version ‖ stateRoot ‖ withdrawalsRoot ‖ blockHash)` and `withdrawalsRoot` *is* the Cartesi outputs root. [`OPOutputsMerkleRootValidator`](contracts/src/OPOutputsMerkleRootValidator.sol) opens that preimage on chain; verification uses Cartesi's own `LibOutputValidityProof`, pulled in as a dependency rather than reimplemented. Nothing forks `OptimismPortal` — its withdrawal path wants an MPT proof this chain cannot produce, so this sidesteps it rather than replacing it.
 
@@ -132,7 +132,7 @@ go run ./cmd/op-cartesi genesis -h
 
 The engine (authenticated, for op-node) and public `eth_*` endpoints listen on `127.0.0.1:8551` and `127.0.0.1:8545` by default. On startup the node logs the genesis block hash and state root.
 
-The chain flags passed to `genesis` and `run` must match: they determine the L2 genesis block hash, and op-node refuses to start if the engine's genesis disagrees with its rollup config. `devnet/env.sh` keeps a single copy of them for both scripts.
+The chain flags passed to `genesis` and `run` must match: they determine the L2 genesis block hash, and op-node refuses to start if the engine's genesis disagrees with its rollup config. `chainFlags()` in `devnet/lib/opcartesi.ts` is the single copy of them both are built from.
 
 ## Fork support
 
