@@ -242,15 +242,16 @@ address the deployment authorised, and are never disputed — there is no fault
 proof VM that can execute a Cartesi Machine. That is how OP chains launch;
 real disputes are the settlement track.
 
-The batcher and the proposer both get `--num-confirmations=1` and a receipt
-poll set to `L1_BLOCK_TIME` (`txmgrArgs` in `lib/optools.ts`). op-service's
-transaction manager assumes a 12-second L1 that reorgs: it waits 12 seconds
-before looking for a receipt, calls a transaction confirmed ten blocks deep,
-and rebroadcasts anything it still believes unmined. Against a two-second
-anvil that rebroadcast always won, so every proposal was sent twice and the
-`l1` pane answered the second copy with `Transaction rejected: nonce too low`.
-Nothing was lost — txmgr reads that rejection as proof the nonce landed — but
-the pane is there to be read.
+The batcher and the proposer both get `--num-confirmations=1` and a one-second
+receipt poll (`txmgrArgs` in `lib/optools.ts`). op-service's transaction
+manager waits 12 seconds before it first looks for a receipt and rebroadcasts
+unmined transactions on a 12-second timer of its own — and since it learns a
+transaction was mined only inside that poll, the two timers wake together and
+the rebroadcast wins. It re-sends a transaction anvil already mined, and the
+`l1` pane answers with `Transaction rejected: nonce too low`. Nothing is lost;
+txmgr reads that rejection as proof the nonce landed. Raising `L1_BLOCK_TIME`
+to mainnet's 12 does not help — the transaction is mined inside the twelve
+seconds either way, and the tie is between the two timers, not with the chain.
 
 Deploying `OptimismPortal` does not make OP's own withdrawal path usable:
 `proveWithdrawalTransaction` verifies an MPT storage proof of the

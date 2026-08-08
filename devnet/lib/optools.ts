@@ -117,32 +117,40 @@ export function addressing(): Addressing {
 
 /** The txmgr settings every OP tool that sends L1 transactions needs here.
  *
- * op-service's transaction manager is tuned for a 12-second L1 that reorgs:
- * it waits `--txmgr.receipt-query-interval` (12s) before it so much as looks
- * for the receipt, and calls a transaction confirmed only `--num-confirmations`
- * (10) blocks deep. Anvil mines every `L1_BLOCK_TIME` seconds and never
- * reorgs, so both numbers are wrong by an order of magnitude — and wrong in a
- * way that is not merely slow. While txmgr believes a transaction is still
- * unmined, a 12-second rebroadcast timer re-publishes it verbatim; against
- * anvil that timer always fires first, so every proposal is sent twice and
- * anvil rejects the second copy:
+ * op-service's transaction manager arms two timers when it publishes, and
+ * leaves both at 12 seconds: `--txmgr.receipt-query-interval`, after which it
+ * first looks for the receipt, and `--txmgr.rebroadcast-interval`, after which
+ * it re-publishes anything it still believes unmined. It learns a transaction
+ * was mined only inside the receipt poll, so at the twelve-second mark the two
+ * timers wake together and the rebroadcast wins by microseconds — it re-sends
+ * a transaction that landed ten blocks ago, and anvil rejects the second copy:
  *
  *     Error: Transaction rejected: nonce too low
  *
- * Nothing is lost when that happens — txmgr reads the rejection as proof the
- * nonce already landed and moves on, at debug level — but the L1 pane is where
- * you watch the batcher and the proposer work, and a rejection per transaction
- * is not what working looks like. Polling at the block time means the receipt
- * is seen a block after it is written, long before anything rebroadcasts.
+ * Nothing is lost. txmgr reads that rejection as proof the nonce is already on
+ * chain and carries on at debug level. But the `l1` pane runs anvil without
+ * --silent precisely so you can watch the batcher and the proposer work, and a
+ * rejection per transaction is not what working looks like.
+ *
+ * The tie is what matters, not the block time: two timers of the same length,
+ * one of which needs a round trip before it can suppress the other. Measured
+ * against anvil, an `L1_BLOCK_TIME` of 12 — mainnet's — reproduces it exactly
+ * as 2 does, because the transaction is mined before the twelve seconds are up
+ * either way. So the poll drops to a second, which is nothing on a local
+ * chain, and the receipt is seen a block after it is written whatever the L1
+ * is mining at.
  *
  * Rebroadcast itself is left on: it is the only thing that recovers a
- * transaction anvil dropped, and with the receipt seen in time it never fires.
+ * transaction anvil dropped. With the receipt seen in time it never fires, and
+ * if it ever does fire the transaction really is still pending, which anvil
+ * answers with "already known" rather than a rejection.
+ *
+ * `--num-confirmations=1` is the other half. Anvil has no reorgs to confirm
+ * away, and the default of 10 blocks was holding each proposal open long past
+ * the 20s proposal interval it is supposed to keep.
  */
 export function txmgrArgs(): string[] {
-    return [
-        "--num-confirmations=1",
-        `--txmgr.receipt-query-interval=${Math.max(1, stack.l1BlockTime)}s`,
-    ];
+    return ["--num-confirmations=1", "--txmgr.receipt-query-interval=1s"];
 }
 
 const images: Record<string, string> = {
