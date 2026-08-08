@@ -5,7 +5,7 @@
 //
 //   bun devnet/withdraw.ts <recipient> <wei>
 //
-// This targets the routed guest (ledger-app): the withdrawal is a call to
+// This targets the routed guest of `app/`: the withdrawal is a call to
 // the bridge predeploy's withdrawEther(to), carrying the wei as msg.value —
 // so the sender (SENDER_KEY) must hold that balance on L2; deposit first.
 // The bridge burns the value and emits the voucher (EVM-COMPAT §9), and
@@ -13,7 +13,7 @@
 // goes into the block's withdrawalsRoot, op-proposer's claim commits to it,
 // and Cartesi's own proof libraries verify the voucher against it on L1.
 
-import { BRIDGE_ADDRESS, bridgeAbi } from "@cartesi/evm-compat";
+import { BRIDGE_ADDRESS, bridgeAbi } from "@op-cartesi/evm";
 import { encodeFunctionData, getAddress } from "viem";
 import { l1Public, usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";

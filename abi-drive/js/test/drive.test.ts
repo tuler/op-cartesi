@@ -1,7 +1,7 @@
 // The ABI drive against its spec (docs/ABI-DRIVE-SPEC.md): format, register,
 // reopen from bytes, and every refusal.
 
-import { MemStore } from "@cartesi/accounts";
+import { MemStore } from "@op-cartesi/accounts";
 import { describe, expect, it } from "vitest";
 import {
     AbiDrive,

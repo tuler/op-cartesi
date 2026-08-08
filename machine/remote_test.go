@@ -129,7 +129,7 @@ func evmAdvance(t *testing.T, index uint64, payload []byte) []byte {
 // sampleRegistration is an owner configuration input for the routed guest
 // (docs/EVM-COMPAT.md): registerPortal(uint8,address) addressed to the
 // config contract, sent by the owner the devnet snapshot bakes in. It is the
-// one input a freshly booted ledger-app guest answers with a provable output
+// one input a freshly booted app guest answers with a provable output
 // — the registration notice — which is exactly what the outputs-root test
 // needs. (A plain ether deposit credits silently: native transfers emit no
 // event, matching OP.)

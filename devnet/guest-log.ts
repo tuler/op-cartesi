@@ -16,7 +16,7 @@
 // Reports carry the router's one-byte tag (EVM-COMPAT §8, evm-compat/js
 // types.ts): app diagnostics, eth_call return data, or revert data.
 
-import { TAG_APP, TAG_RETURN, TAG_REVERT } from "@cartesi/evm-compat";
+import { TAG_APP, TAG_RETURN, TAG_REVERT } from "@op-cartesi/evm";
 import { decodeErrorResult, formatEther, type Hex, hexToBytes, size, slice } from "viem";
 import { config, l2Public } from "./lib/env.ts";
 

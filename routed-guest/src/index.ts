@@ -1,4 +1,4 @@
-// @cartesi/routed-guest: the guest runtime of docs/EVM-COMPAT.md.
+// @op-cartesi/app: the guest runtime of docs/EVM-COMPAT.md.
 //
 // An application boots a Guest, declares its contracts (address + ABI +
 // callbacks), and runs — the library owns admission, dispatch, the outcome

@@ -28,7 +28,7 @@ EOF
 # native addon ships prebuilds and node-gyp-build picks the riscv64 one at
 # runtime. The build context is the REPO ROOT (cartesi.toml sets
 # context = ".."), because the app is a bun workspace member whose
-# @cartesi/accounts dependency lives in accounts-drive/js.
+# @op-cartesi/accounts dependency lives in accounts-drive/js.
 FROM --platform=$BUILDPLATFORM oven/bun:1.3 AS build-stage
 
 WORKDIR /opt/cartesi
@@ -39,7 +39,7 @@ COPY accounts-drive/js/package.json accounts-drive/js/
 COPY abi-drive/js/package.json abi-drive/js/
 COPY evm-compat/js/package.json evm-compat/js/
 COPY routed-guest/package.json routed-guest/
-COPY ledger-app/package.json ledger-app/
+COPY app/package.json app/
 COPY devnet/package.json devnet/
 RUN bun install --frozen-lockfile
 
@@ -47,15 +47,15 @@ COPY accounts-drive/ accounts-drive/
 COPY abi-drive/ abi-drive/
 COPY evm-compat/ evm-compat/
 COPY routed-guest/ routed-guest/
-COPY ledger-app/ ledger-app/
-RUN cd ledger-app && bun run build
+COPY app/ app/
+RUN cd app && bun run build
 
 # Stage the runtime files: the JS bundle plus @deroll/cmio's native addon,
 # which esbuild cannot inline and must be required at runtime. The script
 # locates the packages through module resolution rather than assuming a
 # node_modules layout — bun 1.3's isolated linker keeps workspace members'
 # dependencies out of the root node_modules.
-RUN bun ledger-app/stage.mts rootfs
+RUN bun app/stage.mts rootfs
 
 
 ################################################################################

@@ -1,5 +1,5 @@
-// @cartesi/evm-compat: the wire-level half of docs/EVM-COMPAT.md, shared by
-// the guest runtime (@cartesi/routed-guest) and host tooling. Pure viem —
+// @op-cartesi/evm: the wire-level half of docs/EVM-COMPAT.md, shared by
+// the guest runtime (@op-cartesi/app) and host tooling. Pure viem —
 // nothing here touches a drive or a machine.
 
 export * from "./abi.ts";

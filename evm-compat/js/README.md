@@ -1,7 +1,7 @@
-# @cartesi/evm-compat
+# @op-cartesi/evm
 
 The wire-level half of [docs/EVM-COMPAT.md](../../docs/EVM-COMPAT.md),
-shared by the guest runtime ([`@cartesi/routed-guest`](../../routed-guest))
+shared by the guest runtime ([`@op-cartesi/app`](../../routed-guest))
 and host tooling — pure viem, no drives, no machine:
 
 - **addresses** — the 0xC751 system namespace, token-façade derivation

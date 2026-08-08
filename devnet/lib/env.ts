@@ -216,7 +216,7 @@ export const stack = {
     withGuestLog: flag("WITH_GUEST_LOG", true),
 
     /** The routed guest's snapshot, as `cartesi build` stores it. */
-    snapshotDir: process.env.SNAPSHOT_DIR ?? join(REPO_DIR, "ledger-app", ".cartesi", "image"),
+    snapshotDir: process.env.SNAPSHOT_DIR ?? join(REPO_DIR, "app", ".cartesi", "image"),
     /** Directory for the chain store. Empty keeps the chain in memory. */
     dataDir: process.env.DATA_DIR ?? "",
     /** How long a process waits for what it depends on. Deploying the L1
@@ -344,7 +344,7 @@ export function addresses() {
         // The address the guest accepts configuration from — portal
         // registrations and the fee, through the config contract at
         // guestConfigAddress. It is baked into the snapshot (a Dockerfile ARG
-        // of ledger-app, this same default), so it is consensus-relevant, and
+        // of `app/`, this same default), so it is consensus-relevant, and
         // it has to be known before anything is deployed, which is the point:
         // the portals are not.
         guestOwner: addr("GUEST_OWNER", ANVIL_3),

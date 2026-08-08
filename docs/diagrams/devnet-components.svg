@@ -120,7 +120,7 @@
 <text class="m" x="64" y="744">→ rollup.json for op-nodes</text>
 
 <rect class="ghost" x="420" y="800" width="290" height="46" rx="8"/>
-<text class="ts" x="436" y="820">ledger-app/.cartesi/image</text>
+<text class="ts" x="436" y="820">app/.cartesi/image</text>
 <text class="m" x="436" y="836">cartesi build (devnet/build-snapshot.sh)</text>
 <path class="edge-d" d="M 500 800 L 500 772" marker-end="url(#ah)"/>
 <text class="lbl" x="510" y="790">loads at boot</text>

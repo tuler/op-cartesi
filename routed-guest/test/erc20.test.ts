@@ -17,7 +17,7 @@ import {
     REGISTRY_ADDRESS,
     registryAbi,
     TRANSFER_TOPIC,
-} from "@cartesi/evm-compat";
+} from "@op-cartesi/evm";
 import {
     type Address,
     decodeAbiParameters,

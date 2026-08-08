@@ -19,7 +19,7 @@ import (
 const testDriveBase = uint64(0x80000000000000)
 
 // formatTestDrive builds a drive image with the same geometry the devnet
-// guest (ledger-app) formats at boot, so the host is exercised against the
+// guest (app/) formats at boot, so the host is exercised against the
 // exact layout it will meet on a real machine.
 func formatTestDrive(t *testing.T) (*drive.MemStore, *drive.Drive) {
 	t.Helper()

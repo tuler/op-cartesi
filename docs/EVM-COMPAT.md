@@ -5,7 +5,7 @@ design it leads to; a normative companion spec (the routing standard's
 byte-level contract, in the mold of ACCOUNTS-DRIVE-SPEC.md) remains to be
 written. The router, the journal, and the built-in contract family of
 §5–§10 are implemented and tested in
-[`ledger-app/`](../ledger-app/README.md) — TypeScript on `@deroll/cmio`,
+[`app/`](../app/README.md) — TypeScript on `@deroll/cmio`,
 with viem supplying transaction parsing, recovery and ABI plumbing — and
 that guest **is the devnet guest**: `build-snapshot.ts` builds it, the
 devnet scripts speak its bridge and façades, and the shim's `eth_call`
@@ -668,7 +668,7 @@ handlers never see the device at all.
 ### 10a. The application API, as built: ABI-driven registration
 
 The prototype realizes the manifest as an API rather than a file. The
-runtime is a workspace library (`@cartesi/routed-guest`); an application
+runtime is a workspace library (`@op-cartesi/app`); an application
 boots it and declares each contract as **an address, an ABI, and
 callbacks**:
 
@@ -727,7 +727,7 @@ block.)*
 | Layer | Change |
 |---|---|
 | **Consensus / wire** | **Nothing.** EvmAdvance unchanged, block format unchanged, outputs tree and voucher encodings unchanged, op-node/op-batcher/op-proposer untouched, L1 contracts untouched. |
-| **Guest** | The router (native, reference implementation of the standard) replaces `bank-app.sh`: CMIO loop, outputs accumulator, typed-tx sighash, enforcement, journal, manifest dispatch, built-in family. The accounts drive and its libraries: unchanged. *(done, as workspace libraries — `@cartesi/routed-guest` the runtime, `@cartesi/evm-compat` the wire vocabulary, `@cartesi/abis` the ABI drive; `ledger-app` is an application of them, §10a)* |
+| **Guest** | The router (native, reference implementation of the standard) replaces `bank-app.sh`: CMIO loop, outputs accumulator, typed-tx sighash, enforcement, journal, manifest dispatch, built-in family. The accounts drive and its libraries: unchanged. *(done, as workspace libraries — `@op-cartesi/app` the runtime, `@op-cartesi/evm` the wire vocabulary, `@op-cartesi/abis` the ABI drive; `app` is an application of them, §10a)* |
 | **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `engineapi/eth.go`)*; `eth_getCode` serves the routed-address markers and `cartesi_getContracts` the full surface with ABIs, both from the drives *(done — `chain/code.go`, §10a)*; receipts try the `EvmLog` decode; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
 | **Devnet** | `build-snapshot.sh` ships the router; the dialect scripts collapse into standard tooling — `cast send $TOKEN "transfer(address,uint256)" …`, `cast call $TOKEN "balanceOf(address)" …`, `cast send $BRIDGE "withdrawEther(address)" --value …` — and `send-l2-tx.sh` drops `--legacy`. Scripts getting shorter is the acceptance test. |
 | **Tests** | The realmachine suite keeps its role with the new guest *(done — its inputs now speak the standard)*; enforcement (sighash, recovery, nonce) is covered by the router's vitest suite, retiring `test-guest.lua`; golden accounts-drive vectors already cover the ledger. |

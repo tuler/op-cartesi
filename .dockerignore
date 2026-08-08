@@ -1,10 +1,10 @@
-# The repo root is the docker build context of ledger-app's snapshot build
+# The repo root is the docker build context of `app/`'s snapshot build
 # (cartesi.toml sets context = ".." so the bun workspace resolves inside the
 # build). Keep the context down to what that build reads.
 .git
 **/node_modules
 **/dist
-ledger-app/.cartesi
+app/.cartesi
 devnet/snapshot
 devnet/logs
 devnet/deployment

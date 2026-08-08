@@ -14,11 +14,11 @@ import (
 )
 
 // ledgerMachineEnv points at a machine running the devnet guest — the routed
-// guest of ledger-app (docs/EVM-COMPAT.md), which keeps its ledger on the
+// guest of app/ (docs/EVM-COMPAT.md), which keeps its ledger on the
 // accounts drive and routes every input by its `to` address:
 //
 //	./devnet/build-snapshot.ts
-//	OP_CARTESI_TEST_LEDGER_SNAPSHOT=./ledger-app/.cartesi/image go test ./chain/
+//	OP_CARTESI_TEST_LEDGER_SNAPSHOT=./app/.cartesi/image go test ./chain/
 //
 // It is separate from OP_CARTESI_TEST_SNAPSHOT because the other real-machine
 // tests only need a guest that consumes inputs, while these need one that
@@ -28,14 +28,14 @@ const ledgerMachineEnv = "OP_CARTESI_TEST_LEDGER_SNAPSHOT"
 func newLedgerChain(t *testing.T) *Chain {
 	t.Helper()
 	if os.Getenv(ledgerMachineEnv) == "" {
-		t.Skipf("set %s to a stored machine running the ledger-app guest", ledgerMachineEnv)
+		t.Skipf("set %s to a stored machine running the routed guest of app/", ledgerMachineEnv)
 	}
 	t.Setenv(realMachineEnv, os.Getenv(ledgerMachineEnv))
 	return newRealChain(t)
 }
 
 // The routed guest's standard addresses and genesis parameters, as the
-// devnet snapshot bakes them (ledger-app defaults, matching devnet/lib/env.ts).
+// devnet snapshot bakes them (app/ defaults, matching devnet/lib/env.ts).
 var (
 	guestConfigAddress = common.HexToAddress("0xc751000000000000000000000000000000000002")
 	guestOwner         = common.HexToAddress("0x90F79bf6EB2c4f870365E785982E1f101E93b906")

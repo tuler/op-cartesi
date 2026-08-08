@@ -90,13 +90,13 @@ already discoverable elsewhere:
 
 256 KiB (2^18 — a power of two, so the drive is one aligned subtree of the
 machine's hash tree), 64 index slots, heap at 4096. Declared in
-`ledger-app/cartesi.toml` as the third drive; the guest formats it at boot
+`app/cartesi.toml` as the third drive; the guest formats it at boot
 and reaches it at `$ABI_DRIVE` (`/dev/pmem2` on the devnet). Like the
 accounts drive, the geometry is consensus once the snapshot is stored.
 
 ## 6. Readers
 
-- `@cartesi/abis` (this repo, `abi-drive/js`) — reference reader/writer over
+- `@op-cartesi/abis` (this repo, `abi-drive/js`) — reference reader/writer over
   a byte store; the guest runtime uses it to record registrations at boot.
   `abi-drive/js/golden.ts` writes the golden image the Go tests read, which
   is what pins the two implementations to the same bytes.

@@ -21,7 +21,7 @@ import (
 // that speak their own dialect.
 const EvmCallSignature = "EvmCall(uint256,address,address,uint256,bytes)"
 
-// The report framing tags (EVM-COMPAT §7, mirrored by ledger-app).
+// The report framing tags (EVM-COMPAT §7, mirrored by app/).
 const (
 	ReportTagApp    byte = 0x00 // application diagnostic, passed through
 	ReportTagReturn byte = 0x01 // eth_call return data

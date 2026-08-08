@@ -2,7 +2,7 @@
 #
 # The root drive builds from this directory's Dockerfile with the REPO ROOT
 # as its docker context: the app is a bun workspace member, and its
-# @cartesi/accounts dependency lives in ../accounts-drive/js — outside this
+# @op-cartesi/accounts dependency lives in ../accounts-drive/js — outside this
 # directory, inside the context. (docker resolves --file against the CLI's
 # working directory, so the dockerfile path stays the default.)
 #

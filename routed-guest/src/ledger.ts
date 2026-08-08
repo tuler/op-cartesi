@@ -23,8 +23,8 @@ import {
     open as openDrive,
     ProfileSparse,
     type Store,
-} from "@cartesi/accounts";
-import { type Address, addrKey, l2TokenAddress } from "@cartesi/evm-compat";
+} from "@op-cartesi/accounts";
+import { type Address, addrKey, l2TokenAddress } from "@op-cartesi/evm";
 import { getAddress, toBytes } from "viem";
 
 /** A debit that the balance cannot cover. Distinct from AccountsDriveError:

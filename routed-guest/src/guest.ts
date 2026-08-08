@@ -8,8 +8,9 @@
 // by the genesis root. Registration is therefore a boot-time act: contracts
 // are declared between boot() and run(), never during an input.
 
-import { AbiDrive, type AbiDriveConfig, KIND_APP, KIND_SYSTEM } from "@cartesi/abis";
-import { FileStore, MemStore, type Store } from "@cartesi/accounts";
+import { type AdvanceRequest, Rollup } from "@deroll/cmio";
+import { AbiDrive, type AbiDriveConfig, KIND_APP, KIND_SYSTEM } from "@op-cartesi/abis";
+import { FileStore, MemStore, type Store } from "@op-cartesi/accounts";
 import {
     type BlockContext,
     BRIDGE_ADDRESS,
@@ -21,8 +22,7 @@ import {
     REGISTRY_ADDRESS,
     registryAbi,
     sameAddress,
-} from "@cartesi/evm-compat";
-import { type AdvanceRequest, Rollup } from "@deroll/cmio";
+} from "@op-cartesi/evm";
 import { type Abi, type Address, getAddress, numberToHex } from "viem";
 import { type ContractSpec, contractHandler } from "./contract.ts";
 import { Ledger } from "./ledger.ts";

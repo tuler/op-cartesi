@@ -18,7 +18,7 @@ execution engine, and op-node sequencing on top:
 
 ```sh
 bun install                    # once, at the repo root (bun workspace)
-./devnet/build-snapshot.ts     # once — `cartesi build` of ledger-app (see that script)
+./devnet/build-snapshot.ts     # once — `cartesi build` of app (see that script)
 ./devnet/start-devnet.ts
 ```
 
@@ -86,11 +86,11 @@ worth knowing:
   other by container name. Publishing op-node's RPC to the host's loopback is
   not enough — loopback is not reachable from the bridge gateway.
 
-The guest is [`ledger-app`](../ledger-app/README.md) — the routed guest of
-[docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md), TypeScript on `@deroll/cmio`,
-its ledger on the accounts drive. `build-snapshot.ts` wraps `cartesi build`,
-which stores the booted machine under `ledger-app/.cartesi/image`; that
-directory is the chain's genesis state.
+The guest is [`app`](../app/README.md) — the routed guest of
+[docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md), TypeScript on `@deroll/cmio`, its
+ledger on the accounts drive. `build-snapshot.ts` wraps `cartesi build`, which
+stores the booted machine under `app/.cartesi/image`; that directory is the
+chain's genesis state.
 
 op-node then drives block production: every L2 block carries the L1-attributes
 deposit it injects, that deposit is wrapped in an `EvmAdvance` envelope and fed
@@ -296,7 +296,7 @@ and the ERC-20 façades, `contracts.ts` asks `cartesi_getContracts` what the
 guest routes — every recorded contract with its ABI, every token façade with
 its L1 token, straight off the machine's drives — and the guest they address
 is the one `build-snapshot.ts` builds — the routed guest
-([ledger-app](../ledger-app/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md)).
+([app](../app/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md)).
 Nothing here speaks a private dialect anymore; an app that wants one still
 can, through `cartesi_inspect` and `send-l2-tx.ts` with raw payloads.
 

@@ -14,11 +14,11 @@ The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client 
 
 ```sh
 ./devnet/build-snapshot.ts
-OP_CARTESI_TEST_SNAPSHOT=./ledger-app/.cartesi/image \
-OP_CARTESI_TEST_LEDGER_SNAPSHOT=./ledger-app/.cartesi/image go test ./...
+OP_CARTESI_TEST_SNAPSHOT=./app/.cartesi/image \
+OP_CARTESI_TEST_LEDGER_SNAPSHOT=./app/.cartesi/image go test ./...
 ```
 
-The second variable turns on the deposit and token tests, which need a guest that means something by its inputs rather than merely consuming them — the routed guest of [`ledger-app`](ledger-app/README.md) (docs/EVM-COMPAT.md), which is what the snapshot script builds.
+The second variable turns on the deposit and token tests, which need a guest that means something by its inputs rather than merely consuming them — the routed guest of [`app`](app/README.md) (docs/EVM-COMPAT.md), which is what the snapshot script builds.
 
 **The chain round-trips through L1.** `./devnet/start-devnet.ts` brings up anvil as L1, a Cartesi Machine, op-cartesi, and op-node in sequencer mode; op-node sequences L2 blocks continuously, each carrying the L1-attributes deposit it injects, wrapped in the `EvmAdvance` envelope and executed by the machine. The block's state root is the machine's Merkle root and its `withdrawalsRoot` is the outputs commitment. Each piece runs in its own [mprocs](https://github.com/pvolok/mprocs) pane — including the machine's console and the guest's own per-transaction reports — so the whole stack is one screen you can watch, stop and restart a piece at a time. See [devnet/README.md](devnet/README.md).
 
@@ -26,7 +26,7 @@ The second variable turns on the deposit and token tests, which need a guest tha
 
 The stack has been run against the **official released images** — op-node v1.19.3 and op-batcher v1.16.11 — as well as against locally built binaries. The OP monorepo ships no binaries of its own, so `./devnet/start-devnet.ts` falls back to docker when they are not on your `PATH`; nothing needs compiling but op-cartesi itself.
 
-**Deposits reach the guest.** `bun devnet/deposit.ts <address> <wei>` calls `OptimismPortal.depositTransaction` on L1; op-node derives it into an L2 deposit transaction, and the guest — the routed [`ledger-app`](ledger-app/README.md) — credits the recipient on its accounts drive. The balance is machine state, so the state root commits to it, and `eth_getBalance` reads it straight out of machine memory. The verifier, deriving from L1 alone, arrives at the same balance.
+**Deposits reach the guest.** `bun devnet/deposit.ts <address> <wei>` calls `OptimismPortal.depositTransaction` on L1; op-node derives it into an L2 deposit transaction, and the guest — the routed [`app`](app/README.md) — credits the recipient on its accounts drive. The balance is machine state, so the state root commits to it, and `eth_getBalance` reads it straight out of machine memory. The verifier, deriving from L1 alone, arrives at the same balance.
 
 **Proposals land on L1.** The devnet deploys the full OP Stack L1 suite with `op-deployer` and runs `op-proposer` against the `DisputeGameFactory`. The claim it submits is `keccak(0³² ‖ stateRoot ‖ withdrawalsRoot ‖ blockHash)` — recomputed independently and matched against the on-chain game — so the root claim on L1 commits to the machine's Merkle root *and* the Cartesi outputs tree. Deposits go through the real `OptimismPortal.depositTransaction`.
 
@@ -106,7 +106,7 @@ go test ./...
 # The TypeScript side is a bun workspace: the drive libraries
 # (accounts-drive/js, abi-drive/js), the EVM-compat wire vocabulary
 # (evm-compat/js), the guest runtime (routed-guest), the devnet guest
-# application (ledger-app), and the devnet client scripts (devnet/*.ts).
+# application (app), and the devnet client scripts (devnet/*.ts).
 bun install
 bun run test
 bun run typecheck

@@ -14,7 +14,7 @@
 // 128  bytes32 batcherHash
 // Isthmus appends: 160 uint32 operatorFeeScalar, 164 uint64 operatorFeeConstant.
 
-import { errorRevert, l1BlockAbi, tryDecodeCalldata } from "@cartesi/evm-compat";
+import { errorRevert, l1BlockAbi, tryDecodeCalldata } from "@op-cartesi/evm";
 import { encodeFunctionResult, type Hex, toFunctionSelector, toHex } from "viem";
 import type { Ledger } from "../ledger.ts";
 import type {

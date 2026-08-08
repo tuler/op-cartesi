@@ -1,5 +1,5 @@
 {
-    "name": "@cartesi/accounts",
+    "name": "@op-cartesi/accounts",
     "version": "0.1.0",
     "description": "TypeScript implementation of the Cartesi Accounts Drive Format v1 (docs/ACCOUNTS-DRIVE-SPEC.md).",
     "type": "module",

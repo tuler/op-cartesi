@@ -14,7 +14,7 @@ import {
     PORTAL_ETHER,
     sameAddress,
     tryDecodeCalldata,
-} from "@cartesi/evm-compat";
+} from "@op-cartesi/evm";
 import {
     type Address,
     encodeAbiParameters,

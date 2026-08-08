@@ -23,7 +23,7 @@ import {
     type TxContext,
     tryDecodeCalldata,
     type ViewOutcome,
-} from "@cartesi/evm-compat";
+} from "@op-cartesi/evm";
 import {
     type Abi,
     type AbiStateMutability,

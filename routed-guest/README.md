@@ -1,4 +1,4 @@
-# @cartesi/routed-guest
+# @op-cartesi/app
 
 The guest runtime of [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md): the router
 with its admission rules and outcome model, the journaled ledger over the
@@ -7,7 +7,7 @@ registry, `L1Block`, portal receiver), and the **application API** — a
 contract is an address, an ABI, and callbacks:
 
 ```ts
-import { Fail, Guest, Revert } from "@cartesi/routed-guest";
+import { Fail, Guest, Revert } from "@op-cartesi/app";
 import { parseAbi } from "viem";
 
 const guest = await Guest.boot({ chainId: 901n, owner });

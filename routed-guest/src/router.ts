@@ -27,7 +27,7 @@ import {
     REGISTRY_ADDRESS,
     recoverSender,
     sameAddress,
-} from "@cartesi/evm-compat";
+} from "@op-cartesi/evm";
 import { type Address, concat, type Hex, toHex } from "viem";
 import { Bridge } from "./handlers/bridge.ts";
 import { Config } from "./handlers/config.ts";

@@ -4,7 +4,7 @@
 //
 //   bun devnet/withdraw-erc20.ts <recipient> <amount> [l1-token]
 //
-// This targets the routed guest (ledger-app): the withdrawal is a call to
+// This targets the routed guest of `app/`: the withdrawal is a call to
 // the bridge predeploy's withdrawERC20, naming the token by its derived L2
 // façade address and debiting the sender's own holding (EVM-COMPAT §9) — so
 // the sender (SENDER_KEY) must hold the tokens on L2; deposit first. The
@@ -19,7 +19,7 @@
 // wants an MPT proof against an L2 state root that here is a Cartesi hash
 // tree. See DESIGN §7d.
 
-import { BRIDGE_ADDRESS, bridgeAbi, l2TokenAddress } from "@cartesi/evm-compat";
+import { BRIDGE_ADDRESS, bridgeAbi, l2TokenAddress } from "@op-cartesi/evm";
 import { encodeFunctionData, getAddress, parseAbi } from "viem";
 import { config, l1Public, usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
