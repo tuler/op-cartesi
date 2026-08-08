@@ -38,24 +38,24 @@ COPY package.json bun.lock ./
 COPY accounts-drive/js/package.json accounts-drive/js/
 COPY abi-drive/js/package.json abi-drive/js/
 COPY evm-compat/js/package.json evm-compat/js/
-COPY routed-guest/package.json routed-guest/
 COPY app/package.json app/
+COPY demo/package.json demo/
 COPY devnet/package.json devnet/
 RUN bun install --frozen-lockfile
 
 COPY accounts-drive/ accounts-drive/
 COPY abi-drive/ abi-drive/
 COPY evm-compat/ evm-compat/
-COPY routed-guest/ routed-guest/
 COPY app/ app/
-RUN cd app && bun run build
+COPY demo/ demo/
+RUN cd demo && bun run build
 
 # Stage the runtime files: the JS bundle plus @deroll/cmio's native addon,
 # which esbuild cannot inline and must be required at runtime. The script
 # locates the packages through module resolution rather than assuming a
 # node_modules layout — bun 1.3's isolated linker keeps workspace members'
 # dependencies out of the root node_modules.
-RUN bun app/stage.mts rootfs
+RUN bun demo/stage.mts rootfs
 
 
 ################################################################################

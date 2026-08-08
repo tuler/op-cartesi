@@ -1,10 +1,10 @@
-# The repo root is the docker build context of `app/`'s snapshot build
+# The repo root is the docker build context of `demo/`'s snapshot build
 # (cartesi.toml sets context = ".." so the bun workspace resolves inside the
 # build). Keep the context down to what that build reads.
 .git
 **/node_modules
 **/dist
-app/.cartesi
+demo/.cartesi
 devnet/snapshot
 devnet/logs
 devnet/deployment

@@ -5,8 +5,8 @@
         "accounts-drive/js",
         "abi-drive/js",
         "evm-compat/js",
-        "routed-guest",
         "app",
+        "demo",
         "devnet"
     ],
     "trustedDependencies": [
@@ -14,7 +14,7 @@
         "esbuild"
     ],
     "scripts": {
-        "build": "bun run --filter app build",
+        "build": "bun run --filter demo build",
         "check": "biome check",
         "check:fix": "biome check --write",
         "devnet": "bun devnet/start-devnet.ts",
