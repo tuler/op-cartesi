@@ -14,7 +14,7 @@
 # hash tree.
 #
 # Note the CLI auto-places drives (no `start:` control), unlike
-# devnet/build-snapshot.sh which pins the spec's recommended 2^55. The shim
+# devnet/build-snapshot.ts which pins the spec's recommended 2^55. The shim
 # discovers the drive by its label via the machine config (ACCOUNTS.md §5.1),
 # so auto-placement works; pinning the start in the CLI is a wanted upstream
 # knob.

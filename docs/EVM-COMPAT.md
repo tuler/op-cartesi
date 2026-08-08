@@ -7,7 +7,7 @@ written. The router, the journal, and the built-in contract family of
 §5–§10 are implemented and tested in
 [`ledger-app/`](../ledger-app/README.md) — TypeScript on `@deroll/cmio`,
 with viem supplying transaction parsing, recovery and ABI plumbing — and
-that guest **is the devnet guest**: `build-snapshot.sh` builds it, the
+that guest **is the devnet guest**: `build-snapshot.ts` builds it, the
 devnet scripts speak its bridge and façades, and the shim's `eth_call`
 speaks §7's envelope. The Lua bank app it replaced is retired. It
 addresses the gap between what the chain's transport already is — ordinary

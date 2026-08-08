@@ -1,5 +1,8 @@
+#!/usr/bin/env bun
 // Follows the chain and prints what the guest program inside the Cartesi
 // Machine had to say about every transaction — its reports.
+//
+//   bun devnet/guest-log.ts [rpc]
 //
 // The `machine` pane shows the emulator's console: Linux booting, and
 // anything the guest writes to stdout. That is the machine talking. This is
@@ -21,7 +24,10 @@ const POLL_MS = Number(process.env.GUEST_LOG_POLL_MS ?? 500);
 // Enough of a report to read; the rest is a scroll away in the RPC.
 const MAX_REPORT_CHARS = 400;
 
-const client = l2Public();
+// Any node serves the same emissions, so the RPC is an argument: the
+// sequencer's by default, the verifier's if you want to watch it agree.
+const rpc = process.argv[2] ?? config.l2Rpc;
+const client = l2Public(rpc);
 
 const TAGS: Record<number, string> = {
     [TAG_APP]: "report",
@@ -130,7 +136,7 @@ for (;;) {
             // A restart of this pane alone joins at the head instead of
             // replaying the whole chain.
             next = head;
-            console.log(`following the guest from block ${head} on ${config.l2Rpc}`);
+            console.log(`following the guest from block ${head} on ${rpc}`);
         }
         // A reorg (the safe chain replacing an unsafe one) can move the head
         // backwards, below what has already been printed; follow it back

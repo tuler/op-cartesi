@@ -4,7 +4,7 @@
 // lives in the library. What remains here is what is genuinely this
 // application's: genesis parameters from the image environment (part of the
 // snapshot, so covered by the genesis state root; defaults match
-// devnet/env.sh), and the app-specific contracts.
+// devnet/lib/env.ts), and the app-specific contracts.
 
 import { Guest } from "@cartesi/routed-guest";
 import { getAddress, parseAbi } from "viem";

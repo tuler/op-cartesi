@@ -13,5 +13,5 @@
         "target": "ES2022",
         "types": ["bun"]
     },
-    "include": ["*.ts", "lib"]
+    "include": ["*.ts", "lib", "procs"]
 }

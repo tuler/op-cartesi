@@ -31,7 +31,7 @@ const amount = BigInt(amountArg ?? "1000000000000000000");
 const portal = config.erc20Portal;
 const executor = config.outputExecutor;
 if (!portal || !executor) {
-    console.error("run ./devnet/deploy-outputs.sh first");
+    console.error("run ./devnet/deploy-outputs.ts first");
     process.exit(1);
 }
 
@@ -45,10 +45,10 @@ const depositor = wallet.account.address;
 const deployed = async (address: Address) => (await l1.getCode({ address })) !== undefined;
 
 // The same goes for the outputs suite itself: addresses recorded by an
-// earlier deploy-outputs.sh run outlive the anvil they were deployed to.
+// earlier deploy-outputs.ts run outlive the anvil they were deployed to.
 if (!(await deployed(portal)) || !(await deployed(executor))) {
     console.error(
-        `the outputs suite (portal ${portal}, executor ${executor}) has no code on this L1 — rerun ./devnet/deploy-outputs.sh`,
+        `the outputs suite (portal ${portal}, executor ${executor}) has no code on this L1 — rerun ./devnet/deploy-outputs.ts`,
     );
     process.exit(1);
 }
