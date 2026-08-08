@@ -1,7 +1,7 @@
 // The inspect surface: EvmCall return/revert framing, EOA semantics,
 // EvmSimulate's no-mutation guarantee, and the adopted L1Block predeploy.
 
-import { encodeEvmCall, L1BLOCK_ADDRESS, l1BlockAbi } from "@cartesi/evm-compat";
+import { encodeEvmCall, L1BLOCK_ADDRESS, l1BlockAbi } from "@op-cartesi/evm";
 import { concat, encodeFunctionData, type Hex, toBytes, toFunctionSelector, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import { block, CHAIN_ID, depositTx, driveBytes, makeRouter, user } from "./helpers.ts";

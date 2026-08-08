@@ -1,11 +1,10 @@
 {
-    "name": "ledger-app",
+    "name": "app",
     "version": "0.0.0",
-    "description": "The devnet guest: @cartesi/routed-guest booted with the devnet genesis, plus the app-specific contracts",
+    "description": "The devnet guest: @op-cartesi/app booted with the devnet genesis, plus the app-specific contracts",
     "type": "module",
     "dependencies": {
-        "@cartesi/routed-guest": "workspace:*",
-        "@deroll/cmio": "alpha",
+        "@op-cartesi/app": "workspace:*",
         "viem": "^2.55.10"
     },
     "devDependencies": {
@@ -23,7 +22,6 @@
         "deroll"
     ],
     "trustedDependencies": [
-        "@deroll/cmio",
         "esbuild"
     ]
 }

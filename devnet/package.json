@@ -5,7 +5,7 @@
     "description": "Devnet client scripts: viem on bun, replacing the cast/curl shell scripts",
     "type": "module",
     "dependencies": {
-        "@cartesi/evm-compat": "workspace:*",
+        "@op-cartesi/evm": "workspace:*",
         "viem": "^2.55.10"
     },
     "devDependencies": {

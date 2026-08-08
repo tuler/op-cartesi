@@ -1,7 +1,7 @@
 // Shared types of the routed guest standard (docs/EVM-COMPAT.md).
 //
 // This is the wire-level vocabulary — contexts, outcomes, emissions, report
-// tags — shared by the guest runtime (@cartesi/routed-guest) and by host
+// tags — shared by the guest runtime (@op-cartesi/app) and by host
 // tooling. The Handler interface itself lives with the runtime, since it
 // names the ledger.
 

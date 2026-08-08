@@ -3,8 +3,8 @@
 // over its own un-journaled RAM, the namespace guards, and the ABI drive as
 // the discovery record.
 
-import { KIND_APP, KIND_SYSTEM } from "@cartesi/abis";
-import { CONFIG_ADDRESS, encodeEvmCall, errorRevert, L1BLOCK_ADDRESS } from "@cartesi/evm-compat";
+import { KIND_APP, KIND_SYSTEM } from "@op-cartesi/abis";
+import { CONFIG_ADDRESS, encodeEvmCall, errorRevert, L1BLOCK_ADDRESS } from "@op-cartesi/evm";
 import {
     type Address,
     decodeFunctionResult,

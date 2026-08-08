@@ -1,5 +1,5 @@
 {
-    "name": "@cartesi/abis",
+    "name": "@op-cartesi/abis",
     "version": "0.0.0",
     "description": "The ABI drive (docs/ABI-DRIVE-SPEC.md): a machine-readable registry of the contracts a routed guest serves, and their ABIs",
     "type": "module",
@@ -8,7 +8,7 @@
         "./package.json": "./package.json"
     },
     "dependencies": {
-        "@cartesi/accounts": "workspace:*",
+        "@op-cartesi/accounts": "workspace:*",
         "viem": "^2.55.10"
     },
     "devDependencies": {

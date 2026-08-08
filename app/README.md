@@ -1,7 +1,7 @@
-# ledger-app: the devnet guest
+# app: the devnet guest
 
 The devnet's application, and deliberately small: it boots
-[`@cartesi/routed-guest`](../routed-guest) with the devnet genesis
+[`@op-cartesi/app`](../routed-guest) with the devnet genesis
 (`CHAIN_ID`, `OWNER` from the image environment) and registers the one
 app-specific contract — a counter at `0xc0de…01`, the smallest honest
 demonstration of the standard's fall-through: an ABI, callbacks, and state
@@ -10,21 +10,21 @@ application (EVM-COMPAT §10a).
 
 Everything standard lives in the workspace libraries:
 
-- [`@cartesi/routed-guest`](../routed-guest) — the runtime: router,
+- [`@op-cartesi/app`](../routed-guest) — the runtime: router,
   admission, the outcome model, the journaled ledger, the built-in
   handlers, and the application API (`guest.contract({ address, abi,
   transactions, views })`).
-- [`@cartesi/evm-compat`](../evm-compat/js) — the wire-level vocabulary:
+- [`@op-cartesi/evm`](../evm-compat/js) — the wire-level vocabulary:
   addresses, transaction parsing, `EvmCall`/`EvmSimulate`, `EvmLog`, report
   tags, and the built-in ABIs. Host tooling (devnet scripts, tests) imports
   from here.
-- [`@cartesi/abis`](../abi-drive/js) — the ABI drive
+- [`@op-cartesi/abis`](../abi-drive/js) — the ABI drive
   ([docs/ABI-DRIVE-SPEC.md](../docs/ABI-DRIVE-SPEC.md)): the machine's own
   record of the contracts it serves. With the accounts drive
   ([docs/ACCOUNTS-DRIVE-SPEC.md](../docs/ACCOUNTS-DRIVE-SPEC.md)) naming the
   tokens, a stored snapshot describes its interface surface with no
   knowledge of the application.
-- [`@cartesi/accounts`](../accounts-drive/js) — the accounts drive itself.
+- [`@op-cartesi/accounts`](../accounts-drive/js) — the accounts drive itself.
 
 ## Build and run
 
@@ -49,10 +49,12 @@ the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are
 Dockerfile `ENV`, which `cartesi build` passes into the machine; defaults
 match `devnet/lib/env.ts`.
 
-`@deroll/cmio` stays a direct dependency although only the library uses it:
-it is the native addon `stage.mts` stages next to the bundle, and the
-dependency keeps it resolvable from this package under bun's isolated
-installs.
+`@deroll/cmio` is not a dependency of this app: it belongs to
+[`@op-cartesi/app`](../routed-guest), which is what actually drives the CMIO
+loop. `stage.mts` still stages its native addon next to the bundle — esbuild
+cannot inline a `.node` — but it finds it by following the dependency graph
+(this app → the runtime → the addon), so the layout bun's isolated linker
+produces is never assumed.
 
 ## Not here yet
 

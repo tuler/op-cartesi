@@ -1,4 +1,4 @@
-// @cartesi/accounts: TypeScript implementation of the Cartesi Accounts
+// @op-cartesi/accounts: TypeScript implementation of the Cartesi Accounts
 // Drive Format v1 (docs/ACCOUNTS-DRIVE-SPEC.md).
 
 export type {

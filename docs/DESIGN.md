@@ -443,7 +443,7 @@ to be cut somewhere:
   is not a deployment artifact — it can be chosen before anything exists. The
   guest carries one, and takes configuration from nothing else.
 
-The third is what the devnet guest does (today the routed `ledger-app`, and
+The third is what the devnet guest does (today the routed `app`, and
 its Lua predecessor `bank-app.sh` before it). The owner address is baked into
 the snapshot — a Dockerfile build argument, covered by the genesis state root
 like every other consensus parameter — and registration arrives as an

@@ -1,4 +1,4 @@
-// The devnet guest: @cartesi/routed-guest booted with the devnet genesis.
+// The devnet guest: @op-cartesi/app booted with the devnet genesis.
 //
 // Everything standard — admission, routing, the built-ins, the drives —
 // lives in the library. What remains here is what is genuinely this
@@ -6,7 +6,7 @@
 // snapshot, so covered by the genesis state root; defaults match
 // devnet/lib/env.ts), and the app-specific contracts.
 
-import { Guest } from "@cartesi/routed-guest";
+import { Guest } from "@op-cartesi/app";
 import { getAddress, parseAbi } from "viem";
 
 const CHAIN_ID = BigInt(process.env.CHAIN_ID ?? "901");

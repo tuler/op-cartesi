@@ -1,5 +1,5 @@
 {
-    "name": "@cartesi/routed-guest",
+    "name": "@op-cartesi/app",
     "version": "0.0.0",
     "description": "The routed guest runtime of docs/EVM-COMPAT.md: router, journaled ledger, built-in handlers, and the ABI-driven application API, on @deroll/cmio",
     "type": "module",
@@ -8,9 +8,9 @@
         "./package.json": "./package.json"
     },
     "dependencies": {
-        "@cartesi/abis": "workspace:*",
-        "@cartesi/accounts": "workspace:*",
-        "@cartesi/evm-compat": "workspace:*",
+        "@op-cartesi/abis": "workspace:*",
+        "@op-cartesi/accounts": "workspace:*",
+        "@op-cartesi/evm": "workspace:*",
         "@deroll/cmio": "alpha",
         "viem": "^2.55.10"
     },

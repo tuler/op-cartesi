@@ -2,7 +2,7 @@
 // Keys are the anvil dev accounts the devnet already uses (lib/env.ts: the guest
 // owner defaults to anvil #3).
 
-import { MemStore } from "@cartesi/accounts";
+import { MemStore } from "@op-cartesi/accounts";
 import {
     type Address,
     type Hex,

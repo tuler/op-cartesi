@@ -12,7 +12,7 @@
 // ordinary ERC-20 — reverts included, surfaced as execution-reverted errors
 // with the reason.
 
-import { l2TokenAddress } from "@cartesi/evm-compat";
+import { l2TokenAddress } from "@op-cartesi/evm";
 import { erc20Abi, getAddress } from "viem";
 import { l2Public, usage } from "./lib/env.ts";
 

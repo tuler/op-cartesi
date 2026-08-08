@@ -25,7 +25,7 @@ independently generated test vectors.
 | `rust/` | Rust 2021, zero crates | `cargo test` |
 | `c/` | C99, no deps | `make -C c test` |
 | `lua/` | Lua 5.4, pure | `lua5.4 lua/test.lua` |
-| `js/` | TypeScript (`@cartesi/accounts`), Node ≥ 22 | `node --test js/test/` |
+| `js/` | TypeScript (`@op-cartesi/accounts`), Node ≥ 22 | `node --test js/test/` |
 | `python/` | Python ≥ 3.8, stdlib | `python3 python/test_accounts_drive.py` |
 
 ## The API, by convention

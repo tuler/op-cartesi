@@ -17,7 +17,7 @@
 // handler's own balance; crediting the named beneficiary is the handler
 // moving its own funds — the capability rule, satisfied naturally.
 
-import { errorRevert, l2TokenAddress, PORTAL_ETHER, transferLog } from "@cartesi/evm-compat";
+import { errorRevert, l2TokenAddress, PORTAL_ETHER, transferLog } from "@op-cartesi/evm";
 import { type Address, getAddress, toHex } from "viem";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, Handler, OutputsSink, TxContext } from "../types.ts";

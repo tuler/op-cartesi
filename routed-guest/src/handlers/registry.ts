@@ -1,7 +1,7 @@
 // The router registry (EVM-COMPAT §6): discovery views over the manifest,
 // and the source the shim reads eth_getCode markers from.
 
-import { errorRevert, l2TokenAddress, registryAbi, tryDecodeCalldata } from "@cartesi/evm-compat";
+import { errorRevert, l2TokenAddress, registryAbi, tryDecodeCalldata } from "@op-cartesi/evm";
 import { type Address, encodeFunctionResult } from "viem";
 import type { Ledger } from "../ledger.ts";
 import type { CallContext, Handler, ViewOutcome } from "../types.ts";

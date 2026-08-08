@@ -6,7 +6,7 @@
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { MemStore } from "@cartesi/accounts";
+import { MemStore } from "@op-cartesi/accounts";
 import { AbiDrive, KIND_APP, KIND_SYSTEM } from "./src/index.ts";
 
 const mem = new MemStore(262144);

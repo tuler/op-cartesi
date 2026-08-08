@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Builds the Cartesi Machine snapshot that becomes the chain's genesis state:
-// the routed guest of ledger-app (docs/EVM-COMPAT.md), built with
-// `cartesi build` (@cartesi/cli 2.0 alpha) into ledger-app/.cartesi/image —
+// the routed guest of `app/` (docs/EVM-COMPAT.md), built with
+// `cartesi build` (@cartesi/cli 2.0 alpha) into app/.cartesi/image —
 // a stored machine, booted and parked at its first input yield, which is what
 // makes genesis reproducible: the chain's genesis state root is the stored
 // machine's own root hash.
@@ -9,7 +9,7 @@
 // Genesis parameters travel differently than they did for the Lua guest:
 // CHAIN_ID and OWNER are Dockerfile build ARGs whose defaults match lib/env.ts
 // (chain 901, owner anvil account 3). To deviate, set build_args on
-// [drives.root] in ledger-app/cartesi.toml — they are consensus parameters,
+// [drives.root] in app/cartesi.toml — they are consensus parameters,
 // baked into the image environment and covered by the genesis state root.
 // The accounts drive geometry lives in the same cartesi.toml.
 //
@@ -32,11 +32,11 @@ if (
     l2ChainId !== 901
 ) {
     console.error("note: GUEST_OWNER/L2_CHAIN_ID differ from the image defaults; set matching");
-    console.error("build_args on [drives.root] in ledger-app/cartesi.toml or the snapshot will");
+    console.error("build_args on [drives.root] in app/cartesi.toml or the snapshot will");
     console.error("disagree with the chain flags.");
 }
 
-await must(["cartesi", "build"], { cwd: join(paths.repo, "ledger-app") });
+await must(["cartesi", "build"], { cwd: join(paths.repo, "app") });
 
 console.error(`stored machine snapshot in ${stack.snapshotDir}`);
 console.error("run it with: cartesi-jsonrpc-machine --server-address=127.0.0.1:6000");

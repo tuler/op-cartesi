@@ -1,5 +1,5 @@
 {
-    "name": "@cartesi/evm-compat",
+    "name": "@op-cartesi/evm",
     "version": "0.0.0",
     "description": "Wire-level vocabulary of docs/EVM-COMPAT.md: addresses, transaction admission, EvmCall/EvmSimulate, EvmLog, report tags, built-in ABIs",
     "type": "module",

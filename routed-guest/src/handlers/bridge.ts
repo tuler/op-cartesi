@@ -8,7 +8,7 @@
 // façade address, and the voucher tells the L1 token to move itself from the
 // application contract that has escrowed it since the deposit.
 
-import { bridgeAbi, errorRevert, transferLog, tryDecodeCalldata } from "@cartesi/evm-compat";
+import { bridgeAbi, errorRevert, transferLog, tryDecodeCalldata } from "@op-cartesi/evm";
 import { type Address, encodeFunctionData, parseAbi } from "viem";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
 import type { AdvanceOutcome, Handler, OutputsSink, TxContext } from "../types.ts";

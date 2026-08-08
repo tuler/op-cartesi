@@ -8,7 +8,7 @@ import {
     errorRevert,
     transferLog,
     tryDecodeCalldata,
-} from "@cartesi/evm-compat";
+} from "@op-cartesi/evm";
 import { encodeFunctionResult } from "viem";
 import { InsufficientFunds, type Ledger } from "../ledger.ts";
 import type {

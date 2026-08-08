@@ -1,4 +1,4 @@
-# @cartesi/abis
+# @op-cartesi/abis
 
 Reference implementation of the ABI drive
 ([docs/ABI-DRIVE-SPEC.md](../../docs/ABI-DRIVE-SPEC.md)): a raw flash drive
@@ -12,12 +12,12 @@ holding the snapshot, learns the machine's interface surface by reading
 drive bytes — no knowledge of the application's implementation required.
 
 ```ts
-import { AbiDrive, KIND_APP } from "@cartesi/abis";
+import { AbiDrive, KIND_APP } from "@op-cartesi/abis";
 
 const drive = await AbiDrive.openOrFormat(store);
 await drive.register(address, KIND_APP, JSON.stringify(abi));
 const entries = await drive.entries(); // { address, kind, abi }[]
 ```
 
-Works over any byte store (`@cartesi/accounts`' `Store`): a device file in
+Works over any byte store (`@op-cartesi/accounts`' `Store`): a device file in
 the guest, memory in tests, machine reads on the host.

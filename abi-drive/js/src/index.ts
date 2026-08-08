@@ -35,7 +35,7 @@
 //   heap at heapOffset: UTF-8 JSON ABI blobs (standard Solidity JSON ABI),
 //   tightly packed in registration order.
 
-import { FileStore, type Store } from "@cartesi/accounts";
+import { FileStore, type Store } from "@op-cartesi/accounts";
 import { type Address, getAddress, toBytes, toHex } from "viem";
 
 export const ABI_DRIVE_MAGIC = "ctsiabis";
