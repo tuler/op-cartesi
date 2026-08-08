@@ -1,52 +1,28 @@
-// The devnet guest: @op-cartesi/app booted with the devnet genesis.
+// @op-cartesi/app: the guest runtime of docs/EVM-COMPAT.md.
 //
-// Everything standard — admission, routing, the built-ins, the drives —
-// lives in the library. What remains here is what is genuinely this
-// application's: genesis parameters from the image environment (part of the
-// snapshot, so covered by the genesis state root; defaults match
-// devnet/lib/env.ts), and the app-specific contracts.
+// An application boots a Guest, declares its contracts (address + ABI +
+// callbacks), and runs — the library owns admission, dispatch, the outcome
+// model, the journal, the built-ins, and the drives. Application state is
+// plain RAM the application owns outright.
 
-import { Guest } from "@op-cartesi/app";
-import { getAddress, parseAbi } from "viem";
-
-const CHAIN_ID = BigInt(process.env.CHAIN_ID ?? "901");
-const OWNER = getAddress(process.env.OWNER ?? "0x90F79bf6EB2c4f870365E785982E1f101E93b906");
-
-async function main(): Promise<void> {
-    const guest = await Guest.boot({ chainId: CHAIN_ID, owner: OWNER });
-
-    // The devnet's one application contract: a counter — the smallest honest
-    // demonstration of the fall-through. An address outside every reserved
-    // namespace, ABI-driven dispatch, and state that is simply a variable:
-    // RAM belongs to the application, is machine state like any other, and
-    // does not roll back (EVM-COMPAT §10a). Recorded in the ABI drive, so
-    // `cast call` and viem can discover and speak to it from the snapshot
-    // alone.
-    const counterAbi = parseAbi([
-        "function increment()",
-        "function count() view returns (uint256)",
-    ]);
-    let count = 0n;
-    await guest.contract({
-        address: "0xc0de000000000000000000000000000000000001",
-        abi: counterAbi,
-        transactions: {
-            increment: () => {
-                count += 1n;
-            },
-        },
-        views: {
-            count: () => count,
-        },
-    });
-
-    await guest.run();
-}
-
-main().catch((e) => {
-    // An escaped error would halt the machine, and a halted machine is a
-    // halted chain. run() only rejects when finish itself fails, i.e. the
-    // rollup device is gone — nothing left to do but say so.
-    console.error(e);
-    process.exit(1);
-});
+export type {
+    ContractSpec,
+    TransactionCallbacks,
+    TransactionEnv,
+    ViewCallbacks,
+    ViewEnv,
+} from "./contract.ts";
+export { contractHandler, Fail, Revert } from "./contract.ts";
+export type { GuestOptions } from "./guest.ts";
+export { Guest } from "./guest.ts";
+export type { ResolvedFacade, TokenMetadata } from "./ledger.ts";
+export {
+    AccountsDriveError,
+    DEVNET_DRIVE_CONFIG,
+    InsufficientFunds,
+    Journal,
+    Ledger,
+} from "./ledger.ts";
+export type { AdvanceResult, InspectResult, RouterConfig } from "./router.ts";
+export { Router } from "./router.ts";
+export type { Handler } from "./types.ts";

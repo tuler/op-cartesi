@@ -10,7 +10,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// EvmCall is the inspect envelope of the routed-guest standard
+// EvmCall is the inspect envelope of the routed guest standard
 // (docs/EVM-COMPAT.md §7): an eth_call reaches the guest as
 //
 //	EvmCall(uint256 chainId, address from, address to, uint256 value, bytes data)

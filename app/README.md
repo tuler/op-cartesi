@@ -1,66 +1,74 @@
-# app: the devnet guest
+# @op-cartesi/app
 
-The devnet's application, and deliberately small: it boots
-[`@op-cartesi/app`](../routed-guest) with the devnet genesis
-(`CHAIN_ID`, `OWNER` from the image environment) and registers the one
-app-specific contract — a counter at `0xc0de…01`, the smallest honest
-demonstration of the standard's fall-through: an ABI, callbacks, and state
-that is simply a variable, because application RAM belongs to the
-application (EVM-COMPAT §10a).
+The guest runtime of [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md): the router
+with its admission rules and outcome model, the journaled ledger over the
+accounts drive, the built-in handlers (ERC-20 façades, bridge, config,
+registry, `L1Block`, portal receiver), and the **application API** — a
+contract is an address, an ABI, and callbacks:
 
-Everything standard lives in the workspace libraries:
+```ts
+import { Fail, Guest, Revert } from "@op-cartesi/app";
+import { parseAbi } from "viem";
 
-- [`@op-cartesi/app`](../routed-guest) — the runtime: router,
-  admission, the outcome model, the journaled ledger, the built-in
-  handlers, and the application API (`guest.contract({ address, abi,
-  transactions, views })`).
-- [`@op-cartesi/evm`](../evm-compat/js) — the wire-level vocabulary:
-  addresses, transaction parsing, `EvmCall`/`EvmSimulate`, `EvmLog`, report
-  tags, and the built-in ABIs. Host tooling (devnet scripts, tests) imports
-  from here.
-- [`@op-cartesi/abis`](../abi-drive/js) — the ABI drive
-  ([docs/ABI-DRIVE-SPEC.md](../docs/ABI-DRIVE-SPEC.md)): the machine's own
-  record of the contracts it serves. With the accounts drive
-  ([docs/ACCOUNTS-DRIVE-SPEC.md](../docs/ACCOUNTS-DRIVE-SPEC.md)) naming the
-  tokens, a stored snapshot describes its interface surface with no
-  knowledge of the application.
-- [`@op-cartesi/accounts`](../accounts-drive/js) — the accounts drive itself.
+const guest = await Guest.boot({ chainId: 901n, owner });
 
-## Build and run
+let count = 0n; // application state is a variable — see below
 
-```sh
-bun install        # once, at the repo root (bun workspace)
-bun run typecheck
-bun run build      # esbuild bundle (dist/index.js)
+await guest.contract({
+    address: "0xc0de000000000000000000000000000000000001",
+    abi: parseAbi([
+        "function transfer(address to, uint256 value)",
+        "function count() view returns (uint256)",
+    ]),
+    transactions: {
+        // ABI parameters are the callback's own, fully typed; the
+        // environment rides last (declare fewer parameters to ignore it).
+        transfer: async (to, value, { tx, ledger, out }) => {
+            /* throw new Revert("reason") to revert with data; any other
+               exception reverts with its message — the EVM's own rule */
+        },
+    },
+    views: {
+        count: () => count, // plain values; the library ABI-encodes
+    },
+});
 
-cartesi build      # @cartesi/cli 2.0 alpha → snapshot under .cartesi/image
+await guest.run();
 ```
 
-The runtime's tests live with the runtime (`routed-guest`, `abi-drive/js`):
-`bun run test` at the repo root runs them all.
+## State, and the two ways to fail
 
-`cartesi.toml` declares three drives: root, the accounts drive (raw, 1 MiB)
-and the abi drive (raw, 256 KiB) — both unmounted, formatted by the guest at
-first boot before the first yield, and handed to the app user with
-`user = "dapp"` (cartesi-init runs the entrypoint unprivileged). It also
-pins `machine.ram_image` to a machine-emulator-0.21.0-compatible kernel
-installed on the host (the macOS homebrew path; adjust for your OS) until
-the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are
-Dockerfile `ENV`, which `cartesi build` passes into the machine; defaults
-match `devnet/lib/env.ts`.
+An application's state is **plain RAM that it owns**. It is machine state,
+covered by the state root and as deterministic as anything else in the
+machine, but the journal does not reach it: on REVERT the ledger rolls
+back and your variables do not. (REJECT and `eth_call` need no help — the
+sequencer runs each input, and every query, on a machine fork it throws
+away.)
 
-`@deroll/cmio` is not a dependency of this app: it belongs to
-[`@op-cartesi/app`](../routed-guest), which is what actually drives the CMIO
-loop. `stage.mts` still stages its native addon next to the bundle — esbuild
-cannot inline a `.node` — but it finds it by following the dependency graph
-(this app → the runtime → the addon), so the layout bun's isolated linker
-produces is never assumed.
+That gives one rule, and it is the whole programming model:
 
-## Not here yet
+> A callback that has written nothing of its own throws **`Revert`**. One
+> that has already written throws **`Fail`**.
 
-The rest of EVM-COMPAT §11's shim half: `EvmLog` receipt decoding.
-(Discovery is done — `eth_getCode` answers the `0xEFC751<kind>` markers so
-wallets see routed addresses as contracts, and `cartesi_getContracts`
-serves the full surface with ABIs; `bun devnet/contracts.ts` prints it.)
-The CLI also auto-places flash drives — the shim discovers both drives by
-label rather than assuming fixed starts.
+`Revert` rolls the ledger back and drops the outputs. `Fail` keeps the
+ledger and the outputs and reports the error alongside them, which is the
+honest outcome once your own state has moved. Both charge the sender's
+nonce and fee, and **neither can reject the input** — nothing an
+application throws rolls the machine back, drive refusals included, so a
+buggy contract costs its sender a transaction instead of giving them a
+free retry.
+
+Order a callback so every fallible step comes before its first write and
+you stay in `Revert` territory, which is the safer half. That is easy here
+in a way it is not in the EVM: one input is one handler is one function
+body, with no cross-contract call that can revert underneath you.
+
+Dispatch is ABI-driven: calldata decodes against the registered ABI and the
+function's `stateMutability` decides which side may run it. Every registered
+contract — built-ins included — is recorded in the **ABI drive**
+([docs/ABI-DRIVE-SPEC.md](../docs/ABI-DRIVE-SPEC.md)) at boot, before the
+first yield, so a stored snapshot describes its own interface surface: the
+accounts drive names the tokens, the ABI drive names the contracts.
+
+Registration is a boot-time act (between `boot()` and `run()`): the manifest
+is fixed at snapshot build — there is no dynamic deploy.

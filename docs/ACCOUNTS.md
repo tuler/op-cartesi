@@ -431,7 +431,7 @@ matters — a page with any record in it is hashed as a page however many
 of its bytes are zero, and zero runs cost almost nothing in a stored
 image.
 
-The devnet guest is a sparse-profile app in miniature — the routed `app` today,
+The devnet guest is a sparse-profile app in miniature — the routed `demo` today,
 exactly as the Lua bank app before it: the ledger keyed `token ‖ account`
 with the zero address for ether, ether in the account record, tokens in
 the sparse table.

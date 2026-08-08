@@ -1,27 +1,34 @@
 {
-    "name": "app",
+    "name": "@op-cartesi/app",
     "version": "0.0.0",
-    "description": "The devnet guest: @op-cartesi/app booted with the devnet genesis, plus the app-specific contracts",
+    "description": "The routed guest runtime of docs/EVM-COMPAT.md: router, journaled ledger, built-in handlers, and the ABI-driven application API, on @deroll/cmio",
     "type": "module",
+    "exports": {
+        ".": "./src/index.ts",
+        "./package.json": "./package.json"
+    },
     "dependencies": {
-        "@op-cartesi/app": "workspace:*",
+        "@op-cartesi/abis": "workspace:*",
+        "@op-cartesi/accounts": "workspace:*",
+        "@op-cartesi/evm": "workspace:*",
+        "@deroll/cmio": "alpha",
         "viem": "^2.55.10"
     },
     "devDependencies": {
         "@types/node": "^26.1.2",
-        "esbuild": "^0.28.1",
-        "typescript": "^7.0.2"
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10"
     },
     "scripts": {
-        "build": "node esbuild.mts",
-        "clean": "rm -rf node_modules && rm -rf dist",
+        "test": "vitest run",
         "typecheck": "tsc --noEmit"
     },
     "keywords": [
         "cartesi",
+        "op-cartesi",
         "deroll"
     ],
     "trustedDependencies": [
-        "esbuild"
+        "@deroll/cmio"
     ]
 }
