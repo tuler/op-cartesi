@@ -6,9 +6,12 @@
 //
 // --allow-non-finalized because anvil has no beacon chain to finalize
 // anything, so a proposer that waited for finality would never propose.
+//
+// The txmgr settings below are the same correction: its defaults are written
+// for a 12-second L1 with reorgs, and this one has neither. See txmgrArgs.
 
 import { addresses, stack } from "../lib/env.ts";
-import { addressing, runOp } from "../lib/optools.ts";
+import { addressing, runOp, txmgrArgs } from "../lib/optools.ts";
 import { die, procInit, waitForPort, waitReady } from "../lib/proc.ts";
 
 procInit("op-proposer");
@@ -31,6 +34,7 @@ await runOp("op-proposer", "op-proposer", stack.proposerRpcPort, [
     "--poll-interval=4s",
     "--allow-non-finalized",
     "--wait-node-sync",
+    ...txmgrArgs(),
     `--rpc.addr=${net.bindAddr}`,
     `--rpc.port=${stack.proposerRpcPort}`,
 ]);

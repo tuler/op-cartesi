@@ -6,7 +6,7 @@
 // devnet deliberately runs without one.
 
 import { addresses, portOf, stack } from "../lib/env.ts";
-import { addressing, runOp } from "../lib/optools.ts";
+import { addressing, runOp, txmgrArgs } from "../lib/optools.ts";
 import { procInit, waitForPort } from "../lib/proc.ts";
 
 procInit("op-batcher");
@@ -22,8 +22,8 @@ await runOp("op-batcher", "op-batcher", stack.batcherRpcPort, [
     "--data-availability-type=calldata",
     "--sub-safety-margin=4",
     "--poll-interval=2s",
-    "--num-confirmations=1",
     "--max-channel-duration=2",
+    ...txmgrArgs(),
     `--rpc.addr=${a.bindAddr}`,
     `--rpc.port=${stack.batcherRpcPort}`,
 ]);

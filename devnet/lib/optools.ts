@@ -115,6 +115,36 @@ export function addressing(): Addressing {
     };
 }
 
+/** The txmgr settings every OP tool that sends L1 transactions needs here.
+ *
+ * op-service's transaction manager is tuned for a 12-second L1 that reorgs:
+ * it waits `--txmgr.receipt-query-interval` (12s) before it so much as looks
+ * for the receipt, and calls a transaction confirmed only `--num-confirmations`
+ * (10) blocks deep. Anvil mines every `L1_BLOCK_TIME` seconds and never
+ * reorgs, so both numbers are wrong by an order of magnitude — and wrong in a
+ * way that is not merely slow. While txmgr believes a transaction is still
+ * unmined, a 12-second rebroadcast timer re-publishes it verbatim; against
+ * anvil that timer always fires first, so every proposal is sent twice and
+ * anvil rejects the second copy:
+ *
+ *     Error: Transaction rejected: nonce too low
+ *
+ * Nothing is lost when that happens — txmgr reads the rejection as proof the
+ * nonce already landed and moves on, at debug level — but the L1 pane is where
+ * you watch the batcher and the proposer work, and a rejection per transaction
+ * is not what working looks like. Polling at the block time means the receipt
+ * is seen a block after it is written, long before anything rebroadcasts.
+ *
+ * Rebroadcast itself is left on: it is the only thing that recovers a
+ * transaction anvil dropped, and with the receipt seen in time it never fires.
+ */
+export function txmgrArgs(): string[] {
+    return [
+        "--num-confirmations=1",
+        `--txmgr.receipt-query-interval=${Math.max(1, stack.l1BlockTime)}s`,
+    ];
+}
+
 const images: Record<string, string> = {
     "op-node": stack.opNodeImage,
     "op-batcher": stack.opBatcherImage,
