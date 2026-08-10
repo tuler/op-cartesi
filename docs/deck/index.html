@@ -1,0 +1,1092 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>op-cartesi — project deck</title>
+<style>
+/* ------------------------------------------------------------------ *
+ * Tokens. Light is the complete palette on bare :root; dark redefines
+ * only the values, twice — once for the un-stamped OS-preference state,
+ * once for an explicit toggle.
+ * ------------------------------------------------------------------ */
+:root {
+    --bg:        #e9edec;
+    --surface:   #fbfcfb;
+    --surface-2: #dfe6e4;
+    --ink:       #14201f;
+    --ink-2:     #4a5957;
+    --ink-3:     #74827f;
+    --rule:      #c6d1ce;
+    --rule-soft: #d7e0dd;
+
+    /* Semantic, not decorative: teal is the Cartesi/machine side of every
+       diagram, oxide is the OP/Ethereum side. */
+    --teal:      #0e5c60;
+    --teal-soft: #d3e5e4;
+    --oxide:     #a8451a;
+    --oxide-soft:#f0ddd2;
+
+    --code-bg:   #f3f6f5;
+    --kw:        #8a3d86;
+    --str:       #0e5c60;
+    --com:       #7b8a87;
+    --num:       #a8451a;
+
+    --shadow: 0 1px 2px rgba(20, 32, 31, .05), 0 12px 32px -18px rgba(20, 32, 31, .35);
+
+    --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif, serif;
+    --font-body: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --bg:        #0d1413;
+        --surface:   #141d1c;
+        --surface-2: #1c2726;
+        --ink:       #e4ebe9;
+        --ink-2:     #9db0ac;
+        --ink-3:     #6f807d;
+        --rule:      #27332f;
+        --rule-soft: #1e2a28;
+
+        --teal:      #5ec8bd;
+        --teal-soft: #12312f;
+        --oxide:     #e08a5c;
+        --oxide-soft:#33211a;
+
+        --code-bg:   #101817;
+        --kw:        #c99bc6;
+        --str:       #5ec8bd;
+        --com:       #6f807d;
+        --num:       #e08a5c;
+
+        --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 14px 34px -20px rgba(0, 0, 0, .8);
+    }
+}
+
+:root[data-theme="dark"] {
+    --bg:        #0d1413;
+    --surface:   #141d1c;
+    --surface-2: #1c2726;
+    --ink:       #e4ebe9;
+    --ink-2:     #9db0ac;
+    --ink-3:     #6f807d;
+    --rule:      #27332f;
+    --rule-soft: #1e2a28;
+
+    --teal:      #5ec8bd;
+    --teal-soft: #12312f;
+    --oxide:     #e08a5c;
+    --oxide-soft:#33211a;
+
+    --code-bg:   #101817;
+    --kw:        #c99bc6;
+    --str:       #5ec8bd;
+    --com:       #6f807d;
+    --num:       #e08a5c;
+
+    --shadow: 0 1px 2px rgba(0, 0, 0, .4), 0 14px 34px -20px rgba(0, 0, 0, .8);
+}
+
+/* ------------------------------------------------------------------ *
+ * Frame
+ * ------------------------------------------------------------------ */
+* { box-sizing: border-box; }
+
+html {
+    scroll-snap-type: y mandatory;
+    scroll-behavior: smooth;
+    -webkit-text-size-adjust: 100%;
+}
+@media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    * { animation: none !important; transition: none !important; }
+}
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-body);
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+.slide {
+    scroll-snap-align: start;
+    scroll-snap-stop: always;
+    min-height: 100vh;
+    min-height: 100svh;
+    padding: clamp(2rem, 5vh, 4rem) clamp(1.25rem, 5vw, 5rem) clamp(3rem, 6vh, 4.5rem);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: clamp(1.25rem, 2.5vh, 2rem);
+    position: relative;
+    border-bottom: 1px solid var(--rule-soft);
+}
+
+.inner {
+    width: 100%;
+    max-width: 1180px;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: clamp(1rem, 2.2vh, 1.75rem);
+}
+
+/* Two-column body: argument left, figure right. */
+.cols {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr);
+    gap: clamp(1.5rem, 3.5vw, 3.25rem);
+    align-items: start;
+}
+.cols.wide-right { grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.3fr); }
+.cols.even { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) {
+    .cols, .cols.wide-right, .cols.even { grid-template-columns: minmax(0, 1fr); }
+}
+
+.stack {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+    min-width: 0;
+}
+.stack.tight { gap: .6rem; }
+
+/* ------------------------------------------------------------------ *
+ * Type
+ * ------------------------------------------------------------------ */
+.eyebrow {
+    font-family: var(--font-mono);
+    font-size: .715rem;
+    letter-spacing: .15em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    display: flex;
+    align-items: center;
+    gap: .7rem;
+}
+.eyebrow::after {
+    content: "";
+    flex: 1;
+    height: 1px;
+    background: var(--rule);
+}
+
+h1 {
+    font-family: var(--font-display);
+    font-size: clamp(2.9rem, 7.5vw, 5.4rem);
+    line-height: 1.02;
+    letter-spacing: -.02em;
+    font-weight: 600;
+    margin: 0;
+    text-wrap: balance;
+}
+h2 {
+    font-family: var(--font-display);
+    font-size: clamp(1.85rem, 3.7vw, 2.85rem);
+    line-height: 1.1;
+    letter-spacing: -.015em;
+    font-weight: 600;
+    margin: 0;
+    text-wrap: balance;
+}
+h3 {
+    font-family: var(--font-mono);
+    font-size: .74rem;
+    letter-spacing: .13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 600;
+    margin: 0;
+}
+
+.lead {
+    font-size: clamp(1.02rem, 1.35vw, 1.2rem);
+    color: var(--ink-2);
+    max-width: 62ch;
+    margin: 0;
+    text-wrap: pretty;
+}
+p { margin: 0; max-width: 64ch; text-wrap: pretty; }
+.muted { color: var(--ink-2); }
+.small { font-size: .855rem; }
+
+strong { font-weight: 650; color: var(--ink); }
+code, .mono { font-family: var(--font-mono); font-size: .875em; }
+p code, li code, td code, .mono-inline {
+    background: var(--code-bg);
+    border: 1px solid var(--rule-soft);
+    border-radius: 3px;
+    padding: .08em .34em;
+    white-space: nowrap;
+}
+
+.teal { color: var(--teal); }
+.oxide { color: var(--oxide); }
+
+/* ------------------------------------------------------------------ *
+ * Components
+ * ------------------------------------------------------------------ */
+.rule-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+}
+.rule-list > li {
+    padding: .72rem 0;
+    border-top: 1px solid var(--rule-soft);
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: .85rem;
+    align-items: baseline;
+    font-size: .935rem;
+}
+.rule-list > li:last-child { border-bottom: 1px solid var(--rule-soft); }
+.rule-list.dense > li { padding: .47rem 0; font-size: .885rem; }
+.rule-list .tick {
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    color: var(--teal);
+    letter-spacing: .05em;
+}
+.rule-list .tick.pending { color: var(--oxide); }
+.rule-list .k {
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    letter-spacing: .04em;
+    color: var(--ink-3);
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 1.1rem 1.25rem;
+    display: flex;
+    flex-direction: column;
+    gap: .5rem;
+    box-shadow: var(--shadow);
+    min-width: 0;
+}
+.card.flat { box-shadow: none; background: transparent; }
+.card.accent-teal { border-left: 3px solid var(--teal); }
+.card.accent-oxide { border-left: 3px solid var(--oxide); }
+
+.split-note {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 1rem;
+}
+
+figure { margin: 0; display: flex; flex-direction: column; gap: .6rem; min-width: 0; }
+figcaption {
+    font-family: var(--font-mono);
+    font-size: .74rem;
+    color: var(--ink-3);
+    line-height: 1.55;
+    letter-spacing: .01em;
+}
+
+/* Code */
+.code-wrap {
+    background: var(--code-bg);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    min-width: 0;
+}
+.code-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 1rem;
+    padding: .5rem .9rem;
+    border-bottom: 1px solid var(--rule-soft);
+    background: var(--surface-2);
+    font-family: var(--font-mono);
+    font-size: .715rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+pre {
+    margin: 0;
+    padding: .95rem 1.1rem;
+    overflow-x: auto;
+    font-family: var(--font-mono);
+    font-size: clamp(.7rem, .82vw, .815rem);
+    line-height: 1.62;
+    tab-size: 4;
+}
+pre code { font-size: inherit; background: none; border: 0; padding: 0; white-space: pre; }
+/* The demo listing is the full program, so it sets its own denser measure. */
+.code-wrap.tall pre { font-size: clamp(.66rem, .78vw, .76rem); line-height: 1.4; padding: .7rem 1.05rem; }
+.kw  { color: var(--kw); }
+.str { color: var(--str); }
+.com { color: var(--com); font-style: italic; }
+.num { color: var(--num); }
+.fn  { color: var(--ink); font-weight: 650; }
+
+/* Tables */
+.tbl-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: .855rem; }
+th, td { text-align: left; padding: .55rem .85rem; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+tr:last-child td { border-bottom: 0; }
+th {
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    font-weight: 600;
+    background: var(--surface-2);
+    white-space: nowrap;
+}
+td.addr { font-family: var(--font-mono); font-size: .78rem; white-space: nowrap; color: var(--teal); font-variant-numeric: tabular-nums; }
+
+/* Flow chips */
+.flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: .4rem .5rem;
+}
+.chip {
+    font-family: var(--font-mono);
+    font-size: .755rem;
+    padding: .34rem .6rem;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--surface);
+    white-space: nowrap;
+}
+.chip.t { border-color: var(--teal); color: var(--teal); background: var(--teal-soft); }
+.chip.o { border-color: var(--oxide); color: var(--oxide); background: var(--oxide-soft); }
+.arrow { font-family: var(--font-mono); color: var(--ink-3); font-size: .8rem; }
+
+.branch {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: .35rem .7rem;
+    align-items: center;
+    font-size: .85rem;
+    padding-left: .2rem;
+}
+.branch .bl { font-family: var(--font-mono); color: var(--ink-3); font-size: .78rem; }
+
+/* Adopted / not adopted */
+.ledger { display: grid; gap: .9rem; }
+.ledger .row { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: .8rem; align-items: start; }
+.ledger .sign {
+    font-family: var(--font-mono);
+    font-weight: 700;
+    font-size: .95rem;
+    line-height: 1.5;
+    width: 1.1rem;
+    text-align: center;
+}
+.ledger .plus { color: var(--teal); }
+.ledger .minus { color: var(--oxide); }
+
+/* SVG diagram */
+.diagram { width: 100%; height: auto; display: block; }
+.diagram .box { fill: var(--surface); stroke: var(--rule); stroke-width: 1.25; }
+.diagram .box-t { fill: var(--teal-soft); stroke: var(--teal); stroke-width: 1.5; }
+.diagram .box-o { fill: var(--oxide-soft); stroke: var(--oxide); stroke-width: 1.25; }
+.diagram .sub { fill: var(--bg); stroke: var(--rule-soft); stroke-width: 1; }
+.diagram .lbl { font-family: var(--font-body); font-size: 13px; font-weight: 600; fill: var(--ink); }
+.diagram .lbl-t { fill: var(--teal); }
+.diagram .lbl-o { fill: var(--oxide); }
+.diagram .cap { font-family: var(--font-mono); font-size: 10.5px; fill: var(--ink-3); }
+.diagram .wire { stroke: var(--ink-3); stroke-width: 1.25; fill: none; }
+.diagram .head { fill: var(--ink-3); }
+
+/* Title slide */
+.title-slide { justify-content: center; }
+.title-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .5rem 1.6rem;
+    font-family: var(--font-mono);
+    font-size: .78rem;
+    color: var(--ink-3);
+    letter-spacing: .02em;
+}
+.title-meta b { color: var(--teal); font-weight: 600; }
+.hairline { height: 1px; background: var(--rule); border: 0; margin: 0; }
+
+/* Chrome: progress rail + counter */
+.rail {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: transparent;
+    z-index: 20;
+    pointer-events: none;
+}
+.rail > i {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: var(--teal);
+    transition: width .18s linear;
+}
+.counter {
+    position: fixed;
+    right: clamp(.7rem, 2.2vw, 1.6rem);
+    bottom: clamp(.7rem, 2.2vh, 1.4rem);
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    color: var(--ink-3);
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    border: 1px solid var(--rule-soft);
+    border-radius: 999px;
+    padding: .3rem .7rem;
+    backdrop-filter: blur(6px);
+    font-variant-numeric: tabular-nums;
+}
+.counter button {
+    all: unset;
+    cursor: pointer;
+    padding: 0 .3rem;
+    border-radius: 3px;
+    color: var(--ink-2);
+    line-height: 1;
+}
+.counter button:hover { color: var(--teal); }
+.counter button:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; }
+
+.slide-no {
+    position: absolute;
+    top: clamp(1.1rem, 3vh, 2.1rem);
+    right: clamp(1.25rem, 5vw, 5rem);
+    font-family: var(--font-mono);
+    font-size: .72rem;
+    color: var(--ink-3);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: .08em;
+}
+
+a { color: var(--teal); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<div class="rail" aria-hidden="true"><i id="rail-fill"></i></div>
+
+<nav class="counter" aria-label="Slide navigation">
+    <button type="button" id="prev" aria-label="Previous slide">&#8593;</button>
+    <span><span id="cur">1</span>&thinsp;/&thinsp;10</span>
+    <button type="button" id="next" aria-label="Next slide">&#8595;</button>
+</nav>
+
+<!-- ============================================================ 01 -->
+<section class="slide title-slide" id="s1">
+    <div class="inner">
+        <p class="eyebrow">op-cartesi &nbsp;·&nbsp; project deck</p>
+        <h1>An OP Stack L2 whose execution layer is a Cartesi Machine.</h1>
+        <p class="lead">
+            Deterministic RISC-V Linux where op-geth normally sits. The machine's Merkle
+            root hash <em>is</em> the L2 state root — and everything else, from sequencing
+            to bridging, is the OP Stack unmodified.
+        </p>
+        <hr class="hairline" />
+        <div class="title-meta">
+            <span>Roadmap steps <b>1&ndash;3 done</b></span>
+            <span>Devnet round-trips through <b>L1</b></span>
+            <span>Withdrawals settle via <b>Cartesi vouchers</b></span>
+            <span>Disputes: <b>not yet</b></span>
+        </div>
+    </div>
+    <span class="slide-no">01</span>
+</section>
+
+<!-- ============================================================ 02 -->
+<section class="slide" id="s2">
+    <div class="inner">
+        <p class="eyebrow">What it is</p>
+        <h2>One component is new. Everything else is reuse.</h2>
+        <div class="cols">
+            <div class="stack">
+                <p class="lead">
+                    The core of the project is an <strong>Engine API shim</strong>: a service
+                    that speaks the Engine API and a minimal <code>eth_*</code> subset to
+                    <code>op-node</code> on one side, and drives a Cartesi Machine through its
+                    CMIO input/output protocol on the other.
+                </p>
+                <p class="muted small">
+                    Sequencing, data availability, derivation, L1 bridging and dispute tooling
+                    are reused wholesale. Stock <code>op-node</code> v1.19.3 and
+                    <code>op-batcher</code> v1.16.11 handle these blocks without a patch,
+                    because the blocks are Ethereum-shaped and the transactions are ordinary
+                    signed Ethereum transactions.
+                </p>
+            </div>
+            <div class="stack">
+                <div class="card accent-teal">
+                    <h3>What the machine replaces</h3>
+                    <ul class="rule-list">
+                        <li><span class="k">state root</span><span>the machine's Merkle root hash</span></li>
+                        <li><span class="k">execution</span><span>RISC-V Linux, deterministic, Merkleized memory</span></li>
+                        <li><span class="k">gas used</span><span>machine mcycles</span></li>
+                        <li><span class="k">withdrawals root</span><span>the Cartesi outputs commitment</span></li>
+                        <li><span class="k">genesis</span><span>a snapshot parked at its first input yield</span></li>
+                    </ul>
+                </div>
+                <p class="small muted">
+                    The node never boots a machine. A snapshot arrives already parked, so
+                    genesis is the snapshot's own root hash — which means the genesis state
+                    root commits to the application itself.
+                </p>
+            </div>
+        </div>
+    </div>
+    <span class="slide-no">02</span>
+</section>
+
+<!-- ============================================================ 03 -->
+<section class="slide" id="s3">
+    <div class="inner">
+        <p class="eyebrow">Architecture</p>
+        <h2>Where the shim sits</h2>
+        <figure>
+            <svg class="diagram" viewBox="0 0 1010 250" role="img" aria-label="L1 connects to the OP Stack node layer, which connects over the Engine API to op-cartesi, which drives a Cartesi Machine over CMIO.">
+                <defs>
+                    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                        <path d="M 0 0 L 10 5 L 0 10 z" class="head" />
+                    </marker>
+                </defs>
+
+                <!-- L1 -->
+                <rect class="box-o" x="6" y="56" width="170" height="130" rx="5" />
+                <text class="lbl lbl-o" x="91" y="88" text-anchor="middle">L1 (anvil)</text>
+                <text class="cap" x="91" y="112" text-anchor="middle">OptimismPortal</text>
+                <text class="cap" x="91" y="130" text-anchor="middle">DisputeGameFactory</text>
+                <text class="cap" x="91" y="148" text-anchor="middle">OPEther/ERC20Portal</text>
+                <text class="cap" x="91" y="166" text-anchor="middle">OutputExecutor</text>
+
+                <line class="wire" x1="182" y1="121" x2="248" y2="121" marker-end="url(#a)" marker-start="url(#a)" />
+                <text class="cap" x="215" y="109" text-anchor="middle">batches</text>
+                <text class="cap" x="215" y="141" text-anchor="middle">derivation</text>
+
+                <!-- OP stack -->
+                <rect class="box-o" x="254" y="30" width="210" height="182" rx="5" />
+                <text class="lbl lbl-o" x="359" y="54" text-anchor="middle">OP Stack, unmodified</text>
+                <rect class="sub" x="272" y="68" width="174" height="30" rx="4" />
+                <text class="cap" x="359" y="87" text-anchor="middle">op-node</text>
+                <rect class="sub" x="272" y="104" width="174" height="30" rx="4" />
+                <text class="cap" x="359" y="123" text-anchor="middle">op-batcher</text>
+                <rect class="sub" x="272" y="140" width="174" height="30" rx="4" />
+                <text class="cap" x="359" y="159" text-anchor="middle">op-proposer</text>
+                <text class="cap" x="359" y="195" text-anchor="middle">reads the rollup.json we emit</text>
+
+                <line class="wire" x1="470" y1="121" x2="544" y2="121" marker-end="url(#a)" marker-start="url(#a)" />
+                <text class="cap" x="507" y="109" text-anchor="middle">Engine API</text>
+                <text class="cap" x="507" y="141" text-anchor="middle">+ eth_*</text>
+
+                <!-- shim -->
+                <rect class="box-t" x="550" y="40" width="216" height="162" rx="5" />
+                <text class="lbl lbl-t" x="658" y="64" text-anchor="middle">op-cartesi</text>
+                <text class="cap" x="658" y="82" text-anchor="middle">the one new component</text>
+                <rect class="sub" x="568" y="94" width="180" height="28" rx="4" />
+                <text class="cap" x="658" y="112" text-anchor="middle">engineapi &#183; JWT, RPC</text>
+                <rect class="sub" x="568" y="128" width="180" height="28" rx="4" />
+                <text class="cap" x="658" y="146" text-anchor="middle">chain &#183; blocks + outputs</text>
+                <rect class="sub" x="568" y="162" width="180" height="28" rx="4" />
+                <text class="cap" x="658" y="180" text-anchor="middle">machine &#183; fork, snapshot</text>
+
+                <line class="wire" x1="772" y1="121" x2="838" y2="121" marker-end="url(#a)" marker-start="url(#a)" />
+                <text class="cap" x="805" y="109" text-anchor="middle">CMIO</text>
+
+                <!-- machine -->
+                <rect class="box-t" x="844" y="56" width="160" height="130" rx="5" />
+                <text class="lbl lbl-t" x="924" y="88" text-anchor="middle">Cartesi Machine</text>
+                <text class="cap" x="924" y="112" text-anchor="middle">RISC-V &#183; Linux</text>
+                <text class="cap" x="924" y="130" text-anchor="middle">Merkleized memory</text>
+                <text class="cap" x="924" y="148" text-anchor="middle">accounts + abi drives</text>
+                <text class="cap" x="924" y="166" text-anchor="middle">the application</text>
+            </svg>
+            <figcaption>
+                Sequencing loop: engine_forkchoiceUpdatedV3 (OP payload attributes) &rarr; engine_getPayloadV4 &rarr; engine_newPayloadV4.<br />
+                Every fork through Isthmus is active from genesis &mdash; pre-Isthmus, op-node derives the output root from an MPT proof this chain cannot produce.
+            </figcaption>
+        </figure>
+        <div class="card flat">
+            <p class="small muted">
+                Each transaction reaches the machine wrapped in Cartesi's <code>EvmAdvance</code>
+                envelope &mdash; <span class="mono">EvmAdvance(chainId, appContract, msgSender, blockNumber, blockTimestamp, prevRandao, index, payload)</span>
+                &mdash; with the raw transaction as the payload. Every field is derivable from the
+                block header, so a verifier reconstructs the exact context the builder used.
+            </p>
+        </div>
+    </div>
+    <span class="slide-no">03</span>
+</section>
+
+<!-- ============================================================ 04 -->
+<section class="slide" id="s4">
+    <div class="inner">
+        <p class="eyebrow">Status &nbsp;·&nbsp; verified on a live devnet</p>
+        <h2>What actually runs today</h2>
+        <div class="cols even">
+            <ul class="rule-list dense">
+                <li><span class="tick">DONE</span><span><strong>Sequences and batches.</strong> op-node sequences L2 blocks continuously; op-batcher posts them to L1 as calldata batches.</span></li>
+                <li><span class="tick">DONE</span><span><strong>Re-derived by an independent verifier.</strong> A second node &mdash; its own machine, engine and op-node, sequencing nothing &mdash; rebuilds the chain from L1 alone and reaches byte-identical blocks: same hash, same machine root, same outputs commitment.</span></li>
+                <li><span class="tick">DONE</span><span><strong>Proposes to L1.</strong> op-proposer submits <span class="mono">keccak(0&#179;&#178; &#8214; stateRoot &#8214; withdrawalsRoot &#8214; blockHash)</span> to a DisputeGameFactory &mdash; a root claim committing to both the machine root and the Cartesi outputs tree.</span></li>
+                <li><span class="tick">DONE</span><span><strong>Withdrawals move real assets.</strong> Ether and ERC-20, out through Cartesi vouchers proven against those proposals. A voucher is single-use.</span></li>
+                <li><span class="tick">DONE</span><span><strong>Survives a restart.</strong> Blocks in pebble via go-ethereum's rawdb, the machine checkpointed with <code>cm_store</code>; a 39-block run came back in about a second, re-checking each replayed block against its stored roots.</span></li>
+                <li><span class="tick pending">NEXT</span><span><strong>Disputing a proposal.</strong> No fault-proof VM can execute a Cartesi Machine, so proposals use the permissioned game type. That is the remaining trust assumption &mdash; and it is a constructor argument on the validator, not a hidden one.</span></li>
+            </ul>
+            <div class="stack">
+                <div class="card accent-teal">
+                    <h3>Compatibility has teeth</h3>
+                    <p class="small">
+                        The <code>integration</code> suite drives the shim over authenticated HTTP
+                        using op-node's <em>own</em> types, and checks each block with
+                        <span class="mono">ExecutionPayloadEnvelope.CheckBlockHash</span>, which
+                        independently reconstructs the header. A deliberate one-field mutation to
+                        header construction is caught there.
+                    </p>
+                </div>
+                <div class="card accent-teal">
+                    <h3>On a real machine, not a mock</h3>
+                    <p class="small">
+                        The JSON-RPC client is pinned to machine-emulator 0.21.0 by probing a
+                        running server. Tests load a real machine, build blocks on it, re-execute
+                        them as a verifier, and check that the outputs commitment the host computes
+                        is byte-identical to the one the guest maintains.
+                    </p>
+                </div>
+                <div class="card accent-oxide">
+                    <h3>The whole stack is one screen</h3>
+                    <p class="small">
+                        <code>./devnet/start-devnet.ts</code> brings up anvil, the machine,
+                        op-cartesi and op-node &mdash; each in its own mprocs pane, including the
+                        machine's console and the guest's per-transaction reports. Stop and restart
+                        a piece at a time.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-no">04</span>
+</section>
+
+<!-- ============================================================ 05 -->
+<section class="slide" id="s5">
+    <div class="inner">
+        <p class="eyebrow">EVM compatibility &nbsp;·&nbsp; the thesis</p>
+        <h2>Adopt the EVM's interface. Refuse its execution model.</h2>
+        <div class="cols wide-right">
+            <div class="stack">
+                <div class="ledger">
+                    <div class="row">
+                        <span class="sign plus">+</span>
+                        <div>
+                            <strong>Adopted wholesale.</strong>
+                            <p class="small muted">Transaction types (legacy, 2930, 1559, deposit), ABI calldata, routing on the <code>to</code> address, events, revert data, <code>eth_call</code>.</p>
+                        </div>
+                    </div>
+                    <div class="row">
+                        <span class="sign minus">&minus;</span>
+                        <div>
+                            <strong>Deliberately not.</strong>
+                            <p class="small muted">Bytecode, gas-per-opcode, storage tries, dynamic deployment. The handler table is fixed when the snapshot is built &mdash; it is machine state, covered by the genesis root.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="card accent-teal">
+                    <p style="font-family: var(--font-display); font-size: 1.28rem; line-height: 1.3;">
+                        &ldquo;The app id is the address.&rdquo;
+                    </p>
+                    <p class="small muted">
+                        Every transaction was already a signed Ethereum transaction with a
+                        <code>to</code> field. Before this, the guest ignored it and every payload
+                        went to the zero address in a private dialect no wallet could speak.
+                    </p>
+                </div>
+            </div>
+            <figure>
+                <div class="card">
+                    <h3>The router pipeline</h3>
+                    <div class="flow">
+                        <span class="chip">raw tx</span><span class="arrow">&rarr;</span>
+                        <span class="chip">parse</span><span class="arrow">&rarr;</span>
+                        <span class="chip o">enforce &#183; sig, chain id, nonce, fee</span><span class="arrow">&rarr;</span>
+                        <span class="chip o">value transfer &#183; the drive</span><span class="arrow">&rarr;</span>
+                        <span class="chip t">dispatch on <b>to</b></span>
+                    </div>
+                    <div class="branch">
+                        <span class="bl">&#9492;&#9472; handler registered</span>
+                        <span class="small muted">&rarr; handler runs &rarr; <span class="mono">ACCEPT</span> | <span class="mono">REVERT</span> | <span class="mono">FAIL</span></span>
+                        <span class="bl">&#9492;&#9472; no handler</span>
+                        <span class="small muted">&rarr; plain transfer; calldata ignored &mdash; Ethereum's own rule</span>
+                    </div>
+                </div>
+                <figcaption>
+                    ERC-20 "contracts" are fa&ccedil;ades over the accounts drive. Native token transfers are
+                    ledger operations. "Smart contracts" are handlers &mdash; free to do anything Linux on
+                    RISC-V allows.
+                </figcaption>
+            </figure>
+        </div>
+    </div>
+    <span class="slide-no">05</span>
+</section>
+
+<!-- ============================================================ 06 -->
+<section class="slide" id="s6">
+    <div class="inner">
+        <p class="eyebrow">Demo &nbsp;·&nbsp; demo/src/index.ts</p>
+        <h2>The whole devnet application</h2>
+        <div class="cols wide-right">
+            <div class="stack">
+                <p class="lead">
+                    Not an excerpt &mdash; this is the entire application. Everything standard
+                    (admission, routing, the built-ins, the drives) lives in
+                    <code>@op-cartesi/app</code>. What is left is what is genuinely
+                    <em>this</em> application's.
+                </p>
+                <ul class="rule-list">
+                    <li><span class="k">address</span><span>Outside every reserved namespace, so it is the app's own.</span></li>
+                    <li><span class="k">abi</span><span>Dispatch is ABI-driven; <code>stateMutability</code> decides which side may run it.</span></li>
+                    <li><span class="k">state</span><span>A variable. Application RAM belongs to the application.</span></li>
+                    <li><span class="k">genesis</span><span><code>CHAIN_ID</code> and <code>OWNER</code> come from the image environment, so they are part of the snapshot &mdash; covered by the genesis state root.</span></li>
+                </ul>
+                <p class="small muted">
+                    Recorded in the ABI drive at boot, before the first yield &mdash; so
+                    <code>cast call</code> and viem can discover and speak to this contract from
+                    the stored snapshot alone.
+                </p>
+            </div>
+            <div class="code-wrap tall">
+                <div class="code-head"><span>demo/src/index.ts</span><span>TypeScript</span></div>
+<pre><code><span class="kw">import</span> { Application } <span class="kw">from</span> <span class="str">"@op-cartesi/app"</span>;
+<span class="kw">import</span> { getAddress, parseAbi } <span class="kw">from</span> <span class="str">"viem"</span>;
+
+<span class="kw">const</span> CHAIN_ID = <span class="fn">BigInt</span>(process.env.CHAIN_ID ?? <span class="str">"901"</span>);
+<span class="kw">const</span> OWNER = <span class="fn">getAddress</span>(process.env.OWNER ?? <span class="str">"0x90F7…b906"</span>);
+
+<span class="kw">async function</span> <span class="fn">main</span>(): <span class="kw">Promise</span>&lt;<span class="kw">void</span>&gt; {
+    <span class="kw">const</span> app = <span class="kw">await</span> Application.<span class="fn">boot</span>({ chainId: CHAIN_ID, owner: OWNER });
+
+    <span class="com">// The devnet's one application contract: a counter — the smallest</span>
+    <span class="com">// honest demonstration of the fall-through. An address outside every</span>
+    <span class="com">// reserved namespace, ABI-driven dispatch, and state that is simply a</span>
+    <span class="com">// variable: RAM belongs to the application, is machine state like any</span>
+    <span class="com">// other, and does not roll back.</span>
+    <span class="kw">const</span> counterAbi = <span class="fn">parseAbi</span>([
+        <span class="str">"function increment()"</span>,
+        <span class="str">"function count() view returns (uint256)"</span>,
+    ]);
+    <span class="kw">let</span> count = <span class="num">0n</span>;
+    <span class="kw">await</span> app.<span class="fn">contract</span>({
+        address: <span class="str">"0xc0de000000000000000000000000000000000001"</span>,
+        abi: counterAbi,
+        transactions: {
+            increment: () =&gt; {
+                count += <span class="num">1n</span>;
+            },
+        },
+        views: {
+            count: () =&gt; count,
+        },
+    });
+
+    <span class="kw">await</span> app.<span class="fn">run</span>();
+}
+</code></pre>
+            </div>
+        </div>
+    </div>
+    <span class="slide-no">06</span>
+</section>
+
+<!-- ============================================================ 07 -->
+<section class="slide" id="s7">
+    <div class="inner">
+        <p class="eyebrow">The programming model</p>
+        <h2>An address, an ABI, and callbacks</h2>
+        <div class="cols">
+            <div class="stack">
+                <div class="card accent-teal">
+                    <h3>Typed callbacks</h3>
+                    <p class="small">
+                        The ABI function's parameters are the callback's own, fully typed; the
+                        environment (<code>tx</code>, <code>ledger</code>, <code>out</code>) rides
+                        last, and you declare fewer parameters to ignore it. Views return plain
+                        values &mdash; the library ABI-encodes them.
+                    </p>
+                </div>
+                <div class="card accent-teal">
+                    <h3>State is plain RAM you own</h3>
+                    <p class="small">
+                        Machine state, covered by the state root, as deterministic as anything else
+                        in the machine &mdash; but the journal does not reach it. On revert the
+                        ledger rolls back and your variables do not.
+                    </p>
+                </div>
+                <p class="small muted">
+                    Registration is a boot-time act, between <code>boot()</code> and
+                    <code>run()</code>. There is no dynamic deploy: the manifest is fixed at
+                    snapshot build, which is what lets a stored snapshot describe its own
+                    interface surface.
+                </p>
+            </div>
+            <div class="stack">
+                <div class="card accent-oxide">
+                    <h3>The two ways to fail</h3>
+                    <p style="font-family: var(--font-display); font-size: 1.16rem; line-height: 1.35;">
+                        A callback that has written nothing of its own throws <span class="mono teal">Revert</span>.
+                        One that has already written throws <span class="mono oxide">Fail</span>.
+                    </p>
+                    <div class="tbl-wrap" style="margin-top: .4rem;">
+                        <table>
+                            <thead><tr><th>Outcome</th><th>Ledger</th><th>Outputs</th><th>Nonce + fee</th></tr></thead>
+                            <tbody>
+                                <tr><td><code>Revert</code></td><td>rolled back</td><td>dropped</td><td>charged</td></tr>
+                                <tr><td><code>Fail</code></td><td>kept</td><td>kept, error reported</td><td>charged</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="small muted">
+                        Neither can reject the input. Nothing an application throws rolls the
+                        machine back &mdash; so a buggy contract costs its sender a transaction
+                        instead of giving them a free retry.
+                    </p>
+                </div>
+                <p class="small muted">
+                    Order a callback so every fallible step comes before its first write and you
+                    stay in <code>Revert</code> territory. That is easy here in a way it is not in
+                    the EVM: one input is one handler is one function body, with no cross-contract
+                    call that can revert underneath you.
+                </p>
+            </div>
+        </div>
+    </div>
+    <span class="slide-no">07</span>
+</section>
+
+<!-- ============================================================ 08 -->
+<section class="slide" id="s8">
+    <div class="inner">
+        <p class="eyebrow">EVM compatibility &nbsp;·&nbsp; at the tooling boundary</p>
+        <h2>cast, viem and wallets, unmodified</h2>
+        <div class="cols wide-right">
+            <div class="stack tight">
+                <ul class="rule-list dense">
+                    <li><span class="k">eth_call</span><span>Wrapped as <span class="mono">EvmCall(chainId, from, to, value, data)</span> and run as a Cartesi inspect against a <em>discarded machine fork</em>. RETURN becomes the return data; REVERT becomes a standard JSON-RPC revert error with data, so <code>require</code> messages surface verbatim.</span></li>
+                    <li><span class="k">balances</span><span><code>eth_getBalance</code> and <code>eth_getTransactionCount</code> read the accounts-drive record straight out of machine memory. No fork, no execution.</span></li>
+                    <li><span class="k">eth_getCode</span><span>Routed addresses answer <span class="mono">0xEFC751&lt;kind&gt;</span> markers read off the drives, so wallets see them as contracts.</span></li>
+                    <li><span class="k">discovery</span><span><span class="mono">cartesi_getContracts</span> serves the whole interface surface with ABIs &mdash; every recorded contract, every token fa&ccedil;ade with its L1 token &mdash; straight off the machine's drives.</span></li>
+                    <li><span class="k">gas</span><span>Base fee, tips and <code>feeHistory</code> synthesized from headers; <code>eth_estimateGas</code> returns the per-input cycle budget as gas. A plain <code>cast send</code> needs no flags.</span></li>
+                    <li><span class="k">events</span><span>Notices that decode as logs; deposits emit <span class="mono">Transfer(0x0 &rarr; recipient)</span>, the mint convention indexers expect.</span></li>
+                </ul>
+            </div>
+            <figure>
+                <div class="tbl-wrap">
+                    <table>
+                        <thead><tr><th>Address</th><th>Contract</th><th>Role</th></tr></thead>
+                        <tbody>
+                            <tr><td class="addr">0x4200…0015</td><td>L1Block</td><td>The one adopted OP predeploy &mdash; the attributes deposit already arrives here every block, and guests gain L1 context they otherwise cannot learn.</td></tr>
+                            <tr><td class="addr">0xC75100…0000</td><td>Registry</td><td><code>handlerAt</code>, <code>handlers</code>, <code>l2TokenOf</code> — discovery, and the source for <code>eth_getCode</code>.</td></tr>
+                            <tr><td class="addr">0xC75100…0001</td><td>Bridge</td><td><code>withdrawEther(address)</code> payable; <code>withdrawERC20(address,address,uint256)</code>.</td></tr>
+                            <tr><td class="addr">0xC75100…0002</td><td>Config</td><td>Owner-gated: <code>setFee</code>, <code>registerPortal</code>, <code>registerToken</code>.</td></tr>
+                            <tr><td class="addr">keccak-derived</td><td>ERC-20 fa&ccedil;ade</td><td><span class="mono">last20(keccak256("ctsi.erc20.v1" &#8214; l1Token))</span> — computable from the L1 token address alone, before the first deposit.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+                <figcaption>
+                    The reservation is the full pattern, not the brand bytes: 0xC751 followed by a 16-byte zero run.
+                    Grinding an address into that shape is ~2&#185;&#8308;&#8308;. Prefix-matching alone is 2&#185;&#8310; &mdash; so
+                    nothing treats a bare 0xC751 as authority. Authority is exact membership in the manifest.
+                </figcaption>
+            </figure>
+        </div>
+    </div>
+    <span class="slide-no">08</span>
+</section>
+
+<!-- ============================================================ 09 -->
+<section class="slide" id="s9">
+    <div class="inner">
+        <p class="eyebrow">Bridging</p>
+        <h2>In through OP's portal, out through Cartesi's vouchers</h2>
+        <div class="cols even">
+            <div class="stack">
+                <div class="card accent-oxide">
+                    <h3>Deposit</h3>
+                    <div class="flow">
+                        <span class="chip o">OptimismPortal.depositTransaction</span><span class="arrow">&rarr;</span>
+                        <span class="chip o">op-node derivation</span><span class="arrow">&rarr;</span>
+                        <span class="chip t">EvmAdvance</span><span class="arrow">&rarr;</span>
+                        <span class="chip t">guest credits the accounts drive</span>
+                    </div>
+                    <p class="small muted">
+                        <span class="mono">OPERC20Portal</span> is Cartesi's <code>ERC20Portal</code>
+                        with one line changed: where Cartesi calls <code>inputBox.addInput</code>, it
+                        calls <code>OptimismPortal.depositTransaction</code>. The payload is still
+                        <code>InputEncoding</code>'s, so a guest written for Cartesi Rollups parses
+                        it byte for byte.
+                    </p>
+                </div>
+                <div class="card accent-teal">
+                    <h3>Withdraw</h3>
+                    <div class="flow">
+                        <span class="chip t">guest emits a Voucher</span><span class="arrow">&rarr;</span>
+                        <span class="chip t">outputs tree</span><span class="arrow">&rarr;</span>
+                        <span class="chip t">withdrawalsRoot</span><span class="arrow">&rarr;</span>
+                        <span class="chip o">op-proposer root claim</span><span class="arrow">&rarr;</span>
+                        <span class="chip o">proof + execute on L1</span>
+                    </div>
+                    <p class="small muted">
+                        Height-63 tree, leaves <span class="mono">keccak256(output)</span>, cumulative
+                        over the chain &mdash; matching Cartesi's on-chain tree exactly, so existing
+                        voucher proofs verify unchanged.
+                    </p>
+                </div>
+            </div>
+            <div class="stack">
+                <div class="card">
+                    <h3>The bridge is one small contract</h3>
+                    <p class="small">
+                        A Cartesi <code>Application</code> asks one question before executing an
+                        output &mdash; <span class="mono">isOutputsMerkleRootValid</span> &mdash; and an
+                        OP proposal already commits to the answer, because op-node's root claim is
+                        <span class="mono">keccak(version &#8214; stateRoot &#8214; withdrawalsRoot &#8214; blockHash)</span>
+                        and <code>withdrawalsRoot</code> <em>is</em> the Cartesi outputs root.
+                        <span class="mono">OPOutputsMerkleRootValidator</span> opens that preimage on
+                        chain; verification uses Cartesi's own <code>LibOutputValidityProof</code>,
+                        pulled in as a dependency rather than reimplemented.
+                    </p>
+                </div>
+                <div class="card accent-oxide">
+                    <h3>Why not L1StandardBridge</h3>
+                    <p class="small">
+                        It escrows in itself and releases only against the MPT proof this chain
+                        cannot produce &mdash; tokens sent through it would be stuck. Nothing forks
+                        <code>OptimismPortal</code> either; the withdrawal path sidesteps it rather
+                        than replacing it.
+                    </p>
+                </div>
+                <p class="small muted">
+                    Portals are authenticated by address, but they do not exist when the snapshot
+                    that <em>is</em> L2 genesis is built. So the guest carries one owner address,
+                    chosen before anything is deployed and substituted in at snapshot time &mdash;
+                    and learns the portal addresses from that owner as an ordinary deposit.
+                    Trusting any sender instead would let any contract mint claims against tokens
+                    the application really holds.
+                </p>
+            </div>
+        </div>
+    </div>
+    <span class="slide-no">09</span>
+</section>
+
+<!-- ============================================================ 10 -->
+<section class="slide" id="s10">
+    <div class="inner">
+        <p class="eyebrow">What's next</p>
+        <h2>A provable definition of the computation</h2>
+        <div class="cols">
+            <div class="stack">
+                <p class="lead">
+                    Step 4 is the prerequisite for <em>either</em> settlement track, and it is a
+                    design decision before it is a coding task. Two questions:
+                </p>
+                <ul class="rule-list">
+                    <li><span class="k">which stf?</span><span>Dave specifies a fixed 2&#8310;&#8312; meta-cycle span per input, indexed as (input, big-arch cycle, uarch cycle). This chain's rule is <code>MaxCyclesPerInput</code> with a rejection branch. Those are different functions, and ours is the one that would have to move.</span></li>
+                    <li><span class="k">who checks an input?</span><span>Cartesi hashes every input on L1 in an <code>InputBox</code>; OP runs derivation inside the fault-proof VM. This chain has neither &mdash; its inputs are op-node's derivation output from compressed channel frames plus L1 logs, which no contract can re-derive. Mirroring inputs to L1 or proving derivation are the two honest options.</span></li>
+                    <li><span class="k">and</span><span>The outputs Merkle root has to move <em>inside</em> the machine's memory: a referee cannot dispute a value that is not in the proven state. Today the shim computes it in Go.</span></li>
+                </ul>
+            </div>
+            <div class="stack">
+                <div class="split-note">
+                    <div class="card accent-teal">
+                        <h3>Track A &nbsp;·&nbsp; Dave / PRT</h3>
+                        <p class="small"><code>DaveConsensus</code> already implements <code>IOutputsMerkleRootValidator</code> &mdash; the interface <code>OutputExecutor</code> calls today &mdash; so pointing the executor at Dave is smaller than wrapping Dave as an OP <code>IDisputeGame</code>.</p>
+                    </div>
+                    <div class="card accent-teal">
+                        <h3>Track B &nbsp;·&nbsp; ZK</h3>
+                        <p class="small">Benchmark the freestanding emulator inside a RISC Zero guest, get a cost per block, go/no-go. Worth doing early: the number may redirect the choice, and it commits to nothing.</p>
+                    </div>
+                </div>
+                <div class="card flat">
+                    <h3>Gaps that are not about proofs</h3>
+                    <ul class="rule-list">
+                        <li><span class="tick pending">&#183;</span><span><strong>Inputs are free.</strong> No fee market and no metering charged to anyone &mdash; the substantive question the rest hangs off.</span></li>
+                        <li><span class="tick pending">&#183;</span><span><strong>P2P is disabled</strong>, so unsafe-head gossip and its reorg paths are untested.</span></li>
+                        <li><span class="tick pending">&#183;</span><span><strong>Blob DA is unexercised</strong> &mdash; batches are calldata only.</span></li>
+                        <li><span class="tick pending">&#183;</span><span><strong>No snapshot sync</strong>, and proof construction walks the chain.</span></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+    <span class="slide-no">10</span>
+</section>
+
+<script>
+(function () {
+    var slides = Array.prototype.slice.call(document.querySelectorAll(".slide"));
+    var cur = document.getElementById("cur");
+    var fill = document.getElementById("rail-fill");
+    var index = 0;
+
+    function go(i) {
+        index = Math.max(0, Math.min(slides.length - 1, i));
+        slides[index].scrollIntoView({ block: "start" });
+    }
+
+    document.getElementById("prev").addEventListener("click", function () { go(index - 1); });
+    document.getElementById("next").addEventListener("click", function () { go(index + 1); });
+
+    document.addEventListener("keydown", function (e) {
+        if (e.metaKey || e.ctrlKey || e.altKey) return;
+        var k = e.key;
+        if (k === "ArrowDown" || k === "ArrowRight" || k === "PageDown" || k === " ") {
+            e.preventDefault(); go(index + 1);
+        } else if (k === "ArrowUp" || k === "ArrowLeft" || k === "PageUp") {
+            e.preventDefault(); go(index - 1);
+        } else if (k === "Home") {
+            e.preventDefault(); go(0);
+        } else if (k === "End") {
+            e.preventDefault(); go(slides.length - 1);
+        }
+    });
+
+    // Track the slide occupying the middle of the viewport.
+    if ("IntersectionObserver" in window) {
+        var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (entry) {
+                if (!entry.isIntersecting) return;
+                index = slides.indexOf(entry.target);
+                cur.textContent = String(index + 1);
+                fill.style.width = ((index + 1) / slides.length * 100) + "%";
+            });
+        }, { threshold: 0.5 });
+        slides.forEach(function (s) { io.observe(s); });
+    }
+    fill.style.width = (1 / slides.length * 100) + "%";
+}());
+</script>
+
+</body>
+</html>
