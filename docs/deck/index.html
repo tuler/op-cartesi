@@ -1030,8 +1030,8 @@ a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-ra
                 </div>
                 <div class="card flat">
                     <h3>Gaps that are not about proofs</h3>
-                    <ul class="rule-list">
-                        <li><span class="tick pending">&#183;</span><span><strong>Inputs are free.</strong> No fee market and no metering charged to anyone &mdash; the substantive question the rest hangs off.</span></li>
+                    <ul class="rule-list dense">
+                        <li><span class="tick pending">&#183;</span><span><strong>No fee market.</strong> A flat per-transaction fee is built and charged &mdash; owner-settable, checked at admission, debited on accept, revert and fail alike. What is missing is pricing that tracks work: it does not scale with cycles, and the devnet leaves it at zero. L1 deposits stay exempt; they paid L1 gas already.</span></li>
                         <li><span class="tick pending">&#183;</span><span><strong>P2P is disabled</strong>, so unsafe-head gossip and its reorg paths are untested.</span></li>
                         <li><span class="tick pending">&#183;</span><span><strong>Blob DA is unexercised</strong> &mdash; batches are calldata only.</span></li>
                         <li><span class="tick pending">&#183;</span><span><strong>No snapshot sync</strong>, and proof construction walks the chain.</span></li>
