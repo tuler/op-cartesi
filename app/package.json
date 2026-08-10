@@ -1,7 +1,7 @@
 {
     "name": "@op-cartesi/app",
     "version": "0.0.0",
-    "description": "The routed guest runtime of docs/EVM-COMPAT.md: router, journaled ledger, built-in handlers, and the ABI-driven application API, on @deroll/cmio",
+    "description": "The routed application runtime of docs/EVM-COMPAT.md: router, journaled ledger, built-in handlers, and the ABI-driven application API, on @deroll/cmio",
     "type": "module",
     "exports": {
         ".": "./src/index.ts",

@@ -1,4 +1,4 @@
-// The devnet guest: @op-cartesi/app booted with the devnet genesis.
+// The devnet application: @op-cartesi/app booted with the devnet genesis.
 //
 // Everything standard — admission, routing, the built-ins, the drives —
 // lives in the library. What remains here is what is genuinely this
@@ -6,14 +6,14 @@
 // snapshot, so covered by the genesis state root; defaults match
 // devnet/lib/env.ts), and the app-specific contracts.
 
-import { Guest } from "@op-cartesi/app";
+import { Application } from "@op-cartesi/app";
 import { getAddress, parseAbi } from "viem";
 
 const CHAIN_ID = BigInt(process.env.CHAIN_ID ?? "901");
 const OWNER = getAddress(process.env.OWNER ?? "0x90F79bf6EB2c4f870365E785982E1f101E93b906");
 
 async function main(): Promise<void> {
-    const guest = await Guest.boot({ chainId: CHAIN_ID, owner: OWNER });
+    const app = await Application.boot({ chainId: CHAIN_ID, owner: OWNER });
 
     // The devnet's one application contract: a counter — the smallest honest
     // demonstration of the fall-through. An address outside every reserved
@@ -27,7 +27,7 @@ async function main(): Promise<void> {
         "function count() view returns (uint256)",
     ]);
     let count = 0n;
-    await guest.contract({
+    await app.contract({
         address: "0xc0de000000000000000000000000000000000001",
         abi: counterAbi,
         transactions: {
@@ -40,7 +40,7 @@ async function main(): Promise<void> {
         },
     });
 
-    await guest.run();
+    await app.run();
 }
 
 main().catch((e) => {

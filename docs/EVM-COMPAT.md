@@ -673,9 +673,9 @@ boots it and declares each contract as **an address, an ABI, and
 callbacks**:
 
 ```ts
-const guest = await Guest.boot({ chainId, owner });
-await guest.contract({ address, abi, transactions: {...}, views: {...} });
-await guest.run();
+const app = await Application.boot({ chainId, owner });
+await app.contract({ address, abi, transactions: {...}, views: {...} });
+await app.run();
 ```
 
 The library owns everything the standard specifies — admission, dispatch,

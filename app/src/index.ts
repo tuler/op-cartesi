@@ -1,10 +1,12 @@
-// @op-cartesi/app: the guest runtime of docs/EVM-COMPAT.md.
+// @op-cartesi/app: the application runtime of docs/EVM-COMPAT.md.
 //
-// An application boots a Guest, declares its contracts (address + ABI +
-// callbacks), and runs — the library owns admission, dispatch, the outcome
-// model, the journal, the built-ins, and the drives. Application state is
-// plain RAM the application owns outright.
+// Boot an Application, declare its contracts (address + ABI + callbacks), and
+// run — the library owns admission, dispatch, the outcome model, the journal,
+// the built-ins, and the drives. Application state is plain RAM the
+// application owns outright.
 
+export type { ApplicationOptions } from "./application.ts";
+export { Application } from "./application.ts";
 export type {
     ContractSpec,
     TransactionCallbacks,
@@ -13,8 +15,6 @@ export type {
     ViewEnv,
 } from "./contract.ts";
 export { contractHandler, Fail, Revert } from "./contract.ts";
-export type { GuestOptions } from "./guest.ts";
-export { Guest } from "./guest.ts";
 export type { ResolvedFacade, TokenMetadata } from "./ledger.ts";
 export {
     AccountsDriveError,

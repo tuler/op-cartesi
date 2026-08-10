@@ -115,7 +115,7 @@ export type ViewCallbacks<abi extends Abi> = {
 
 export interface ContractSpec<abi extends Abi> {
     /** The routed address — the application's choice, outside the reserved
-     * namespaces (Guest.contract enforces that). */
+     * namespaces (Application.contract enforces that). */
     address: Address;
     /** Standard JSON ABI (viem's Abi). Recorded verbatim in the ABI drive. */
     abi: abi;
@@ -154,7 +154,7 @@ function argsOf(decoded: { args?: unknown }): readonly unknown[] {
     return Array.isArray(decoded.args) ? decoded.args : [];
 }
 
-/** Builds the router Handler for a contract spec. Guest.contract is the
+/** Builds the router Handler for a contract spec. Application.contract is the
  * normal entry; this is exported for tests and custom wiring. */
 export function contractHandler<const abi extends Abi>(spec: ContractSpec<abi>): Handler {
     // Mapped types carry an implicit index signature, so the callback maps
