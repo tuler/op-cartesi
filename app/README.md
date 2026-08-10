@@ -1,20 +1,20 @@
 # @op-cartesi/app
 
-The guest runtime of [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md): the router
-with its admission rules and outcome model, the journaled ledger over the
-accounts drive, the built-in handlers (ERC-20 façades, bridge, config,
+The application runtime of [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md): the
+router with its admission rules and outcome model, the journaled ledger over
+the accounts drive, the built-in handlers (ERC-20 façades, bridge, config,
 registry, `L1Block`, portal receiver), and the **application API** — a
 contract is an address, an ABI, and callbacks:
 
 ```ts
-import { Fail, Guest, Revert } from "@op-cartesi/app";
+import { Application, Fail, Revert } from "@op-cartesi/app";
 import { parseAbi } from "viem";
 
-const guest = await Guest.boot({ chainId: 901n, owner });
+const app = await Application.boot({ chainId: 901n, owner });
 
 let count = 0n; // application state is a variable — see below
 
-await guest.contract({
+await app.contract({
     address: "0xc0de000000000000000000000000000000000001",
     abi: parseAbi([
         "function transfer(address to, uint256 value)",
@@ -33,7 +33,7 @@ await guest.contract({
     },
 });
 
-await guest.run();
+await app.run();
 ```
 
 ## State, and the two ways to fail

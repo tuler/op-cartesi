@@ -1,4 +1,4 @@
-# demo: the devnet guest
+# demo: the devnet application
 
 The devnet's application, and deliberately small: it boots
 [`@op-cartesi/app`](../app) with the devnet genesis (`CHAIN_ID`, `OWNER` from
@@ -11,7 +11,7 @@ Everything standard lives in the workspace libraries:
 
 - [`@op-cartesi/app`](../app) — the runtime: router, admission, the outcome
   model, the journaled ledger, the built-in handlers, and the application
-  API (`guest.contract({ address, abi, transactions, views })`).
+  API (`app.contract({ address, abi, transactions, views })`).
 - [`@op-cartesi/evm`](../evm-compat/js) — the wire-level vocabulary:
   addresses, transaction parsing, `EvmCall`/`EvmSimulate`, `EvmLog`, report
   tags, and the built-in ABIs. Host tooling (devnet scripts, tests) imports
@@ -38,9 +38,9 @@ The runtime's tests live with the runtime (`app`, `abi-drive/js`):
 `bun run test` at the repo root runs them all.
 
 `cartesi.toml` declares three drives: root, the accounts drive (raw, 1 MiB)
-and the abi drive (raw, 256 KiB) — both unmounted, formatted by the guest at
-first boot before the first yield, and handed to the app user with
-`user = "dapp"` (cartesi-init runs the entrypoint unprivileged). It also
+and the abi drive (raw, 256 KiB) — both unmounted, formatted by the
+application at first boot before the first yield, and handed to the app user
+with `user = "dapp"` (cartesi-init runs the entrypoint unprivileged). It also
 pins `machine.ram_image` to a machine-emulator-0.21.0-compatible kernel
 installed on the host (the macOS homebrew path; adjust for your OS) until
 the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are

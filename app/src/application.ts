@@ -1,6 +1,6 @@
-// The guest: boots the drives, owns the router, registers application
-// contracts, records the manifest into the ABI drive, and runs the rollup
-// loop on @deroll/cmio.
+// The application: boots the drives, owns the router, registers the
+// application's contracts, records the manifest into the ABI drive, and runs
+// the rollup loop on @deroll/cmio.
 //
 // Boot order matters (EVM-COMPAT §10): both drives are opened — and on
 // first boot formatted and populated — before the first yield, so the
@@ -28,7 +28,7 @@ import { type ContractSpec, contractHandler } from "./contract.ts";
 import { Ledger } from "./ledger.ts";
 import { Router } from "./router.ts";
 
-export interface GuestOptions {
+export interface ApplicationOptions {
     chainId: bigint;
     owner: Address;
     /** Accounts drive device; defaults to $ACCOUNTS_DRIVE, then /dev/pmem1. */
@@ -54,7 +54,7 @@ function inSystemNamespace(address: Address): boolean {
     return /^0xc751(00){16}[0-9a-f]{4}$/.test(address.toLowerCase());
 }
 
-export class Guest {
+export class Application {
     private constructor(
         readonly ledger: Ledger,
         readonly router: Router,
@@ -64,28 +64,28 @@ export class Guest {
     private static async assemble(
         ledger: Ledger,
         abiStore: Store,
-        opts: GuestOptions,
-    ): Promise<Guest> {
+        opts: ApplicationOptions,
+    ): Promise<Application> {
         const abiDrive = await AbiDrive.openOrFormat(abiStore, opts.abiDriveConfig);
         const router = new Router(ledger, { chainId: opts.chainId, owner: opts.owner });
         for (const b of BUILTINS) {
             await abiDrive.register(b.address, KIND_SYSTEM, JSON.stringify(b.abi));
         }
-        return new Guest(ledger, router, abiDrive);
+        return new Application(ledger, router, abiDrive);
     }
 
-    /** Boot from the machine's flash devices — the guest entry point. */
-    static async boot(opts: GuestOptions): Promise<Guest> {
+    /** Boot from the machine's flash devices — the application entry point. */
+    static async boot(opts: ApplicationOptions): Promise<Application> {
         const accountsDevice = opts.accountsDevice ?? process.env.ACCOUNTS_DRIVE ?? "/dev/pmem1";
         const abiDevice = opts.abiDevice ?? process.env.ABI_DRIVE ?? "/dev/pmem2";
         const ledger = await Ledger.openDevice(accountsDevice);
-        return Guest.assemble(ledger, await FileStore.open(abiDevice), opts);
+        return Application.assemble(ledger, await FileStore.open(abiDevice), opts);
     }
 
     /** Boot over in-memory stores — the test entry point. */
-    static async inMemory(opts: GuestOptions, abiDriveLength = 262144): Promise<Guest> {
+    static async inMemory(opts: ApplicationOptions, abiDriveLength = 262144): Promise<Application> {
         const ledger = await Ledger.inMemory();
-        return Guest.assemble(ledger, new MemStore(abiDriveLength), opts);
+        return Application.assemble(ledger, new MemStore(abiDriveLength), opts);
     }
 
     /** Registers an application contract: routes its address, and records
