@@ -61,27 +61,17 @@ Provable outputs accumulate into a Merkle tree that matches Cartesi's on-chain t
 
 Receipts are synthesized from those records: outputs become logs, acceptance becomes `status`, mcycles become `gasUsed`. Each log carries the output's chain-wide index as a topic next to the raw bytes, which is exactly what a Cartesi output validity proof needs — so the receipt is enough to build the L1 proof later. Nothing on the OP Stack's critical path reads L2 receipts, so `receiptsRoot` and the header bloom stay empty and the encoding is not frozen into consensus while it is still moving.
 
-Reports are not logs, because a log implies provability. They are served through the `cartesi_` namespace instead, alongside the output indices and the outputs commitment.
-
-| Method | Purpose |
-|---|---|
-| `eth_getTransactionReceipt`, `eth_getBlockReceipts` | Standard receipts; outputs appear as logs. |
-| `eth_call` | Runs the machine's read-only inspect against a discarded fork, returning the concatenated reports. |
-| `cartesi_getTransactionEmissions` | Outputs with their chain-wide indices, plus the reports and cycle count. |
-| `cartesi_getOutputsRoot` | The outputs commitment and output count as of a block. |
-| `cartesi_inspect` | Inspect with the reports kept separate. |
-
-The full method list is in [JSON-RPC](#json-rpc).
+Reports are not logs, because a log implies provability. They are served through the `cartesi_` namespace instead, alongside the output indices and the outputs commitment — see [JSON-RPC](#json-rpc) for every method the node serves.
 
 ## JSON-RPC
 
-The node serves two listeners, assembled in `engineapi.NewHandler`. The **engine port** (`127.0.0.1:8551` by default) is what op-node talks to: it carries `engine_*` and is JWT-authenticated when a secret is configured. The **public port** (`127.0.0.1:8545`) carries everything else, unauthenticated. The `eth_`, `cartesi_` and `miner_` namespaces are served on **both** ports — op-node and op-batcher read `eth_*` over the authenticated connection, and `miner_setMaxDASize` is required on the sequencer's L2 endpoint.
+The node serves two listeners, assembled in `engineapi.NewHandler` (addresses under [Development](#development)). Only `engine_*` is exclusive to the engine port, where it is JWT-authenticated when a secret is configured; `eth_`, `cartesi_` and `miner_` are served on **both** — op-node and op-batcher read `eth_*` over the authenticated connection, and `miner_setMaxDASize` is required on the sequencer's L2 endpoint.
 
 This is a deliberately small surface: the methods op-node, op-batcher and op-proposer actually call, the `eth_*` subset ordinary wallets and `cast` need, and a `cartesi_*` namespace for what `eth_*` cannot say faithfully. There are no filter, subscription, log-query, `debug_` or `txpool_` methods, and no `eth_getProof` — this chain has no Ethereum MPT, so `cartesi_getAccountProof` takes its place.
 
 ### `engine_` — the Engine API (engine port only)
 
-This chain is Isthmus from genesis, so only the versions op-node calls for an Isthmus chain are served; there is no pre-Isthmus history for the older versions to describe.
+Only these versions are served, for the reason in [Fork support](#fork-support).
 
 | Method | Purpose |
 |---|---|
@@ -99,7 +89,7 @@ This chain is Isthmus from genesis, so only the versions op-node calls for an Is
 | `eth_getBlockByHash` | A block by hash, with transaction hashes or full transactions. Includes `requestsHash` and `withdrawalsRoot`, which clients that recompute the block hash need. |
 | `eth_getBlockByNumber` | The same by number or by the `latest` / `safe` / `finalized` / `earliest` / `pending` tags. |
 | `eth_sendRawTransaction` | Ingress for signed transactions. There is no public L2 mempool, so the sequencer's RPC is the only way in; the transaction lands in a bounded FIFO the next block drains. |
-| `eth_getTransactionReceipt` | A receipt synthesized from the machine's emissions: provable outputs become logs, acceptance becomes `status`, mcycles become `gasUsed`. Not committed to — the header keeps an empty receipts root and bloom. |
+| `eth_getTransactionReceipt` | The receipt synthesized from what the machine emitted for that transaction — see [Outputs and receipts](#outputs-and-receipts). |
 | `eth_getBlockReceipts` | Every receipt in a block. |
 | `eth_call` | A read-only query: the call travels to the guest as the `EvmCall` envelope and runs as a machine inspect against a fork that is then discarded. A rejected inspect surfaces as the standard revert error (code 3) with the revert bytes, so `require`-style messages reach viem, ethers and `cast` verbatim. |
 | `eth_getBalance` | The account's native balance, read straight out of the guest's accounts drive in machine memory — no fork, no execution. Zero on a machine without an accounts drive (the in-memory mock). |
@@ -112,16 +102,14 @@ This chain is Isthmus from genesis, so only the versions op-node calls for an Is
 
 ### `cartesi_` — the machine's own vocabulary
 
-Reports are diagnostic and explicitly not provable, so they must not be dressed up as logs; and an output's chain-wide index, which every on-chain proof is built from, has no standard receipt field to live in. That is what this namespace is for.
-
 | Method | Purpose |
 |---|---|
-| `cartesi_getTransactionEmissions` | Everything the machine produced for one transaction: provable outputs with their chain-wide indices, the reports, the cycle count, and whether the input was accepted. Reports of a rejected input are kept — they usually explain the failure — while its outputs are dropped, because a rejection rolls the machine back. |
-| `cartesi_getOutputsRoot` | The cumulative outputs commitment as of a block, plus the number of outputs it holds. This is the block's `withdrawalsRoot`, and what op-node folds into the L2 output root. |
-| `cartesi_getOutputProof` | A Cartesi output validity proof — the raw output, its index and its sibling hashes — against a chosen block's commitment, which is what `Application.executeOutput` needs to execute a voucher on L1. The tree is cumulative, so an output is provable against any block from the one that emitted it onward; the block tag defaults to the safe head, since proposals follow the safe chain. |
+| `cartesi_getTransactionEmissions` | Everything the machine produced for one transaction: provable outputs with their chain-wide indices, the reports, the cycle count, and whether the input was accepted. |
+| `cartesi_getOutputsRoot` | The outputs commitment as of a block, plus the number of outputs the tree holds — which bounds the valid output indices there. |
+| `cartesi_getOutputProof` | A Cartesi output validity proof — the raw output, its index and its sibling hashes — against a chosen block's commitment, which is what `Application.executeOutput` needs to execute a voucher on L1. Since the tree is cumulative an output is provable against any block from the one that emitted it onward; the block tag defaults to the safe head, since proposals follow the safe chain. |
 | `cartesi_inspect` | A read-only query against the machine state at a block, with the reports returned individually and the payload passed through untouched both ways. `eth_call` is the enveloped, EVM-shaped view of the same mechanism. |
 | `cartesi_getContracts` | Every address the guest routes as of a block — system built-ins and application contracts with their recorded ABIs, plus the token façades the accounts drive's registry implies — read off the parked machine's drives with no execution. Lets a client answer "what does this chain speak?" from drive bytes alone. |
-| `cartesi_getAccountProof` | This chain's `eth_getProof` analogue: the account record (or its provable absence) with machine Merkle proofs against the block's `stateRoot`, plus the drive geometry and probe walk a verifier needs to replay the lookup itself. Requires a machine that can prove — against the in-memory mock it errors rather than serving proofless "proofs". |
+| `cartesi_getAccountProof` | The account record (or its provable absence) with machine Merkle proofs against the block's `stateRoot`, plus the drive geometry and probe walk a verifier needs to replay the lookup itself. Requires a machine that can prove — against the in-memory mock it errors rather than serving proofless "proofs". |
 
 ### `miner_`
 
