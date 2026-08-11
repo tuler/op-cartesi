@@ -71,6 +71,64 @@ Reports are not logs, because a log implies provability. They are served through
 | `cartesi_getOutputsRoot` | The outputs commitment and output count as of a block. |
 | `cartesi_inspect` | Inspect with the reports kept separate. |
 
+The full method list is in [JSON-RPC](#json-rpc).
+
+## JSON-RPC
+
+The node serves two listeners, assembled in `engineapi.NewHandler`. The **engine port** (`127.0.0.1:8551` by default) is what op-node talks to: it carries `engine_*` and is JWT-authenticated when a secret is configured. The **public port** (`127.0.0.1:8545`) carries everything else, unauthenticated. The `eth_`, `cartesi_` and `miner_` namespaces are served on **both** ports — op-node and op-batcher read `eth_*` over the authenticated connection, and `miner_setMaxDASize` is required on the sequencer's L2 endpoint.
+
+This is a deliberately small surface: the methods op-node, op-batcher and op-proposer actually call, the `eth_*` subset ordinary wallets and `cast` need, and a `cartesi_*` namespace for what `eth_*` cannot say faithfully. There are no filter, subscription, log-query, `debug_` or `txpool_` methods, and no `eth_getProof` — this chain has no Ethereum MPT, so `cartesi_getAccountProof` takes its place.
+
+### `engine_` — the Engine API (engine port only)
+
+This chain is Isthmus from genesis, so only the versions op-node calls for an Isthmus chain are served; there is no pre-Isthmus history for the older versions to describe.
+
+| Method | Purpose |
+|---|---|
+| `engine_forkchoiceUpdatedV3` | Sets the unsafe/safe/finalized heads and, when op-node passes OP payload attributes, starts building the next block — returning the payload id. Reorgs are honoured by rewinding to a machine snapshot. |
+| `engine_getPayloadV4` | Returns the execution payload built for a payload id. The header's `stateRoot` is the machine's Merkle root and its `withdrawalsRoot` is the Cartesi outputs commitment. |
+| `engine_newPayloadV4` | Imports a payload from a peer or from L1 derivation and re-executes it on the machine, rejecting it unless the resulting root and outputs commitment match what the payload claims. This is the verifier path. Blob hashes and execution requests must be empty; a missing `parentBeaconBlockRoot` is rejected rather than defaulted. |
+
+### `eth_` — the subset op-node, op-batcher and wallets read
+
+| Method | Purpose |
+|---|---|
+| `eth_chainId` | The configured L2 chain id. |
+| `eth_blockNumber` | Height of the unsafe head. |
+| `eth_syncing` | Always `false`: the node has no sync protocol — it follows op-node, or replays from a checkpoint at startup. |
+| `eth_getBlockByHash` | A block by hash, with transaction hashes or full transactions. Includes `requestsHash` and `withdrawalsRoot`, which clients that recompute the block hash need. |
+| `eth_getBlockByNumber` | The same by number or by the `latest` / `safe` / `finalized` / `earliest` / `pending` tags. |
+| `eth_sendRawTransaction` | Ingress for signed transactions. There is no public L2 mempool, so the sequencer's RPC is the only way in; the transaction lands in a bounded FIFO the next block drains. |
+| `eth_getTransactionReceipt` | A receipt synthesized from the machine's emissions: provable outputs become logs, acceptance becomes `status`, mcycles become `gasUsed`. Not committed to — the header keeps an empty receipts root and bloom. |
+| `eth_getBlockReceipts` | Every receipt in a block. |
+| `eth_call` | A read-only query: the call travels to the guest as the `EvmCall` envelope and runs as a machine inspect against a fork that is then discarded. A rejected inspect surfaces as the standard revert error (code 3) with the revert bytes, so `require`-style messages reach viem, ethers and `cast` verbatim. |
+| `eth_getBalance` | The account's native balance, read straight out of the guest's accounts drive in machine memory — no fork, no execution. Zero on a machine without an accounts drive (the in-memory mock). |
+| `eth_getTransactionCount` | The account's nonce from the same record. Since the guest enforces and bumps it, this is the next nonce a wallet must sign with. |
+| `eth_getCode` | A four-byte marker for every address the guest routes (system built-ins, application contracts from the ABI drive, token façades from the accounts drive registry) and `0x` for everything else. There is no EVM bytecode to serve; the marker is what lets tooling treat a routed address as a contract. |
+| `eth_gasPrice` | The head header's base fee plus a zero tip. There is no fee market — every header carries the same constant — so this is the honest suggestion, and it is what lets `cast send` run without gas flags. |
+| `eth_maxPriorityFeePerGas` | Zero: nothing charges or pays priority fees, so a tip would buy no ordering. |
+| `eth_feeHistory` | Fee history synthesized from headers, in geth's exact wire shape: the constant base fee, `gasUsedRatio` from metered mcycles over the block limit, and an all-zero reward matrix when percentiles are requested. Clamped to the blocks this node still holds. |
+| `eth_estimateGas` | The per-input cycle budget (`MaxCyclesPerInput` at `CyclesPerGas`) expressed as gas — an upper bound the chain will accept, not a measurement of this call. A true estimate needs a signature-less simulation entry point in the guest; see [Known gaps](#known-gaps-that-are-not-about-proofs). |
+
+### `cartesi_` — the machine's own vocabulary
+
+Reports are diagnostic and explicitly not provable, so they must not be dressed up as logs; and an output's chain-wide index, which every on-chain proof is built from, has no standard receipt field to live in. That is what this namespace is for.
+
+| Method | Purpose |
+|---|---|
+| `cartesi_getTransactionEmissions` | Everything the machine produced for one transaction: provable outputs with their chain-wide indices, the reports, the cycle count, and whether the input was accepted. Reports of a rejected input are kept — they usually explain the failure — while its outputs are dropped, because a rejection rolls the machine back. |
+| `cartesi_getOutputsRoot` | The cumulative outputs commitment as of a block, plus the number of outputs it holds. This is the block's `withdrawalsRoot`, and what op-node folds into the L2 output root. |
+| `cartesi_getOutputProof` | A Cartesi output validity proof — the raw output, its index and its sibling hashes — against a chosen block's commitment, which is what `Application.executeOutput` needs to execute a voucher on L1. The tree is cumulative, so an output is provable against any block from the one that emitted it onward; the block tag defaults to the safe head, since proposals follow the safe chain. |
+| `cartesi_inspect` | A read-only query against the machine state at a block, with the reports returned individually and the payload passed through untouched both ways. `eth_call` is the enveloped, EVM-shaped view of the same mechanism. |
+| `cartesi_getContracts` | Every address the guest routes as of a block — system built-ins and application contracts with their recorded ABIs, plus the token façades the accounts drive's registry implies — read off the parked machine's drives with no execution. Lets a client answer "what does this chain speak?" from drive bytes alone. |
+| `cartesi_getAccountProof` | This chain's `eth_getProof` analogue: the account record (or its provable absence) with machine Merkle proofs against the block's `stateRoot`, plus the drive geometry and probe walk a verifier needs to replay the lookup itself. Requires a machine that can prove — against the in-memory mock it errors rather than serving proofless "proofs". |
+
+### `miner_`
+
+| Method | Purpose |
+|---|---|
+| `miner_setMaxDASize` | op-batcher's backpressure: when batches back up on L1 it asks the sequencer to build smaller blocks. The limits apply to mempool transactions; deposits are forced by op-node and cannot be shed. op-batcher treats an engine that does not serve this method as fatal, so it is served on both ports. |
+
 ## Layout
 
 | Package | Purpose |
