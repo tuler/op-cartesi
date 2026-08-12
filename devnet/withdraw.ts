@@ -15,9 +15,10 @@
 
 import { BRIDGE_ADDRESS, bridgeAbi } from "@op-cartesi/evm";
 import { encodeFunctionData, getAddress } from "viem";
-import { l1Public, usage } from "./lib/env.ts";
+import { usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 import { executeVoucher } from "./lib/voucher.ts";
+import { l1Public } from "./lib/wallet.ts";
 
 const [toArg, amountArg] = process.argv.slice(2);
 if (!toArg || !amountArg) usage("withdraw.ts <recipient> <wei>");

@@ -18,7 +18,8 @@
 
 import { TAG_APP, TAG_RETURN, TAG_REVERT } from "@op-cartesi/evm";
 import { decodeErrorResult, formatEther, type Hex, hexToBytes, size, slice } from "viem";
-import { config, l2Public } from "./lib/env.ts";
+import { config } from "./lib/env.ts";
+import { l2Public } from "./lib/wallet.ts";
 
 const POLL_MS = Number(process.env.GUEST_LOG_POLL_MS ?? 500);
 // Enough of a report to read; the rest is a scroll away in the RPC.

@@ -21,9 +21,10 @@
 
 import { BRIDGE_ADDRESS, bridgeAbi, l2TokenAddress } from "@op-cartesi/evm";
 import { encodeFunctionData, getAddress, parseAbi } from "viem";
-import { config, l1Public, usage } from "./lib/env.ts";
+import { config, usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 import { executeVoucher } from "./lib/voucher.ts";
+import { l1Public } from "./lib/wallet.ts";
 
 const balanceOfAbi = parseAbi(["function balanceOf(address owner) view returns (uint256)"]);
 

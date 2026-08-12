@@ -15,7 +15,8 @@
 
 import { getAddress, type TransactionReceipt } from "viem";
 import { getL2TransactionHashes } from "viem/op-stack";
-import { config, l1Public, l1Wallet, l2Chain, l2Public, usage } from "./lib/env.ts";
+import { config, usage } from "./lib/env.ts";
+import { l1Public, l1Wallet, l2Chain, l2Public } from "./lib/wallet.ts";
 
 const [toArg, amountArg] = process.argv.slice(2);
 if (!toArg) usage("deposit.ts <recipient address> [wei]");

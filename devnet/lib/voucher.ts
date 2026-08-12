@@ -5,7 +5,8 @@
 // and hand Cartesi's own verifier a proof against it.
 
 import { type Address, type Hex, parseAbi } from "viem";
-import { config, l1Public, l1Wallet, l2Public } from "./env.ts";
+import { config } from "./env.ts";
+import { l1Public, l1Wallet, l2Public } from "./wallet.ts";
 
 const factoryAbi = parseAbi([
     "function gameCount() view returns (uint256)",

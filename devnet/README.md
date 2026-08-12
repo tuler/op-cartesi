@@ -262,6 +262,7 @@ the repo root once), and every file is directly executable:
 | `deposit.ts` `withdraw.ts` `balance.ts` … | the transactional scripts |
 | `guest-log.ts` | the `guest` pane, and a tail for any node |
 | `lib/env.ts` | all configuration |
+| `lib/wallet.ts` | the chains and the viem clients |
 | `lib/proc.ts` `lib/optools.ts` `lib/opcartesi.ts` | running and waiting |
 
 For the transactional half this was always the argument: the Ethereum

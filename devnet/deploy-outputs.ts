@@ -10,8 +10,9 @@ import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type Address, encodeFunctionData, type Hex, parseAbi } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { addresses, asKey, chainParams, config, l1Public, l1Wallet, paths } from "./lib/env.ts";
+import { addresses, chainParams, config, paths } from "./lib/env.ts";
 import { die, must, run, say } from "./lib/proc.ts";
+import { asKey, l1Public, l1Wallet } from "./lib/wallet.ts";
 
 // How long a proposal must stand before its outputs may be executed, and
 // whether its game must have resolved. Zero and false are the permissioned

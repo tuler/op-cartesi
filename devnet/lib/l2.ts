@@ -4,7 +4,8 @@
 // verifies. No --legacy, no invented nonce.
 
 import type { Address, Hex } from "viem";
-import { config, l2Wallet } from "./env.ts";
+import { config } from "./env.ts";
+import { l2Wallet } from "./wallet.ts";
 
 export async function sendL2Tx(tx: {
     to: Address;
