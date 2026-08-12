@@ -18,8 +18,8 @@
 // workspace member; the build's docker context is the repo root).
 
 import { join } from "node:path";
-import { addresses, chainParams, paths, stack } from "./lib/env.ts";
-import { die, must } from "./lib/proc.ts";
+import { addresses, chainParams, paths, stack } from "devnet/env";
+import { die, must } from "devnet/proc";
 
 if (Bun.which("cartesi") === null) {
     die("cartesi is not on PATH; install it with: npm i -g @cartesi/cli@alpha");

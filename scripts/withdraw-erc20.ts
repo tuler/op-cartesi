@@ -2,7 +2,7 @@
 
 // Runs an ERC-20 withdrawal end to end.
 //
-//   bun devnet/withdraw-erc20.ts <recipient> <amount> [l1-token]
+//   bun scripts/withdraw-erc20.ts <recipient> <amount> [l1-token]
 //
 // This targets the routed guest of `app/`: the withdrawal is a call to
 // the bridge predeploy's withdrawERC20, naming the token by its derived L2
@@ -20,11 +20,11 @@
 // tree. See DESIGN §7d.
 
 import { BRIDGE_ADDRESS, bridgeAbi, l2TokenAddress } from "@op-cartesi/evm";
+import { config, usage } from "devnet/env";
+import { l1Public } from "devnet/wallet";
 import { encodeFunctionData, getAddress, parseAbi } from "viem";
-import { config, usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 import { executeVoucher } from "./lib/voucher.ts";
-import { l1Public } from "./lib/wallet.ts";
 
 const balanceOfAbi = parseAbi(["function balanceOf(address owner) view returns (uint256)"]);
 
@@ -35,7 +35,7 @@ const amount = BigInt(amountArg);
 const token = tokenArg ? getAddress(tokenArg) : config.testToken;
 if (!token) {
     console.error(
-        "no token given and no TEST_TOKEN_ADDRESS; run bun devnet/deposit-erc20.ts first",
+        "no token given and no TEST_TOKEN_ADDRESS; run bun scripts/deposit-erc20.ts first",
     );
     process.exit(1);
 }

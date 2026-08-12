@@ -1,14 +1,15 @@
 #!/usr/bin/env bun
+
 // Sends one L2 transaction — the general form of what the old send-l2-tx.sh
 // did for one hardcoded recipient.
 //
-//   bun devnet/send-l2-tx.ts <to> [calldata] [value-wei]
+//   bun scripts/send-l2-tx.ts <to> [calldata] [value-wei]
 //
 // The sender defaults to SENDER_KEY (anvil account 3, the guest owner).
 // Prints the transaction hash on stdout.
 
+import { usage } from "devnet/env";
 import { getAddress, isHex } from "viem";
-import { usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 
 const [toArg, dataArg, valueArg] = process.argv.slice(2);

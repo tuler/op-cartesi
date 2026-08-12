@@ -3,9 +3,9 @@
 // gas methods the shim serves, and signs EIP-1559 — which the routed guest
 // verifies. No --legacy, no invented nonce.
 
+import { config } from "devnet/env";
+import { l2Wallet } from "devnet/wallet";
 import type { Address, Hex } from "viem";
-import { config } from "./env.ts";
-import { l2Wallet } from "./wallet.ts";
 
 export async function sendL2Tx(tx: {
     to: Address;

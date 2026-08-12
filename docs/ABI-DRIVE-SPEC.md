@@ -108,4 +108,4 @@ accounts drive, the geometry is consensus once the snapshot is stored.
   from the accounts drive's registry (`chain/code.go`). The discovery RPC,
   `cartesi_getContracts`, serves the full surface from the same reads: the
   recorded contracts with their ABIs embedded, and each façade with the L1
-  token it serves (`devnet/contracts.ts` prints it).
+  token it serves (`scripts/contracts.ts` prints it).

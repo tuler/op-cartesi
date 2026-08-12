@@ -56,7 +56,7 @@ if (stack.withVerifier) {
 }
 if (stack.withContracts) {
     line();
-    line("  bun devnet/deposit.ts <address> <wei>   # deposit through OptimismPortal");
-    line("  bun devnet/balance.ts <address>         # what the guest's ledger says");
+    line("  bun scripts/deposit.ts <address> <wei>   # deposit through OptimismPortal");
+    line("  bun scripts/balance.ts <address>         # what the guest's ledger says");
 }
 console.log(out.join("\n"));

@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+
 // Sends an L1 deposit that op-node derives into an L2 deposit transaction —
 // viem's own OP-stack deposit flow
 // (https://viem.sh/op-stack/guides/deposits): depositTransaction against the
@@ -6,17 +7,17 @@
 // the L2 deposit hash from the L1 receipt's TransactionDeposited log, and a
 // wait for the L2 inclusion.
 //
-//   bun devnet/deposit.ts <recipient> [wei]
+//   bun scripts/deposit.ts <recipient> [wei]
 //
 // Requires the devnet to be running with the contract suite deployed
 // (./devnet/start-devnet.ts, the WITH_CONTRACTS=1 default): the portal is
 // the deposit path a real user takes, and the only one — the contract-less
 // mode has no deposits.
 
+import { config, usage } from "devnet/env";
+import { l1Public, l1Wallet, l2Chain, l2Public } from "devnet/wallet";
 import { getAddress, type TransactionReceipt } from "viem";
 import { getL2TransactionHashes } from "viem/op-stack";
-import { config, usage } from "./lib/env.ts";
-import { l1Public, l1Wallet, l2Chain, l2Public } from "./lib/wallet.ts";
 
 const [toArg, amountArg] = process.argv.slice(2);
 if (!toArg) usage("deposit.ts <recipient address> [wei]");

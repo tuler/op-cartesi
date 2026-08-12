@@ -4,9 +4,9 @@
 // block, open that proposal's root claim, take the outputs root out of it,
 // and hand Cartesi's own verifier a proof against it.
 
+import { config } from "devnet/env";
+import { l1Public, l1Wallet, l2Public } from "devnet/wallet";
 import { type Address, type Hex, parseAbi } from "viem";
-import { config } from "./env.ts";
-import { l1Public, l1Wallet, l2Public } from "./wallet.ts";
 
 const factoryAbi = parseAbi([
     "function gameCount() view returns (uint256)",

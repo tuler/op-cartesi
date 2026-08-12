@@ -16,7 +16,7 @@ import (
 	"github.com/tuler/op-cartesi/mempool"
 )
 
-// driveBase is where devnet/build-snapshot.ts puts the accounts drive.
+// driveBase is where scripts/build-snapshot.ts puts the accounts drive.
 const driveBase = uint64(0x80000000000000)
 
 // newDriveBackedServer is newPublicServer with an accounts drive installed in

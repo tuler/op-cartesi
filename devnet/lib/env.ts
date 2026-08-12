@@ -27,8 +27,8 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Address, Hex } from "viem";
 
-export const DEVNET_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
-export const REPO_DIR = dirname(DEVNET_DIR);
+const DEVNET_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
+const REPO_DIR = dirname(DEVNET_DIR);
 
 /** Everything the devnet writes and reads back, by absolute path. */
 export const paths = {

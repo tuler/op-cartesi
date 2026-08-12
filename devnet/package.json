@@ -2,8 +2,14 @@
     "name": "devnet",
     "version": "0.0.0",
     "private": true,
-    "description": "Devnet client scripts: viem on bun, replacing the cast/curl shell scripts",
+    "description": "Launches the devnet: anvil, the OP Stack L1 suite, op-cartesi and op-node, one mprocs pane each",
     "type": "module",
+    "exports": {
+        "./env": "./lib/env.ts",
+        "./wallet": "./lib/wallet.ts",
+        "./cartesi": "./lib/cartesi.ts",
+        "./proc": "./lib/proc.ts"
+    },
     "dependencies": {
         "@op-cartesi/evm": "workspace:*",
         "viem": "^2.55.10"
