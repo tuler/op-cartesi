@@ -18,7 +18,7 @@ execution engine, and op-node sequencing on top:
 
 ```sh
 bun install                    # once, at the repo root (bun workspace)
-./devnet/build-snapshot.ts     # once — `cartesi build` of demo (see that script)
+./scripts/build-snapshot.ts    # once — `cartesi build` of demo (see that script)
 ./devnet/start-devnet.ts
 ```
 
@@ -248,24 +248,41 @@ L2ToL1MessagePasser account against the L2 state root, and ours is a Cartesi
 hash tree. Withdrawals go through Cartesi vouchers instead — see below and
 [DESIGN.md §4 and §7c](../docs/DESIGN.md).
 
-### Everything is TypeScript on bun
+### Two packages: bringing it up, and using it
 
-There is no shell in `devnet/` anymore — not the client scripts, not the
-orchestration. Both are part of the repo's bun workspace (`bun install` at
-the repo root once), and every file is directly executable:
+`devnet/` is one job — put the stack on its feet and keep it there. Talking
+to the stack once it is up is the other, and it is [`scripts/`](../scripts/README.md):
+deposits, withdrawals, balances, the snapshot they all run against. Both are
+members of the repo's bun workspace (`bun install` at the repo root once), and
+every file in either is directly executable.
+
+The split is a dependency direction, not a folder. A client script imports
+the devnet's configuration and its viem clients through the two entry points
+this package publishes —
+
+```ts
+import { config, usage } from "devnet/env";
+import { l1Public, l2Chain } from "devnet/wallet";
+```
+
+— and nothing goes the other way: the devnet never imports a script. That is
+the right direction, because the values are the devnet's own. The ports it
+binds and the addresses its deploys wrote are what a client has to agree
+with, and they are written into `devnet/*.env` by the panes that produced
+them.
 
 | | |
 |---|---|
 | `start-devnet.ts` `stop-devnet.ts` `procs/*.ts` | the stack |
-| `deploy-l1.ts` `deploy-outputs.ts` `build-snapshot.ts` | the deploys |
+| `deploy-l1.ts` `deploy-outputs.ts` | the deploys, and two of the panes |
 | `generate-config.ts` `start-shim.ts` | op-cartesi on its own |
-| `deposit.ts` `withdraw.ts` `balance.ts` … | the transactional scripts |
 | `guest-log.ts` | the `guest` pane, and a tail for any node |
-| `lib/env.ts` | all configuration |
-| `lib/wallet.ts` | the chains and the viem clients |
+| `lib/env.ts` | all configuration — `devnet/env` |
+| `lib/wallet.ts` | the chains and the viem clients — `devnet/wallet` |
 | `lib/proc.ts` `lib/optools.ts` `lib/opcartesi.ts` | running and waiting |
 
-For the transactional half this was always the argument: the Ethereum
+There is no shell left in either package — not the client scripts, not the
+orchestration. For the transactional half this was always the argument: the Ethereum
 plumbing the shell did with `cast` and hex string surgery — ABI encoding,
 receipt polling, deposit payload packing — is what viem is for. The
 orchestration half followed for a different reason. It had grown a second
@@ -291,7 +308,7 @@ deployment outputs, not preferences, and they are re-read rather than cached,
 so a process that started before a deploy still sees what it wrote. `.env` is
 gitignored; keys live there, not in command lines.
 
-The scripts and the guest speak the same standard: `withdraw.ts` and
+The scripts ([`scripts/`](../scripts/README.md)) and the guest speak the same standard: `withdraw.ts` and
 `withdraw-erc20.ts` call the bridge predeploy, `balance.ts` reads the drive
 and the ERC-20 façades, `contracts.ts` asks `cartesi_getContracts` what the
 guest routes — every recorded contract with its ABI, every token façade with
@@ -306,9 +323,9 @@ can, through `cartesi_inspect` and `send-l2-tx.ts` with raw payloads.
 `deposit.ts` sends an L1 deposit and lets op-node derive it into the L2 chain:
 
 ```sh
-bun devnet/deposit.ts 0x00000000000000000000000000000000000a11ce 1000000000000000000
+bun scripts/deposit.ts 0x00000000000000000000000000000000000a11ce 1000000000000000000
 # ...the script follows the deposit to its derived L2 transaction, then:
-bun devnet/balance.ts 0x00000000000000000000000000000000000a11ce
+bun scripts/balance.ts 0x00000000000000000000000000000000000a11ce
 ```
 
 The balance is kept by the guest, not by the shim, on the accounts drive of
@@ -346,12 +363,12 @@ and press `s`, or run it yourself:
 
 ```sh
 ./devnet/deploy-outputs.ts
-bun devnet/withdraw.ts 0x00000000000000000000000000000000000a11ce 500000000000000000
+bun scripts/withdraw.ts 0x00000000000000000000000000000000000a11ce 500000000000000000
 ```
 
 `withdraw.ts` asks the guest for a withdrawal — a `withdrawEther` call on the
 routed guest's bridge predeploy, carrying the wei as `msg.value` — and
-`lib/voucher.ts` does the rest: wait for a proposal covering the voucher's
+`scripts/lib/voucher.ts` does the rest: wait for a proposal covering the voucher's
 block, open that proposal's root claim on L1, and prove the voucher against
 the outputs root inside it with Cartesi's own libraries. Nothing about op-node, op-batcher or op-proposer is
 modified or aware of any of this — the root claim they already publish is the
@@ -367,9 +384,9 @@ output index and the block to prove it as of.
 ERC-20 goes through a Cartesi-style portal, not `L1StandardBridge`:
 
 ```sh
-bun devnet/deposit-erc20.ts 1000000000000000000      # deploys a test token first time
-bun devnet/balance.ts 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 $TEST_TOKEN_ADDRESS
-bun devnet/withdraw-erc20.ts 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 500000000000000000
+bun scripts/deposit-erc20.ts 1000000000000000000      # deploys a test token first time
+bun scripts/balance.ts 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 $TEST_TOKEN_ADDRESS
+bun scripts/withdraw-erc20.ts 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 500000000000000000
 ```
 
 The portal escrows the tokens in the application contract and hands the guest

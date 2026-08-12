@@ -2,7 +2,7 @@
 
 // Reads a balance out of the guest's ledger.
 //
-//   bun devnet/balance.ts <address> [l1-token]
+//   bun scripts/balance.ts <address> [l1-token]
 //
 // Ether comes back through eth_getBalance, which the shim answers with one
 // machine.read_memory against the accounts drive — no execution. A token
@@ -13,9 +13,9 @@
 // with the reason.
 
 import { l2TokenAddress } from "@op-cartesi/evm";
+import { usage } from "devnet/env";
+import { l2Public } from "devnet/wallet";
 import { erc20Abi, getAddress } from "viem";
-import { usage } from "./lib/env.ts";
-import { l2Public } from "./lib/wallet.ts";
 
 const [whoArg, tokenArg] = process.argv.slice(2);
 if (!whoArg) usage("balance.ts <address> [l1-token]");

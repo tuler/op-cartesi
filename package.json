@@ -7,7 +7,8 @@
         "evm-compat/js",
         "app",
         "demo",
-        "devnet"
+        "devnet",
+        "scripts"
     ],
     "trustedDependencies": [
         "@deroll/cmio",
@@ -21,7 +22,7 @@
         "devnet:stop": "bun devnet/stop-devnet.ts",
         "format": "biome format --write",
         "lint": "biome lint",
-        "snapshot": "bun devnet/build-snapshot.ts",
+        "snapshot": "bun scripts/build-snapshot.ts",
         "test": "bun run --filter '*' test",
         "typecheck": "bun run --filter '*' typecheck"
     },

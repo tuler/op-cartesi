@@ -3,7 +3,7 @@
 // Runs an ether withdrawal end to end: ask the guest for one, then prove and
 // execute the voucher it emits.
 //
-//   bun devnet/withdraw.ts <recipient> <wei>
+//   bun scripts/withdraw.ts <recipient> <wei>
 //
 // This targets the routed guest of `app/`: the withdrawal is a call to
 // the bridge predeploy's withdrawEther(to), carrying the wei as msg.value —
@@ -14,11 +14,11 @@
 // and Cartesi's own proof libraries verify the voucher against it on L1.
 
 import { BRIDGE_ADDRESS, bridgeAbi } from "@op-cartesi/evm";
+import { usage } from "devnet/env";
+import { l1Public } from "devnet/wallet";
 import { encodeFunctionData, getAddress } from "viem";
-import { usage } from "./lib/env.ts";
 import { sendL2Tx } from "./lib/l2.ts";
 import { executeVoucher } from "./lib/voucher.ts";
-import { l1Public } from "./lib/wallet.ts";
 
 const [toArg, amountArg] = process.argv.slice(2);
 if (!toArg || !amountArg) usage("withdraw.ts <recipient> <wei>");

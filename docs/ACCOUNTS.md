@@ -25,7 +25,7 @@ Three consumers want per-account state, and today none of them can have it:
 - **Wallet tooling.** `eth_getTransactionCount` is the first thing `cast
   send` asks for, and the shim cannot answer it: the state is the machine's
   memory, and there is no accounts trie to read a nonce from.
-  `devnet/send-l2-tx.sh` works around it by inventing a nonce from the
+  `scripts/send-l2-tx.ts` works around it by inventing a nonce from the
   clock, which is exactly the kind of workaround that stops at the demo.
 - **Replay protection.** The chain does not check a nonce, so an included
   transaction can be resubmitted and executed again. The durable check must

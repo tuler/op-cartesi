@@ -1,0 +1,19 @@
+{
+    "name": "@op-cartesi/scripts",
+    "version": "0.0.0",
+    "private": true,
+    "description": "Client scripts for a running devnet: deposits, withdrawals, balances, and the machine snapshot they all run against",
+    "type": "module",
+    "dependencies": {
+        "@op-cartesi/evm": "workspace:*",
+        "devnet": "workspace:*",
+        "viem": "^2.55.10"
+    },
+    "devDependencies": {
+        "@types/bun": "^1.3.5",
+        "typescript": "^7.0.2"
+    },
+    "scripts": {
+        "typecheck": "tsc --noEmit"
+    }
+}

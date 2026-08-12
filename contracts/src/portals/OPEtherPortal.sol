@@ -11,7 +11,7 @@ import {OPPortal} from "./OPPortal.sol";
 ///
 /// Unlike the ERC-20 case, ETH has somewhere else it could go: OP's own
 /// `OptimismPortal.depositTransaction` mints ETH on L2 directly, which is the
-/// path devnet/deposit.sh already uses. The difference is custody. That path
+/// path scripts/deposit.ts already uses. The difference is custody. That path
 /// leaves the ETH in OP's lockbox, where a Cartesi voucher cannot reach it;
 /// this one puts it in the application contract, where a voucher can. A chain
 /// using vouchers for withdrawals wants this one, so that both directions

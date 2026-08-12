@@ -18,7 +18,7 @@
 //
 // Prerequisites: anvil, cartesi-jsonrpc-machine, go, and either
 // op-node/op-batcher/op-proposer on PATH or docker. Plus a machine snapshot:
-// ./devnet/build-snapshot.ts, once.
+// ./scripts/build-snapshot.ts, once.
 
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -100,7 +100,7 @@ requireOpTools(runtime);
 if (deployerInDocker()) requireCommands("docker");
 
 if (!existsSync(stack.snapshotDir)) {
-    die(`no machine snapshot at ${stack.snapshotDir} — run ./devnet/build-snapshot.ts first`);
+    die(`no machine snapshot at ${stack.snapshotDir} — run ./scripts/build-snapshot.ts first`);
 }
 
 // op-node needs the secret before op-cartesi would otherwise create it, and in

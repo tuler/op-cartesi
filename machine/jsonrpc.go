@@ -453,7 +453,7 @@ func (r *Remote) ReadMemory(ctx context.Context, address, length uint64) ([]byte
 // accountsDriveLabel is the label the accounts drive is declared under
 // (docs/ACCOUNTS-DRIVE-SPEC.md §4), and accountsDriveDefaultStart the spec's
 // recommended well-known start address — the classic PMA_DRIVE_START, which
-// devnet/build-snapshot.ts pins explicitly.
+// scripts/build-snapshot.ts pins explicitly.
 const (
 	accountsDriveLabel        = "accounts"
 	accountsDriveDefaultStart = uint64(0x80000000000000)

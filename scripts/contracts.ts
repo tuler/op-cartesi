@@ -1,16 +1,17 @@
 #!/usr/bin/env bun
+
 // Lists the guest's interface surface: what the chain speaks, straight from
 // the machine's drives via cartesi_getContracts.
 //
-//   bun devnet/contracts.ts
+//   bun scripts/contracts.ts
 //
 // Recorded contracts print their ABI as human-readable signatures; token
 // façades print the L1 token they serve (their shared ABI is the standard's
 // erc20FacadeAbi).
 
+import { usage } from "devnet/env";
+import { l2Public } from "devnet/wallet";
 import type { AbiFunction } from "viem";
-import { usage } from "./lib/env.ts";
-import { l2Public } from "./lib/wallet.ts";
 
 if (process.argv[2] === "-h" || process.argv[2] === "--help") usage("contracts.ts");
 

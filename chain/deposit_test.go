@@ -17,7 +17,7 @@ import (
 // guest of demo/ (docs/EVM-COMPAT.md), which keeps its ledger on the
 // accounts drive and routes every input by its `to` address:
 //
-//	./devnet/build-snapshot.ts
+//	./scripts/build-snapshot.ts
 //	OP_CARTESI_TEST_LEDGER_SNAPSHOT=./demo/.cartesi/image go test ./chain/
 //
 // It is separate from OP_CARTESI_TEST_SNAPSHOT because the other real-machine

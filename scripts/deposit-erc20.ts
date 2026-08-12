@@ -1,7 +1,7 @@
 #!/usr/bin/env bun
 // Deposits ERC-20 tokens through OPERC20Portal.
 //
-//   bun devnet/deposit-erc20.ts [amount] [token]
+//   bun scripts/deposit-erc20.ts [amount] [token]
 //
 // Deploys a test token on first use (via forge) and records it in
 // devnet/token.env. A recorded token that no longer has code — anvil forgets
@@ -16,10 +16,10 @@
 
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
+import { config, paths, usage } from "devnet/env";
+import { l1Public, l1Wallet } from "devnet/wallet";
 import { type Address, erc20Abi, getAddress, parseAbi } from "viem";
-import { config, DEVNET_DIR, usage } from "./lib/env.ts";
-import { l1Public, l1Wallet } from "./lib/wallet.ts";
 
 const portalAbi = parseAbi([
     "function depositERC20Tokens(address token, address appContract, uint256 value, bytes execLayerData)",
@@ -83,7 +83,7 @@ if (tokenArg) {
             config.depositorKey,
             "--broadcast",
         ],
-        { cwd: join(dirname(DEVNET_DIR), "contracts"), encoding: "utf8" },
+        { cwd: join(paths.repo, "contracts"), encoding: "utf8" },
     );
     const text = `${out.stdout ?? ""}${out.stderr ?? ""}`;
     const match = text.match(/TEST_TOKEN_ADDRESS=(0x[0-9a-fA-F]{40})/);
@@ -99,7 +99,7 @@ if (tokenArg) {
     }
     writeFileSync(
         config.tokenEnvFile,
-        `# Written by devnet/deposit-erc20.ts.\nTEST_TOKEN_ADDRESS=${token}\n`,
+        `# Written by scripts/deposit-erc20.ts.\nTEST_TOKEN_ADDRESS=${token}\n`,
     );
     console.error(`  token ${token}, supply held by ${depositor}`);
 }
@@ -139,4 +139,4 @@ const escrowed = await l1.readContract({
 console.error(`  escrowed in the application: ${escrowed}`);
 console.error("");
 console.error(`the guest credits ${depositor} once the chain derives the deposit; check with:`);
-console.error(`  bun devnet/balance.ts ${depositor} ${token}`);
+console.error(`  bun scripts/balance.ts ${depositor} ${token}`);

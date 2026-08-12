@@ -13,7 +13,7 @@ Compatibility is verified against **op-node's own types** rather than hand-writt
 The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client is pinned to machine-emulator 0.21.0 by probing a running server, and `chain` and `machine` carry tests that load a real machine, build blocks on it, re-execute them as a verifier, and check that the outputs commitment the host computes is byte-identical to the one the guest maintains. They are skipped unless a snapshot is supplied:
 
 ```sh
-./devnet/build-snapshot.ts
+./scripts/build-snapshot.ts
 OP_CARTESI_TEST_SNAPSHOT=./demo/.cartesi/image \
 OP_CARTESI_TEST_LEDGER_SNAPSHOT=./demo/.cartesi/image go test ./...
 ```
@@ -26,11 +26,11 @@ The second variable turns on the deposit and token tests, which need a guest tha
 
 The stack has been run against the **official released images** — op-node v1.19.3 and op-batcher v1.16.11 — as well as against locally built binaries. The OP monorepo ships no binaries of its own, so `./devnet/start-devnet.ts` falls back to docker when they are not on your `PATH`; nothing needs compiling but op-cartesi itself.
 
-**Deposits reach the guest.** `bun devnet/deposit.ts <address> <wei>` calls `OptimismPortal.depositTransaction` on L1; op-node derives it into an L2 deposit transaction, and the guest — the routed [`demo`](demo/README.md) — credits the recipient on its accounts drive. The balance is machine state, so the state root commits to it, and `eth_getBalance` reads it straight out of machine memory. The verifier, deriving from L1 alone, arrives at the same balance.
+**Deposits reach the guest.** `bun scripts/deposit.ts <address> <wei>` calls `OptimismPortal.depositTransaction` on L1; op-node derives it into an L2 deposit transaction, and the guest — the routed [`demo`](demo/README.md) — credits the recipient on its accounts drive. The balance is machine state, so the state root commits to it, and `eth_getBalance` reads it straight out of machine memory. The verifier, deriving from L1 alone, arrives at the same balance.
 
 **Proposals land on L1.** The devnet deploys the full OP Stack L1 suite with `op-deployer` and runs `op-proposer` against the `DisputeGameFactory`. The claim it submits is `keccak(0³² ‖ stateRoot ‖ withdrawalsRoot ‖ blockHash)` — recomputed independently and matched against the on-chain game — so the root claim on L1 commits to the machine's Merkle root *and* the Cartesi outputs tree. Deposits go through the real `OptimismPortal.depositTransaction`.
 
-**Withdrawals work, through Cartesi vouchers.** `bun devnet/withdraw.ts <address> <wei>` asks the guest to withdraw; it emits a Cartesi `Voucher`, the voucher enters the outputs tree, `op-proposer` proposes the block, and an L1 contract proves the voucher against that proposal and executes it — moving real ETH. Verified end to end on the devnet, including that a voucher is single-use.
+**Withdrawals work, through Cartesi vouchers.** `bun scripts/withdraw.ts <address> <wei>` asks the guest to withdraw; it emits a Cartesi `Voucher`, the voucher enters the outputs tree, `op-proposer` proposes the block, and an L1 contract proves the voucher against that proposal and executes it — moving real ETH. Verified end to end on the devnet, including that a voucher is single-use.
 
 The bridge is one small contract. A Cartesi `Application` asks one question before executing an output — `isOutputsMerkleRootValid` — and an OP proposal already commits to the answer, since op-node's root claim is `keccak(version ‖ stateRoot ‖ withdrawalsRoot ‖ blockHash)` and `withdrawalsRoot` *is* the Cartesi outputs root. [`OPOutputsMerkleRootValidator`](contracts/src/OPOutputsMerkleRootValidator.sol) opens that preimage on chain; verification uses Cartesi's own `LibOutputValidityProof`, pulled in as a dependency rather than reimplemented. Nothing forks `OptimismPortal` — its withdrawal path wants an MPT proof this chain cannot produce, so this sidesteps it rather than replacing it.
 
@@ -128,7 +128,8 @@ Only these versions are served, for the reason in [Fork support](#fork-support).
 | `mempool` | Bounded FIFO transaction ingress (the OP Stack has no public L2 mempool; the sequencer's RPC is the only entry point). |
 | `rollup` | Generates the `rollup.json` document op-node reads. |
 | `integration` | Separate Go module: compatibility tests driving the shim with op-node's wire types. Kept out of the main module so the shim itself depends only on op-geth. |
-| `devnet` | Scripts and instructions for running the shim alongside op-node. |
+| `devnet` | Brings the devnet up: anvil, the OP Stack L1 suite, the machine, the shim and op-node, one mprocs pane each. |
+| `scripts` | Client scripts for a running devnet — deposits, withdrawals, balances — and the machine snapshot they run against. |
 
 Transactions are ordinary signed Ethereum transactions (plus OP deposit transactions injected by op-node), which is what lets stock op-node and op-batcher handle our blocks unmodified.
 
@@ -152,7 +153,8 @@ go test ./...
 # The TypeScript side is a bun workspace: the drive libraries
 # (accounts-drive/js, abi-drive/js), the EVM-compat wire vocabulary
 # (evm-compat/js), the guest runtime (app), the devnet guest
-# application (demo), and the devnet client scripts (devnet/*.ts).
+# application (demo), the devnet itself (devnet) and the client
+# scripts that drive it (scripts).
 bun install
 bun run test
 bun run typecheck
