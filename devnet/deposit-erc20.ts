@@ -18,7 +18,8 @@ import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type Address, erc20Abi, getAddress, parseAbi } from "viem";
-import { config, DEVNET_DIR, l1Public, l1Wallet, usage } from "./lib/env.ts";
+import { config, DEVNET_DIR, usage } from "./lib/env.ts";
+import { l1Public, l1Wallet } from "./lib/wallet.ts";
 
 const portalAbi = parseAbi([
     "function depositERC20Tokens(address token, address appContract, uint256 value, bytes execLayerData)",

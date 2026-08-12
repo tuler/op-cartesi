@@ -14,7 +14,8 @@
 
 import { l2TokenAddress } from "@op-cartesi/evm";
 import { erc20Abi, getAddress } from "viem";
-import { l2Public, usage } from "./lib/env.ts";
+import { usage } from "./lib/env.ts";
+import { l2Public } from "./lib/wallet.ts";
 
 const [whoArg, tokenArg] = process.argv.slice(2);
 if (!whoArg) usage("balance.ts <address> [l1-token]");

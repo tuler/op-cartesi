@@ -14,8 +14,9 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseAbi } from "viem";
-import { addresses, chainParams, config, l1Public, paths, stack } from "./lib/env.ts";
+import { addresses, chainParams, config, paths, stack } from "./lib/env.ts";
 import { die, must, run, say } from "./lib/proc.ts";
+import { l1Public } from "./lib/wallet.ts";
 
 const systemConfigAbi = parseAbi(["function scalar() view returns (uint256)"]);
 

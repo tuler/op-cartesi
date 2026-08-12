@@ -15,9 +15,10 @@
 // because a server holds exactly one machine.
 
 import { writeFileSync } from "node:fs";
-import { chainParams, l1Public, paths, stack } from "../lib/env.ts";
+import { chainParams, paths, stack } from "../lib/env.ts";
 import { generateRollupConfig, startMachineServer } from "../lib/opcartesi.ts";
 import { clearReady, die, markReady, procInit, say, waitForPort, waitReady } from "../lib/proc.ts";
+import { l1Public } from "../lib/wallet.ts";
 
 procInit("genesis");
 clearReady("genesis");

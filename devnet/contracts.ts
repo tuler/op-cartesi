@@ -9,7 +9,8 @@
 // erc20FacadeAbi).
 
 import type { AbiFunction } from "viem";
-import { l2Public, usage } from "./lib/env.ts";
+import { usage } from "./lib/env.ts";
+import { l2Public } from "./lib/wallet.ts";
 
 if (process.argv[2] === "-h" || process.argv[2] === "--help") usage("contracts.ts");
 
