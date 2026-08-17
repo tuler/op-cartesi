@@ -5,11 +5,11 @@
     "type": "module",
     "dependencies": {
         "@op-cartesi/app": "workspace:*",
-        "viem": "^2.55.10"
+        "viem": "^2.55.18"
     },
     "devDependencies": {
-        "@types/node": "^26.1.2",
-        "esbuild": "^0.28.1",
+        "@types/node": "^26.2.0",
+        "esbuild": "^0.28.2",
         "typescript": "^7.0.2"
     },
     "scripts": {
@@ -18,8 +18,7 @@
         "typecheck": "tsc --noEmit"
     },
     "keywords": [
-        "cartesi",
-        "deroll"
+        "cartesi"
     ],
     "trustedDependencies": [
         "esbuild"

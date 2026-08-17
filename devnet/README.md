@@ -87,7 +87,7 @@ worth knowing:
   not enough — loopback is not reachable from the bridge gateway.
 
 The guest is [`demo`](../demo/README.md) — the routed guest of
-[docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md), TypeScript on `@deroll/cmio`, its
+[docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md), TypeScript on `@cartesi/rollup`, its
 ledger on the accounts drive. `build-snapshot.ts` wraps `cartesi build`, which
 stores the booted machine under `demo/.cartesi/image`; that directory is the
 chain's genesis state.

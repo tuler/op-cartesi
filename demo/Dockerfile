@@ -50,7 +50,7 @@ COPY app/ app/
 COPY demo/ demo/
 RUN cd demo && bun run build
 
-# Stage the runtime files: the JS bundle plus @deroll/cmio's native addon,
+# Stage the runtime files: the JS bundle plus @cartesi/rollup's native addon,
 # which esbuild cannot inline and must be required at runtime. The script
 # locates the packages through module resolution rather than assuming a
 # node_modules layout — bun 1.3's isolated linker keeps workspace members'

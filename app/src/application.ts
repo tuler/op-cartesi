@@ -1,6 +1,6 @@
 // The application: boots the drives, owns the router, registers the
 // application's contracts, records the manifest into the ABI drive, and runs
-// the rollup loop on @deroll/cmio.
+// the rollup loop on @cartesi/rollup.
 //
 // Boot order matters (EVM-COMPAT §10): both drives are opened — and on
 // first boot formatted and populated — before the first yield, so the
@@ -8,7 +8,7 @@
 // by the genesis root. Registration is therefore a boot-time act: contracts
 // are declared between boot() and run(), never during an input.
 
-import { type AdvanceRequest, Rollup } from "@deroll/cmio";
+import { type AdvanceRequest, Rollup } from "@cartesi/rollup";
 import { AbiDrive, type AbiDriveConfig, KIND_APP, KIND_SYSTEM } from "@op-cartesi/abis";
 import { FileStore, MemStore, type Store } from "@op-cartesi/accounts";
 import {

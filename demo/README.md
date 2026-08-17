@@ -47,7 +47,7 @@ the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are
 Dockerfile `ENV`, which `cartesi build` passes into the machine; defaults
 match `devnet/lib/env.ts`.
 
-`@deroll/cmio` is not a dependency of this app: it belongs to
+`@cartesi/rollup` is not a dependency of this app: it belongs to
 [`@op-cartesi/app`](../app), which is what actually drives the CMIO loop.
 `stage.mts` still stages its native addon next to the bundle — esbuild cannot
 inline a `.node` — but it finds it by following the dependency graph (this

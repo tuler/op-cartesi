@@ -5,7 +5,7 @@ design it leads to; a normative companion spec (the routing standard's
 byte-level contract, in the mold of ACCOUNTS-DRIVE-SPEC.md) remains to be
 written. The router, the journal, and the built-in contract family of
 §5–§10 are implemented and tested in
-[`app/`](../app/README.md) — TypeScript on `@deroll/cmio`,
+[`app/`](../app/README.md) — TypeScript on `@cartesi/rollup`,
 with viem supplying transaction parsing, recovery and ABI plumbing — and
 that guest **is the devnet guest**: `build-snapshot.ts` builds it, the
 devnet scripts speak its bridge and façades, and the shim's `eth_call`

@@ -10,10 +10,10 @@ const options: BuildOptions = {
     // bundle, so node parses index.js as CommonJS whatever this package's
     // "type" says.
     format: "cjs",
-    // @deroll/cmio is a native addon (.node): it cannot be inlined into
+    // @cartesi/rollup is a native addon (.node): it cannot be inlined into
     // the bundle and must be required at runtime from node_modules. The
     // Dockerfile copies it (and its node-gyp-build loader) next to the bundle.
-    external: ["@deroll/cmio"],
+    external: ["@cartesi/rollup"],
 };
 
 await build(options);
