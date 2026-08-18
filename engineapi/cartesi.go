@@ -84,9 +84,10 @@ func (a *CartesiAPI) GetTransactionEmissions(_ context.Context, txHash common.Ha
 	return out, nil
 }
 
-// OutputsRoot describes the chain-wide outputs commitment as of a block. It is
-// the value the block publishes in its withdrawals root, and what op-node
-// folds into the L2 output root.
+// OutputsRoot describes the chain-wide outputs commitment as of a block. The
+// block commits to it through the withdrawal trie: this root sits in the
+// trie's outputs root slot, and the trie's root is the header's
+// withdrawalsRoot, which op-node folds into the L2 output root.
 type OutputsRoot struct {
 	BlockHash   common.Hash    `json:"blockHash"`
 	BlockNumber hexutil.Uint64 `json:"blockNumber"`
@@ -383,9 +384,19 @@ type OutputProof struct {
 	// named as its ABI names them so the reply can be passed through.
 	OutputIndex          hexutil.Uint64 `json:"outputIndex"`
 	OutputHashesSiblings []common.Hash  `json:"outputHashesSiblings"`
-	// OutputsMerkleRoot is the root the proof reproduces, which is the block's
-	// withdrawalsRoot and the value an L1 validator must have accepted.
+	// OutputsMerkleRoot is the root the proof reproduces. The block does not
+	// publish it directly: the header's withdrawalsRoot is the message
+	// passer trie's root, and this root sits in that trie's outputs root
+	// slot — opened on L1 with OutputsRootProof.
 	OutputsMerkleRoot common.Hash `json:"outputsMerkleRoot"`
+	// WithdrawalsRoot is the block's committed withdrawal trie root — the
+	// messagePasserStorageRoot of the L2 output root an L1 proposal holds.
+	WithdrawalsRoot common.Hash `json:"withdrawalsRoot"`
+	// OutputsRootProof is the storage proof of the outputs root slot against
+	// WithdrawalsRoot: the RLP trie nodes SecureMerkleTrie takes. It is what
+	// lets an L1 validator get from a proposal's withdrawalsRoot to
+	// OutputsMerkleRoot.
+	OutputsRootProof []hexutil.Bytes `json:"outputsRootProof"`
 	// ProvenAgainst names the block whose commitment this proof is against.
 	ProvenAgainst common.Hash    `json:"provenAgainst"`
 	BlockNumber   hexutil.Uint64 `json:"blockNumber"`
@@ -419,11 +430,24 @@ func (a *CartesiAPI) GetOutputProof(_ context.Context, index hexutil.Uint64, id 
 	if err != nil {
 		return nil, err
 	}
+	slotProofs, ok, err := a.chain.PasserProofAt(target.Hash(), []common.Hash{chain.OutputsRootSlot})
+	if err != nil {
+		return nil, err
+	}
+	if !ok || len(slotProofs) != 1 {
+		return nil, fmt.Errorf("no withdrawal commitment for block %s", target.Hash())
+	}
+	nodes := make([]hexutil.Bytes, 0, len(slotProofs[0].Proof))
+	for _, node := range slotProofs[0].Proof {
+		nodes = append(nodes, node)
+	}
 	return &OutputProof{
 		Output:               found.Output,
 		OutputIndex:          hexutil.Uint64(proof.OutputIndex),
 		OutputHashesSiblings: proof.Siblings,
-		OutputsMerkleRoot:    *target.Header.WithdrawalsHash,
+		OutputsMerkleRoot:    common.BytesToHash(slotProofs[0].Value),
+		WithdrawalsRoot:      *target.Header.WithdrawalsHash,
+		OutputsRootProof:     nodes,
 		ProvenAgainst:        target.Hash(),
 		BlockNumber:          hexutil.Uint64(target.NumberU64()),
 		EmittedIn:            hexutil.Uint64(found.BlockNumber),

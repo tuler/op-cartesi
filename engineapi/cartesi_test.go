@@ -189,8 +189,18 @@ func TestCartesiGetOutputsRoot(t *testing.T) {
 	if root.Count != 1 {
 		t.Errorf("output count %d, want 1", root.Count)
 	}
-	if payload.WithdrawalsRoot == nil || root.Root != *payload.WithdrawalsRoot {
-		t.Errorf("served root %s, but the header committed %v", root.Root, payload.WithdrawalsRoot)
+	// The header no longer publishes this root directly: it commits the
+	// withdrawal trie's root, which holds the outputs root in its reserved
+	// slot. The tree the chain carries for the block is the served value.
+	tree, ok := c.OutputTreeAt(payload.BlockHash)
+	if !ok {
+		t.Fatal("no outputs accumulator for the block")
+	}
+	if root.Root != tree.Root() {
+		t.Errorf("served root %s, but the chain computed %s", root.Root, tree.Root())
+	}
+	if payload.WithdrawalsRoot != nil && root.Root == *payload.WithdrawalsRoot {
+		t.Error("outputs root equals the withdrawals root; the trie indirection is missing")
 	}
 }
 
