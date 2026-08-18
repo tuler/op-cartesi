@@ -24,8 +24,8 @@ import {
     ProfileSparse,
     type Store,
 } from "@op-cartesi/accounts";
-import { type Address, addrKey, l2TokenAddress } from "@op-cartesi/evm";
-import { getAddress, toBytes } from "viem";
+import { type Address, addrKey, l2TokenAddress, PORTAL_ERC20 } from "@op-cartesi/evm";
+import { getAddress, type Hex, toBytes } from "viem";
 
 /** A debit that the balance cannot cover. Distinct from AccountsDriveError:
  * this is application arithmetic, not a drive-format refusal. */
@@ -86,6 +86,16 @@ export class JournaledStore implements Store {
     }
 }
 
+/** The L1 half of the standard messaging pair (DESIGN §7g). The messenger
+ * is stored both plain (the withdrawal target) and aliased (the deposit
+ * sender it authenticates); the bridge is the xDomainMessageSender the L2
+ * bridge accepts. */
+export interface CrossDomainConfig {
+    l1Messenger: Address;
+    l1MessengerAliased: Address;
+    l1Bridge: Address;
+}
+
 export interface TokenMetadata {
     name: string;
     symbol: string;
@@ -130,6 +140,12 @@ export class Ledger {
     /** The flat per-transaction fee (ACCOUNTS.md §5.7); owner-settable,
      * zero at genesis for the same devnet reason the Lua app documents. */
     fee = 0n;
+    /** The standard messaging pair, once the owner registers it. */
+    private crossDomainConfig?: CrossDomainConfig;
+    /** OP's msgNonce: the messenger's dense outbound counter. */
+    private msgNonce = 0n;
+    /** v1 message hash → relay outcome (successfulMessages/failedMessages). */
+    private messages = new Map<Hex, "successful" | "failed">();
 
     static async create(backing: Store): Promise<Ledger> {
         const l = new Ledger();
@@ -312,6 +328,64 @@ export class Ledger {
             this.fee = before;
         });
         this.fee = fee;
+    }
+
+    // ------------------------------------------------- cross-domain (§7g)
+
+    /** The registered L1 side of the standard messaging pair, or undefined
+     * while the chain runs portal-style. RAM state like `portals`, journaled
+     * the same way; machine state, hence consensus, hence provable. */
+    crossDomain(): CrossDomainConfig | undefined {
+        return this.crossDomainConfig;
+    }
+
+    registerCrossDomain(cfg: CrossDomainConfig): void {
+        const before = this.crossDomainConfig;
+        this.journal.note(() => {
+            this.crossDomainConfig = before;
+        });
+        this.crossDomainConfig = cfg;
+    }
+
+    /** True when any ERC-20 portal is registered — the escrow the standard
+     * bridge must never coexist with (DESIGN §7g). */
+    hasErc20Portal(): boolean {
+        for (const kind of this.portals.values()) if (kind === PORTAL_ERC20) return true;
+        return false;
+    }
+
+    /** The messenger's dense nonce counter: returns the current value and
+     * advances it. OP's msgNonce, journaled so a reverted send does not
+     * burn a nonce. */
+    nextMessageNonce(): bigint {
+        const nonce = this.msgNonce;
+        this.journal.note(() => {
+            this.msgNonce = nonce;
+        });
+        this.msgNonce = nonce + 1n;
+        return nonce;
+    }
+
+    /** The nonce the next sendMessage would use, for the view method. */
+    peekMessageNonce(): bigint {
+        return this.msgNonce;
+    }
+
+    /** Replay-protection record per v1 message hash, mirroring the
+     * messenger's successfulMessages/failedMessages. A failed message keeps
+     * its value on the messenger's balance until replayed. */
+    messageStatus(hash: Hex): "successful" | "failed" | undefined {
+        return this.messages.get(hash.toLowerCase() as Hex);
+    }
+
+    setMessageStatus(hash: Hex, status: "successful" | "failed"): void {
+        const key = hash.toLowerCase() as Hex;
+        const before = this.messages.get(key);
+        this.journal.note(() => {
+            if (before === undefined) this.messages.delete(key);
+            else this.messages.set(key, before);
+        });
+        this.messages.set(key, status);
     }
 
     /** Flushes drive bytes into machine state before a yield (spec §10).

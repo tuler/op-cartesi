@@ -36,6 +36,7 @@ import type {
 
 const FEE_SET_TOPIC: Hex = keccak256(toHex("FeeSet(uint256)"));
 const PORTAL_REGISTERED_TOPIC: Hex = keccak256(toHex("PortalRegistered(uint8,address,address)"));
+const MESSENGER_REGISTERED_TOPIC: Hex = keccak256(toHex("MessengerRegistered(address,address)"));
 const TOKEN_REGISTERED_TOPIC: Hex = keccak256(toHex("TokenRegistered(address,address,uint16)"));
 
 export class Config implements Handler {
@@ -64,6 +65,19 @@ export class Config implements Handler {
                 if (kind !== PORTAL_ETHER && kind !== PORTAL_ERC20) {
                     return { kind: "revert", data: errorRevert("unknown portal kind") };
                 }
+                // Escrow paths are exclusive (DESIGN §7g): a Cartesi ERC-20
+                // portal escrows in the application contract, the standard
+                // bridge escrows in L1StandardBridge, and one fungible
+                // ledger balance backed by two escrows lets a deposit into
+                // one drain the other.
+                if (kind === PORTAL_ERC20 && ledger.crossDomain()) {
+                    return {
+                        kind: "revert",
+                        data: errorRevert(
+                            "the standard bridge is registered; escrows are exclusive",
+                        ),
+                    };
+                }
                 const aliased = applyL1ToL2Alias(portal);
                 ledger.registerPortal(aliased, kind);
                 out.log(
@@ -72,6 +86,29 @@ export class Config implements Handler {
                     encodeAbiParameters(
                         [{ type: "uint8" }, { type: "address" }, { type: "address" }],
                         [kind, portal, aliased],
+                    ),
+                );
+                return { kind: "accept" };
+            }
+            case "registerMessenger": {
+                const [l1Messenger, l1Bridge] = decoded.args;
+                if (ledger.hasErc20Portal()) {
+                    return {
+                        kind: "revert",
+                        data: errorRevert("an ERC-20 portal is registered; escrows are exclusive"),
+                    };
+                }
+                ledger.registerCrossDomain({
+                    l1Messenger,
+                    l1MessengerAliased: applyL1ToL2Alias(l1Messenger),
+                    l1Bridge,
+                });
+                out.log(
+                    this.configAddress,
+                    [MESSENGER_REGISTERED_TOPIC],
+                    encodeAbiParameters(
+                        [{ type: "address" }, { type: "address" }],
+                        [l1Messenger, l1Bridge],
                     ),
                 );
                 return { kind: "accept" };
