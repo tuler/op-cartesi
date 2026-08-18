@@ -2,7 +2,7 @@
 
 **Goal:** run a chain whose state transition function is a Cartesi Machine (RISC-V, Linux) instead of an EVM, while writing as little new code as possible — reusing mature components for L1 interaction, sequencing, data availability, derivation, and dispute resolution.
 
-**TL;DR:** The OP Stack is the right donor. It has two clean, already-exploited seams: the **Engine API** boundary between `op-node` and the execution engine (precedent: Monomer put a Cosmos SDK app behind it), and the **DisputeGameFactory** game-type registry on L1 (precedent: Cannon, Asterisc, OP Succinct, and Kailua all coexist as registered game types on the same contracts). Arbitrum Nitro has no equivalent seams — its STF *is* Geth+ArbOS compiled into the WAVM replay binary, so swapping the execution layer means forking the heart of Nitro. One new component does the whole job: an Engine API shim that speaks the Engine API to `op-node` and CMIO to the machine.
+**TL;DR:** The OP Stack is the right donor. It has two clean, already-exploited seams: the **[Engine API](https://specs.optimism.io/protocol/overview.html#engine-api)** boundary between `op-node` and the execution engine (precedent: Monomer put a Cosmos SDK app behind it), and the **[DisputeGameFactory](https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html#disputegamefactory-interface)** game-type registry on L1 (precedent: Cannon, Asterisc, OP Succinct, and Kailua all coexist as registered game types on the same contracts). Arbitrum Nitro has no equivalent seams — its STF *is* Geth+ArbOS compiled into the WAVM replay binary, so swapping the execution layer means forking the heart of Nitro. One new component does the whole job: an Engine API shim that speaks the Engine API to `op-node` and CMIO to the machine.
 
 **Where this stands.** Everything from §3 through §7 is built and running: the shim sequences and verifies, the chain persists and restarts, and both directions of the ether and ERC-20 bridges run on stock OP contracts. What is *not* solved is §8 — proving the computation, so that a proposal can be disputed. Proposals go into OP's permissioned game type and nobody can challenge them; that is the chain's one remaining trust assumption, and §8 explains exactly what closing it requires.
 
@@ -34,9 +34,9 @@ The one thing it is **not**: an Ethereum execution client. No blocks, no transac
 
 ### OP Stack — two designed-in seams
 
-The OP Stack splits an L2 node into a **consensus/rollup node** (`op-node`, or the Rust `kona-node`) and an **execution engine**, connected by the (slightly extended) Ethereum **Engine API**: `op-node` derives the L2 chain from L1 (batches + deposits), then drives the engine with `engine_forkchoiceUpdated` / `engine_getPayload` / `engine_newPayload`. The engine is explicitly pluggable — op-geth, op-reth, op-erigon all sit behind the same interface, and **Monomer (Polymer/Nethermind) proved the seam works for non-EVM engines** by translating Engine API ↔ ABCI so Cosmos SDK apps run as the OP Stack execution layer. (Monomer is paused, but it's a working, readable Go reference for exactly the adapter you need.)
+The OP Stack splits an L2 node into a **consensus/rollup node** (`op-node`, or the Rust `kona-node`) and an **execution engine**, connected by the (slightly extended) Ethereum **[Engine API](https://specs.optimism.io/protocol/exec-engine.html#engine-api)**: `op-node` [derives the L2 chain from L1](https://specs.optimism.io/protocol/derivation.html#l2-chain-derivation-pipeline) (batches + deposits), then drives the engine with `engine_forkchoiceUpdated` / `engine_getPayload` / `engine_newPayload`. The engine is explicitly pluggable — op-geth, op-reth, op-erigon all sit behind the same interface, and **Monomer (Polymer/Nethermind) proved the seam works for non-EVM engines** by translating Engine API ↔ ABCI so Cosmos SDK apps run as the OP Stack execution layer. (Monomer is paused, but it's a working, readable Go reference for exactly the adapter you need.)
 
-On L1, the settlement side is equally pluggable: `OptimismPortal` validates withdrawals against outputs proposed through the **DisputeGameFactory**, which dispatches by `GameType`. The deployed registry already includes `CANNON` (MIPS FPVM), `ASTERISC`/`ASTERISC_KONA` (RISC-V FPVM), `OP_SUCCINCT` (SP1 validity proofs), and `KAILUA` (RISC Zero hybrid ZK fraud/validity proofs). Adding a game type is a supported, production-exercised extension point — you deploy a new game implementation and register it; the portal, factory, batcher, proposer, and challenger tooling stay stock.
+On L1, the settlement side is equally pluggable: `OptimismPortal` validates [withdrawals](https://specs.optimism.io/protocol/withdrawals.html) against outputs proposed through the **DisputeGameFactory**, which dispatches by [`GameType`](https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html#types). The deployed registry already includes `CANNON` (MIPS FPVM), `ASTERISC`/`ASTERISC_KONA` (RISC-V FPVM), `OP_SUCCINCT` (SP1 validity proofs), and `KAILUA` (RISC Zero hybrid ZK fraud/validity proofs). Adding a game type is a supported, production-exercised extension point — you deploy a new game implementation and register it; the portal, factory, batcher, proposer, and challenger tooling stay stock.
 
 Around those seams, the reusable inventory is large: `op-batcher` (calldata/blob batch submission, compression, channel framing), `op-proposer` (posts output roots / creates games), `op-challenger` (dispute participation framework), `op-conductor` (HA sequencer failover), `op-deployer`, the bridge contract suite, and op-node's built-in sequencer mode with unsafe-head P2P gossip. That is the "Ethereum interaction + sequencer" subsystem, off the shelf.
 
@@ -55,7 +55,7 @@ This is the one genuinely new component, and it's Monomer-shaped: a service that
 1. **Block production** (`engine_forkchoiceUpdatedV3` with payload attributes → `engine_getPayloadV4`): take the attributes from op-node — timestamp, L1-origin info, and the mandatory deposit transactions — plus pending user transactions from its own tiny mempool (`eth_sendRawTransaction`; there is no public L2 mempool in the OP Stack, so the sequencer's shim is the only ingress). Feed each item into the machine as a CMIO input, run to the next yield, then synthesize an L2 block: an Ethereum-shaped header whose `stateRoot` is `cm_get_root_hash()` and whose `withdrawalsRoot` is the withdrawal trie root (§5).
 2. **Block import** (`engine_newPayloadV4`): verifiers replay the same inputs into their machine and check the resulting root hash and withdrawal commitment against what the payload claims. This is what makes derivation-from-L1 work identically on every node.
 3. **Fork choice and reorgs**: map `forkchoiceUpdated`'s unsafe/safe/finalized heads onto machine snapshots. This is where the emulator's fork/rollback and `cm_store`/`cm_load` APIs earn their keep: keep periodic snapshots keyed by block hash, roll back on L1 reorg.
-4. **Deposit semantics**: op-node injects the L1-attributes deposit and user deposits (ETH/token bridge mints) as the first transactions of every block. The guest inside the machine parses and honors them — crediting balances, recording L1 block info — which is what makes the standard bridge sound. This mirrors Cartesi Rollups' InputBox/portal pattern, just arriving in OP's deposit-transaction encoding, which the guest ABI-decodes like any other input.
+4. **Deposit semantics**: op-node injects the [L1-attributes deposit](https://specs.optimism.io/protocol/deposits.html#l1-attributes-deposited-transaction) and [user deposits](https://specs.optimism.io/protocol/deposits.html#user-deposited-transactions) (ETH/token bridge mints) as the first transactions of every block. The guest inside the machine parses and honors them — crediting balances, recording L1 block info — which is what makes the standard bridge sound. This mirrors Cartesi Rollups' InputBox/portal pattern, just arriving in OP's deposit-transaction encoding, which the guest ABI-decodes like any other input.
 5. **A minimal `eth_*` surface** for op-node, op-batcher and op-proposer, plus the subset ordinary wallets need. Everything genuinely machine-shaped is served under a `cartesi_*` namespace instead of being faked as EVM state.
 
 The leverage is the point: **op-node, op-batcher, op-proposer, op-conductor, sequencer mode, P2P, blob DA, and the entire derivation pipeline come for free once this shim exists.**
@@ -96,7 +96,7 @@ The Cartesi Machine's I/O model has three concepts that look receipt-shaped but 
 
 | Cartesi concept | Nature | OP Stack / Ethereum counterpart |
 |---|---|---|
-| **Output — voucher** (`tx-output`; an executable call on L1) | provable, committed | **Withdrawal** (an L2ToL1MessagePasser message). Belongs in the *output root*, not in a receipt. |
+| **Output — voucher** (`tx-output`; an executable call on L1) | provable, committed | **[Withdrawal](https://specs.optimism.io/protocol/withdrawals.html#the-l2tol1messagepasser-contract)** (an L2ToL1MessagePasser message). Belongs in the *output root*, not in a receipt. |
 | **Output — notice** (a provable statement) | provable, committed | Ethereum **log / event**. Belongs in the receipt *and* in the outputs commitment. |
 | **Report** (`tx-report`) | explicitly **not** provable | Receipt **status, revert reason, debug payload**. Must never enter a commitment. |
 | **Inspect** (`CmioRxRequestInspectState`) | read-only, no state change | **`eth_call`**. Not a receipt concern at all. |
@@ -107,14 +107,14 @@ In Cartesi Rollups, outputs accumulate into an **outputs Merkle root** — that 
 OutputRootV0 = keccak(version, stateRoot, messagePasserStorageRoot, blockHash)
 ```
 
-which is exactly what `op-proposer` posts and what `OptimismPortal` checks withdrawals against.
+which is exactly what `op-proposer` [posts](https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction) and what `OptimismPortal` checks withdrawals against.
 
 ### Isthmus is not optional
 
 op-node builds that output root in `L2Client.outputV0`, and it has two paths:
 
 - **Pre-Isthmus:** `eth_getProof(L2ToL1MessagePasser, [], blockHash)`, then `proof.Verify(block.Root())` — an MPT proof of a specific *account* against the block's state root.
-- **Isthmus:** reads `block.WithdrawalsRoot()` directly from the header.
+- **[Isthmus](https://specs.optimism.io/protocol/isthmus/exec-engine.html#l2tol1messagepasser-storage-root-in-header):** reads `block.WithdrawalsRoot()` directly from the header.
 
 **The pre-Isthmus path is unimplementable for a Cartesi execution layer.** It requires a genuine Ethereum MPT state trie containing an account at a fixed address, provable against the state root. This chain's state root is a Cartesi hash-tree root over the machine's address space; there is no account trie and no such account. Producing a proof that verifies is impossible, and faking one would be worse than not having it.
 
@@ -184,7 +184,7 @@ The chain maintains exactly that trie, and `withdrawalsRoot` is its root:
 
 - **The guest emits withdrawals.** `withdrawEther` emits a `Withdrawal(uint256
   nonce, address sender, address target, uint256 value, uint256 gasLimit,
-  bytes data)` message — the OP `WithdrawalTransaction` fields, riding as a
+  bytes data)` message — the OP [`WithdrawalTransaction` fields](https://specs.optimism.io/protocol/withdrawals.html#the-l2tol1messagepasser-contract), riding as a
   Notice because the rollup device has no raw output. A notice deliberately: a
   voucher is executable by the Cartesi output executor, and a message the
   portal can finalize must not have a second executor to be paid by. The nonce
@@ -195,7 +195,8 @@ The chain maintains exactly that trie, and `withdrawalsRoot` is its root:
   is routed too (`app/src/handlers/passer.ts`): `initiateWithdrawal(target,
   gasLimit, data)` burns `msg.value` and emits the message with the caller's
   exact fields, and a plain transfer is the real passer's `receive()` — so
-  viem's `initiateWithdrawal`, the first step of the stock withdrawal guide,
+  viem's `initiateWithdrawal`, the first step of the [stock withdrawal
+  guide](https://specs.optimism.io/protocol/withdrawals.html#withdrawal-flow),
   starts a withdrawal without knowing the execution layer is not an EVM.
   `withdrawEther` remains as a convenience over the same burn.
 - **The host maintains the trie** (`chain/passertrie.go`): a genuine
@@ -273,9 +274,9 @@ Deposits arrive through the real `OptimismPortal.depositTransaction`, are derive
 
 ### ERC-20: the standard OP bridge, both directions
 
-The guest adopts `L2CrossDomainMessenger` (0x4200…0007) and `L2StandardBridge` (0x4200…0010) as real predeploys, implemented as native guest handlers rather than EVM bytecode.
+The guest adopts [`L2CrossDomainMessenger`](https://specs.optimism.io/protocol/predeploys.html#l2crossdomainmessenger) (0x4200…0007) and [`L2StandardBridge`](https://specs.optimism.io/protocol/predeploys.html#l2standardbridge) (0x4200…0010) as real predeploys, implemented as native guest handlers rather than EVM bytecode.
 
-- **Inbound**, `L1StandardBridge.depositERC20` escrows the tokens on L1 and sends a cross-domain message, which reaches `OptimismPortal` as an ordinary `TransactionDeposited` — so op-node derives it and hands it to the machine like any other deposit. It arrives as two layers of ABI:
+- **Inbound**, [`L1StandardBridge.depositERC20`](https://specs.optimism.io/protocol/bridges.html#token-depositing) escrows the tokens on L1 and sends a cross-domain message, which reaches `OptimismPortal` as an ordinary `TransactionDeposited` — so op-node derives it and hands it to the machine like any other deposit. It arrives as two layers of ABI:
 
       to     0x4200…0007          (L2CrossDomainMessenger)
       from   0x199ed609…56393     (aliased L1CrossDomainMessenger)
@@ -283,7 +284,7 @@ The guest adopts `L2CrossDomainMessenger` (0x4200…0007) and `L2StandardBridge`
                           value, minGasLimit,
                message = finalizeBridgeERC20(l2Token, l1Token, from, to, amount, ""))
 
-  The messenger authenticates `relayMessage` from the *aliased*
+  The messenger authenticates `relayMessage` from the *[aliased](https://specs.optimism.io/protocol/deposits.html#address-aliasing)*
   `L1CrossDomainMessenger` — an address the owner registers — and dispatches to
   the target. The bridge accepts `finalizeBridgeERC20` and `finalizeBridgeETH`
   only through that dispatch, checking the message's cross-domain sender is the
@@ -355,7 +356,7 @@ This repo ships no Cartesi-style L1 portals: with the standard paths in place th
 
 ### The encodings that became consensus
 
-`hashWithdrawal`, the `relayMessage` ABI, `encodeVersionedNonce`, and `hashCrossDomainMessageV1` are encodings the guest must reproduce byte-exactly: `L1CrossDomainMessenger` recomputes the v1 hash for replay protection, and the withdrawal hash is what the portal proves. They are pinned in `CrossDomainVectors.t.sol` against OP's own `Encoding` and `Hashing` libraries, vendored verbatim next to the trie verifier — fixed vectors produced by the guest's TypeScript encoders, recomputed by the exact Solidity that will judge them on L1. `baseGas` is transcribed with OP's constants but is deliberately not consensus-critical: L1 never recomputes it, it only rides inside the withdrawal hash as the minimum gas the finalizer must supply.
+`hashWithdrawal`, the `relayMessage` ABI, `encodeVersionedNonce`, and [`hashCrossDomainMessageV1`](https://specs.optimism.io/protocol/messengers.html#message-version-1) are encodings the guest must reproduce byte-exactly: `L1CrossDomainMessenger` recomputes the v1 hash for replay protection, and the withdrawal hash is what the portal proves. They are pinned in `CrossDomainVectors.t.sol` against OP's own `Encoding` and `Hashing` libraries, vendored verbatim next to the trie verifier — fixed vectors produced by the guest's TypeScript encoders, recomputed by the exact Solidity that will judge them on L1. `baseGas` is transcribed with OP's constants but is deliberately not consensus-critical: L1 never recomputes it, it only rides inside the withdrawal hash as the minimum gas the finalizer must supply.
 
 ### Receipts OP tooling can read
 
@@ -466,7 +467,7 @@ one proof covers a large `mcycle_count`.
 
 **Track B — OP's own proving stack.** Make the Cartesi state transition provable
 by machinery OP already ships, by writing a **`cartesi-program`** — the analogue
-of op-program/Kona — a self-contained deterministic client that runs OP
+of [op-program/Kona](https://specs.optimism.io/fault-proof/index.html#fault-proof-program) — a self-contained deterministic client that runs OP
 derivation to reconstruct the input sequence from L1 data via the preimage
 oracle, then executes those inputs by *embedding the Cartesi machine emulator
 itself* (the emulator supports freestanding compilation for exactly this),
@@ -475,7 +476,7 @@ asserting the final root hash. Derivation logic comes from Kona's reusable
 writing derivation. Two flavors:
 
 - **B1 — Asterisc (interactive):** compile `cartesi-program` to RISC-V and prove
-  it in OP's RISC-V FPVM, using the **stock `FaultDisputeGame`** and stock
+  it in OP's RISC-V FPVM, using the **stock [`FaultDisputeGame`](https://specs.optimism.io/fault-proof/stage-one/fault-dispute-game.html)** and stock
   `op-challenger`. New contracts: none — you deploy the standard game with your
   absolute prestate. The cost is emulator-inside-FPVM: off-chain that is a
   constant-factor slowdown on trace generation (bisection keeps on-chain work at
@@ -653,7 +654,11 @@ A Cartesi-machine L2 is natively an **app-chain**: the chain's state transition 
 
 ## Key references
 - Cartesi machine emulator (code analyzed): https://github.com/cartesi/machine-emulator — `src/cm.h` (C API), `uarch/`, `risc0/` (ZK pipeline)
-- OP Stack specs — rollup node & Engine API: https://specs.optimism.io/protocol/rollup-node.html · https://specs.optimism.io/protocol/exec-engine.html
+- OP Stack specs — rollup node & Engine API: https://specs.optimism.io/protocol/rollup-node.html · https://specs.optimism.io/protocol/exec-engine.html#engine-api
+- OP Stack specs — derivation, deposits, withdrawals: https://specs.optimism.io/protocol/derivation.html · https://specs.optimism.io/protocol/deposits.html · https://specs.optimism.io/protocol/withdrawals.html
+- OP Stack specs — output proposals, predeploys, bridges & messengers: https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction · https://specs.optimism.io/protocol/predeploys.html · https://specs.optimism.io/protocol/bridges.html · https://specs.optimism.io/protocol/messengers.html
+- OP Stack specs — Isthmus `withdrawalsRoot` in the header (§4–§5): https://specs.optimism.io/protocol/isthmus/exec-engine.html#l2tol1messagepasser-storage-root-in-header
+- OP Stack specs — fault proofs & the dispute game interface (§8): https://specs.optimism.io/fault-proof/index.html · https://specs.optimism.io/fault-proof/stage-one/fault-dispute-game.html · https://specs.optimism.io/fault-proof/stage-one/dispute-game-interface.html
 - op-node README (CL/EL split): https://github.com/ethereum-optimism/optimism/blob/develop/op-node/README.md
 - Monomer (non-EVM engine behind op-node; reference for the shim): https://github.com/polymerdao/monomer
 - Asterisc (RISC-V FPVM, registered OP game type): https://github.com/ethereum-optimism/asterisc
