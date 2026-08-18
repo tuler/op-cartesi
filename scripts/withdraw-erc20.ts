@@ -25,7 +25,7 @@ import {
 import { config, usage } from "devnet/env";
 import { l1Public, l2Public } from "devnet/wallet";
 import { encodeFunctionData, getAddress, parseAbi } from "viem";
-import { sendL2Tx } from "./lib/l2.ts";
+import { l2Sender, sendL2Tx, waitL2Receipt } from "./lib/l2.ts";
 import { proveAndFinalizeWithdrawal } from "./lib/portal.ts";
 
 const balanceOfAbi = parseAbi(["function balanceOf(address owner) view returns (uint256)"]);
@@ -45,7 +45,12 @@ if (!token) {
 const l1 = l1Public();
 const l2 = l2Public();
 
-console.error(`asking the guest to bridge ${amount} of ${token} to ${to}`);
+// The bridge call would *revert* on a short token balance (visible in the
+// receipt), but a sender with no ether at all cannot pay the fee and gets
+// *rejected* — dropped without a receipt — so name the sender up front.
+const sender = l2Sender();
+
+console.error(`asking the guest to bridge ${amount} of ${token} to ${to} (sender ${sender})`);
 const txHash = await sendL2Tx({
     to: L2_BRIDGE_ADDRESS,
     data: encodeFunctionData({
@@ -56,7 +61,7 @@ const txHash = await sendL2Tx({
 });
 console.error(`  L2 tx ${txHash}`);
 
-const receipt = await l2.waitForTransactionReceipt({ hash: txHash, pollingInterval: 2_000 });
+const receipt = await waitL2Receipt(txHash);
 const emissions = await l2.getTransactionEmissions({ hash: txHash });
 const message = emissions.outputs
     .map((o) => decodeWithdrawalOutput(o.data))
