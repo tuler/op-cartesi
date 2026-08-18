@@ -652,7 +652,13 @@ root:
   `encodeVersionedNonce`-shaped (version 1 in the top 16 bits) and derived
   from the chain-wide input index plus a per-input ordinal, which makes it
   unique with no stored counter — nothing on L1 requires the counter to be
-  dense, only the withdrawal hash to be unique.
+  dense, only the withdrawal hash to be unique. The passer predeploy itself
+  is routed too (`app/src/handlers/passer.ts`): `initiateWithdrawal(target,
+  gasLimit, data)` burns `msg.value` and emits the message with the caller's
+  exact fields, and a plain transfer is the real passer's `receive()` — so
+  viem's `initiateWithdrawal`, the first step of the stock withdrawal guide,
+  starts a withdrawal without knowing the execution layer is not an EVM.
+  `withdrawEther` remains as a convenience over the same burn.
 - **The host maintains the trie** (`chain/passertrie.go`): a genuine
   Ethereum storage trie over geth's own `trie` package, secure-keyed the way
   geth keys account storage, holding the `sentMessages` slot of every

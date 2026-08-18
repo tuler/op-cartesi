@@ -42,6 +42,14 @@ export const erc20FacadeAbi = parseAbi([
     "function transfer(address to, uint256 value) returns (bool)",
 ]);
 
+/** The adopted OP predeploy: L2ToL1MessagePasser at 0x4200…0016 — the
+ * function viem's initiateWithdrawal sends, so the stock OP withdrawal flow
+ * (viem.sh/op-stack/guides/withdrawals) starts against this chain exactly as
+ * it would against any other. */
+export const messagePasserAbi = parseAbi([
+    "function initiateWithdrawal(address target, uint256 gasLimit, bytes data) payable",
+]);
+
 /** The adopted OP predeploy: L1Block views at 0x4200…0015. */
 export const l1BlockAbi = parseAbi([
     "function number() view returns (uint64)",

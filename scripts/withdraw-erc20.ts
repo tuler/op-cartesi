@@ -16,14 +16,9 @@
 // L1 bridge release its own escrow — no voucher, no executor, no custom
 // contract anywhere on the path.
 
-import {
-    decodeWithdrawalOutput,
-    L2_BRIDGE_ADDRESS,
-    l2StandardBridgeAbi,
-    l2TokenAddress,
-} from "@op-cartesi/evm";
+import { L2_BRIDGE_ADDRESS, l2StandardBridgeAbi, l2TokenAddress } from "@op-cartesi/evm";
 import { config, usage } from "devnet/env";
-import { l1Public, l2Public } from "devnet/wallet";
+import { l1Public } from "devnet/wallet";
 import { encodeFunctionData, getAddress, parseAbi } from "viem";
 import { l2Sender, sendL2Tx, waitL2Receipt } from "./lib/l2.ts";
 import { proveAndFinalizeWithdrawal } from "./lib/portal.ts";
@@ -43,7 +38,6 @@ if (!token) {
 }
 
 const l1 = l1Public();
-const l2 = l2Public();
 
 // The bridge call would *revert* on a short token balance (visible in the
 // receipt), but a sender with no ether at all cannot pay the fee and gets
@@ -62,16 +56,11 @@ const txHash = await sendL2Tx({
 console.error(`  L2 tx ${txHash}`);
 
 const receipt = await waitL2Receipt(txHash);
-const emissions = await l2.getTransactionEmissions({ hash: txHash });
-const message = emissions.outputs
-    .map((o) => decodeWithdrawalOutput(o.data))
-    .find((w) => w !== undefined);
-if (!message) throw new Error("the transaction emitted no withdrawal message");
 
 const balance = () =>
     l1.readContract({ address: token, abi: balanceOfAbi, functionName: "balanceOf", args: [to] });
 const before = await balance();
-await proveAndFinalizeWithdrawal(message, receipt.blockNumber);
+await proveAndFinalizeWithdrawal(receipt);
 const after = await balance();
 
 console.error("");

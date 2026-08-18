@@ -383,15 +383,16 @@ stores the decoded values, and the standard view methods (`number()`,
 `timestamp()`, `hash()`, `basefee()`, `sequenceNumber()`, …) serve them.
 Tooling that reads L1 context on OP chains starts working, and — more
 useful — *guest applications gain L1 context* they currently have no
-access to. `L2ToL1MessagePasser` (`0x4200…0016`) is adopted at the *storage*
-level but not the ABI level: the chain maintains its `sentMessages`
-storage trie as the header's `withdrawalsRoot` (DESIGN §7f), so
-`eth_getProof` for the address and `proveWithdrawalTransaction` work —
-but there is no contract to call at that address; withdrawals enter
-through the bridge built-in, which plays `initiateWithdrawal`'s role.
-Calling conventions without the storage would have been the worse half
-to adopt; the storage without the ABI is the half OP tooling actually
-verifies against. The messenger/standard-bridge pair
+access to. `L2ToL1MessagePasser` (`0x4200…0016`) is adopted at both
+levels: the chain maintains its `sentMessages` storage trie as the
+header's `withdrawalsRoot` (DESIGN §7f), so `eth_getProof` for the
+address and `proveWithdrawalTransaction` work — and the guest routes the
+address itself, serving `initiateWithdrawal(target, gasLimit, data)` (a
+burn of `msg.value` that becomes the `Withdrawal` message verbatim) and
+the real passer's `receive()` for a plain transfer, so viem's
+`initiateWithdrawal` and the rest of the stock withdrawal flow run
+unchanged. The bridge built-in's `withdrawEther` remains as a
+convenience over the same burn. The messenger/standard-bridge pair
 (`0x4200…0007`/`…0010`) — deferred here while their withdrawal halves
 were unimplementable — is now adopted in full (DESIGN §7g): the
 messenger relays deposits from the registered L1 messenger and sends

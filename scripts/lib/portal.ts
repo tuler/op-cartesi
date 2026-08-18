@@ -1,146 +1,98 @@
-// The L1 half of every OP-path withdrawal, whatever the message says: wait
-// for a proposal covering the withdrawal's block, prove the sentMessages
-// slot against it with eth_getProof — the exact storage proof viem's
-// buildProveWithdrawal would fetch — then outlive the delays and finalize.
+// The L1 half of every OP-path withdrawal, on viem's op-stack actions — the
+// same calls the withdrawal guide (viem.sh/op-stack/guides/withdrawals) runs
+// against any OP chain: waitToProve finds the dispute game covering the
+// withdrawal's block, buildProveWithdrawal fetches the message passer's
+// storage proof with eth_getProof, and proveWithdrawal / finalizeWithdrawal
+// drive OptimismPortal. The withdrawal itself comes off the L2 receipt's
+// MessagePassed log, so callers hand over a receipt and nothing else.
 //
-// The delay and game plumbing is devnet-specific: anvil time is advanced
-// past the proof maturity delay and the permissioned game's clock, and the
-// game is resolved by hand because nothing else on the devnet will.
+// One deliberate departure from the guide: no waitToFinalize. It measures
+// the proof's age against the caller's wall clock, and this devnet advances
+// *anvil's* clock past the delays instead of living through a week of them —
+// the two clocks disagree by exactly the amount skipped, so waitToFinalize
+// would wait out the real seven days. The devnet plumbing between prove and
+// finalize (advance time, resolve the permissioned game by hand, advance
+// past the air gap) stands in for it.
 
-import {
-    MESSAGE_PASSER_ADDRESS,
-    type WithdrawalMessage,
-    withdrawalHash,
-    withdrawalSlot,
-} from "@op-cartesi/evm";
 import { config } from "devnet/env";
-import { l1Public, l1Wallet, l2Public } from "devnet/wallet";
-import { type Address, type Hex, parseAbi } from "viem";
-
-const factoryAbi = parseAbi([
-    "function gameCount() view returns (uint256)",
-    "function gameAtIndex(uint256 index) view returns (uint32, uint64, address)",
-]);
+import { l1Public, l1Wallet, l2Chain, l2Public } from "devnet/wallet";
+import { getAddress, parseAbi, type TransactionReceipt, toFunctionSelector } from "viem";
 
 const gameAbi = parseAbi([
-    "function l2BlockNumber() view returns (uint256)",
     "function status() view returns (uint8)",
     "function resolve() returns (uint8)",
     "function resolveClaim(uint256 claimIndex, uint256 numToResolve)",
     "function maxClockDuration() view returns (uint64)",
 ]);
 
-const portalAbi = parseAbi([
-    "function proveWithdrawalTransaction((uint256 nonce, address sender, address target, uint256 value, uint256 gasLimit, bytes data) tx, uint256 disputeGameIndex, (bytes32 version, bytes32 stateRoot, bytes32 messagePasserStorageRoot, bytes32 latestBlockhash) outputRootProof, bytes[] withdrawalProof)",
-    "function finalizeWithdrawalTransaction((uint256 nonce, address sender, address target, uint256 value, uint256 gasLimit, bytes data) tx)",
+const portalDelaysAbi = parseAbi([
     "function proofMaturityDelaySeconds() view returns (uint256)",
     "function disputeGameFinalityDelaySeconds() view returns (uint256)",
-    // The portal's custom errors, so a revert prints a name, not a selector.
-    "error OptimismPortal_InvalidRootClaim()",
-    "error OptimismPortal_ProofNotOldEnough()",
-    "error OptimismPortal_Unproven()",
-    "error OptimismPortal_InvalidProofTimestamp()",
-    "error OptimismPortal_ImproperDisputeGame()",
-    "error OptimismPortal_InvalidDisputeGame()",
-    "error OptimismPortal_AlreadyFinalized()",
-    "error OptimismPortal_InvalidMerkleProof()",
-    "error OptimismPortal_InvalidOutputRootProof()",
-    "error OptimismPortal_BadTarget()",
-    "error OptimismPortal_CallPaused()",
-    "error OptimismPortal_GasEstimation()",
 ]);
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// The portal's custom errors, by selector — viem's own portal ABI carries
+// none of them, so without this a revert prints four bytes and nothing else.
+const portalErrorNames = new Map(
+    [
+        "OptimismPortal_InvalidRootClaim",
+        "OptimismPortal_ProofNotOldEnough",
+        "OptimismPortal_Unproven",
+        "OptimismPortal_InvalidProofTimestamp",
+        "OptimismPortal_ImproperDisputeGame",
+        "OptimismPortal_InvalidDisputeGame",
+        "OptimismPortal_AlreadyFinalized",
+        "OptimismPortal_InvalidMerkleProof",
+        "OptimismPortal_InvalidOutputRootProof",
+        "OptimismPortal_BadTarget",
+        "OptimismPortal_CallPaused",
+        "OptimismPortal_GasEstimation",
+    ].map((name) => [toFunctionSelector(`${name}()`).toLowerCase(), name]),
+);
 
-/** Proves and finalizes one withdrawal message through OptimismPortal.
- * `emittedIn` is the L2 block that carried it. */
-export async function proveAndFinalizeWithdrawal(
-    message: WithdrawalMessage,
-    emittedIn: bigint,
-): Promise<void> {
-    const factory = config.disputeGameFactory;
-    if (!factory) throw new Error("run the devnet with contracts deployed first");
+/** Rethrows a portal revert with its error named, when the selector in the
+ * message is one of the portal's. */
+function explainPortalRevert(e: unknown): never {
+    const match = e instanceof Error ? e.message.match(/0x[0-9a-fA-F]{8}/) : null;
+    const name = match && portalErrorNames.get(match[0].toLowerCase());
+    if (e instanceof Error && name) {
+        e.message = `${name} — ${e.message}`;
+    }
+    throw e;
+}
+
+/** Proves and finalizes the withdrawal carried by an L2 transaction receipt
+ * through OptimismPortal. */
+export async function proveAndFinalizeWithdrawal(receipt: TransactionReceipt): Promise<void> {
+    if (!config.disputeGameFactory) throw new Error("run the devnet with contracts deployed first");
     const l1 = l1Public();
     const l2 = l2Public();
     const caller = l1Wallet(config.callerKey);
     const portal = config.depositContract;
-    const wHash = withdrawalHash(message);
-    console.error(`  withdrawal ${wHash}, in L2 block ${emittedIn}`);
 
-    // 1. Wait for a proposal whose L2 block is at or past the withdrawal's.
-    console.error(`  waiting for a proposal covering L2 block ${emittedIn}`);
-    let gameIndex = -1n;
-    let game: Address | undefined;
-    let proposedBlock = 0n;
-    for (;;) {
-        const count = await l1.readContract({
-            address: factory,
-            abi: factoryAbi,
-            functionName: "gameCount",
-        });
-        for (let i = count - 1n; i >= 0n; i--) {
-            const [, , proxy] = await l1.readContract({
-                address: factory,
-                abi: factoryAbi,
-                functionName: "gameAtIndex",
-                args: [i],
-            });
-            const block = await l1.readContract({
-                address: proxy,
-                abi: gameAbi,
-                functionName: "l2BlockNumber",
-            });
-            if (block >= emittedIn) {
-                gameIndex = i;
-                game = proxy;
-                proposedBlock = block;
-                break;
-            }
-        }
-        if (game) break;
-        await sleep(4_000);
-    }
-    console.error(`  game ${gameIndex} proposes L2 block ${proposedBlock}`);
-
-    // 2. The storage proof against the proposed block.
-    const slot = withdrawalSlot(wHash);
-    const proof = await l2.getProof({
-        address: MESSAGE_PASSER_ADDRESS,
-        storageKeys: [slot],
-        blockNumber: proposedBlock,
+    // 1. Wait for a proposal (a dispute game) at or past the withdrawal's
+    // block. waitToProve also lifts the withdrawal off the receipt's
+    // MessagePassed log — the log the guest synthesizes for exactly this.
+    console.error(`  waiting for a proposal covering L2 block ${receipt.blockNumber}`);
+    const { game, output, withdrawal } = await l1.waitToProve({
+        receipt,
+        targetChain: l2Chain,
+        pollingInterval: 4_000,
     });
-    const block = await l2.getBlock({ blockNumber: proposedBlock });
-    if (!block.withdrawalsRoot) throw new Error(`L2 block ${proposedBlock} has no withdrawalsRoot`);
-    if (proof.storageHash !== block.withdrawalsRoot) {
-        throw new Error(
-            `storageHash ${proof.storageHash} != withdrawalsRoot ${block.withdrawalsRoot}`,
-        );
-    }
+    console.error(`  withdrawal ${withdrawal.withdrawalHash}`);
+    console.error(`  game ${output.outputIndex} proposes L2 block ${output.l2BlockNumber}`);
 
-    // 3. Prove against the portal.
-    const zero: Hex = "0x0000000000000000000000000000000000000000000000000000000000000000";
-    await waitL1(
-        l1,
-        caller.writeContract({
-            address: portal,
-            abi: portalAbi,
-            functionName: "proveWithdrawalTransaction",
-            args: [
-                message,
-                gameIndex,
-                {
-                    version: zero,
-                    stateRoot: block.stateRoot,
-                    messagePasserStorageRoot: block.withdrawalsRoot,
-                    latestBlockhash: block.hash,
-                },
-                proof.storageProof[0]!.proof,
-            ],
-        }),
-    );
+    // 2. The storage proof against the proposed block: eth_getProof on the
+    // message passer, answered from the block's withdrawal trie.
+    const proveArgs = await l2.buildProveWithdrawal({ output, withdrawal });
+
+    // 3. Prove.
+    await waitL1(l1, caller.proveWithdrawal(proveArgs).catch(explainPortalRevert));
     console.error(`  proven against OptimismPortal at ${portal}`);
 
-    // 4. Outlive the delays and resolve the game — devnet plumbing.
+    // 4. Outlive the delays and resolve the game — the devnet plumbing the
+    // header explains. The game proxy's address rides in the metadata word
+    // of the factory's GameId: (type ‖ timestamp ‖ address).
+    const gameProxy = getAddress(`0x${game.metadata.slice(26)}`);
     const skipTime = async (seconds: bigint, what: string) => {
         console.error(`  advancing anvil time by ${seconds}s (${what})`);
         await l1.request({
@@ -151,11 +103,11 @@ export async function proveAndFinalizeWithdrawal(
     };
     const maturity = await l1.readContract({
         address: portal,
-        abi: portalAbi,
+        abi: portalDelaysAbi,
         functionName: "proofMaturityDelaySeconds",
     });
     const clock = await l1.readContract({
-        address: game!,
+        address: gameProxy,
         abi: gameAbi,
         functionName: "maxClockDuration",
     });
@@ -164,13 +116,17 @@ export async function proveAndFinalizeWithdrawal(
         `proof maturity ${maturity}s, game clock ${clock}s`,
     );
 
-    const status = await l1.readContract({ address: game!, abi: gameAbi, functionName: "status" });
+    const status = await l1.readContract({
+        address: gameProxy,
+        abi: gameAbi,
+        functionName: "status",
+    });
     if (status === 0) {
         console.error("  resolving the dispute game");
         await waitL1(
             l1,
             caller.writeContract({
-                address: game!,
+                address: gameProxy,
                 abi: gameAbi,
                 functionName: "resolveClaim",
                 args: [0n, 0n],
@@ -178,7 +134,7 @@ export async function proveAndFinalizeWithdrawal(
         );
         await waitL1(
             l1,
-            caller.writeContract({ address: game!, abi: gameAbi, functionName: "resolve" }),
+            caller.writeContract({ address: gameProxy, abi: gameAbi, functionName: "resolve" }),
         );
     }
 
@@ -188,7 +144,7 @@ export async function proveAndFinalizeWithdrawal(
     // or finalize reverts with OptimismPortal_InvalidRootClaim.
     const finality = await l1.readContract({
         address: portal,
-        abi: portalAbi,
+        abi: portalDelaysAbi,
         functionName: "disputeGameFinalityDelaySeconds",
     });
     await skipTime(finality + 60n, `dispute game finality delay ${finality}s`);
@@ -196,17 +152,12 @@ export async function proveAndFinalizeWithdrawal(
     // 5. Finalize: the portal executes the withdrawal's call.
     await waitL1(
         l1,
-        caller.writeContract({
-            address: portal,
-            abi: portalAbi,
-            functionName: "finalizeWithdrawalTransaction",
-            args: [message],
-        }),
+        caller.finalizeWithdrawal({ targetChain: l2Chain, withdrawal }).catch(explainPortalRevert),
     );
     console.error("  finalized through OptimismPortal");
 }
 
-async function waitL1(l1: ReturnType<typeof l1Public>, tx: Promise<Hex>): Promise<void> {
+async function waitL1(l1: ReturnType<typeof l1Public>, tx: Promise<`0x${string}`>): Promise<void> {
     const receipt = await l1.waitForTransactionReceipt({ hash: await tx });
     if (receipt.status !== "success")
         throw new Error(`L1 transaction ${receipt.transactionHash} reverted`);

@@ -43,6 +43,7 @@ import { Erc20Facade } from "./handlers/erc20.ts";
 import { L1Block } from "./handlers/l1block.ts";
 import { L2Bridge } from "./handlers/l2bridge.ts";
 import { Messenger } from "./handlers/messenger.ts";
+import { MessagePasser } from "./handlers/passer.ts";
 import { PortalReceiver } from "./handlers/portal.ts";
 import { Registry } from "./handlers/registry.ts";
 import { AccountsDriveError, InsufficientFunds, type Ledger } from "./ledger.ts";
@@ -170,6 +171,9 @@ export class Router {
         messenger.bridge = l2Bridge;
         this.manifest.set(addrKey(L2_MESSENGER_ADDRESS), messenger);
         this.manifest.set(addrKey(L2_BRIDGE_ADDRESS), l2Bridge);
+        // The passer itself: initiateWithdrawal, viem's entry into the
+        // withdrawal flow — needs no registration, a withdrawal is a burn.
+        this.manifest.set(addrKey(MESSAGE_PASSER_ADDRESS), new MessagePasser());
         registry.lookup = (addr) => {
             const h = this.resolve(addr, null);
             return h ? { payable: h.payable ?? false } : undefined;
