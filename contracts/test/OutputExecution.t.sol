@@ -7,6 +7,7 @@ import {OutputValidityProof} from "cartesi-rollups-contracts/src/common/OutputVa
 import {Outputs} from "cartesi-rollups-contracts/src/common/Outputs.sol";
 
 import {OutputTree} from "./OutputTree.sol";
+import {PasserTrieFixture} from "./PasserTrie.sol";
 
 import {
     OPOutputsMerkleRootValidator, OutputRootProof
@@ -102,11 +103,19 @@ contract OutputExecutionTest is Test {
     }
 
     /// @dev Builds the OP output root the way op-node does, and proposes it.
-    function propose(uint256 l2Block, uint8 status) internal returns (uint256, OutputRootProof memory) {
+    /// The messagePasserStorageRoot is the withdrawal trie's root — here the
+    /// single-slot trie holding the outputs root, which is exactly what the
+    /// chain commits for a block with no OP withdrawals — and the storage
+    /// proof of that slot is what accept() takes alongside the preimage.
+    function propose(uint256 l2Block, uint8 status)
+        internal
+        returns (uint256, OutputRootProof memory, bytes[] memory)
+    {
+        (bytes32 trieRoot, bytes[] memory slotProof) = PasserTrieFixture.outputsOnlyTrie(outputsRoot());
         OutputRootProof memory proof = OutputRootProof({
             version: bytes32(0),
             stateRoot: keccak256(abi.encode("machine root", l2Block)),
-            messagePasserStorageRoot: outputsRoot(),
+            messagePasserStorageRoot: trieRoot,
             latestBlockhash: keccak256(abi.encode("block hash", l2Block))
         });
         bytes32 claim = keccak256(
@@ -115,7 +124,7 @@ contract OutputExecutionTest is Test {
             )
         );
         MockGame game = new MockGame(claim, l2Block, status);
-        return (factory.add(address(game)), proof);
+        return (factory.add(address(game)), proof, slotProof);
     }
 
     function voucher(address destination, uint256 value) internal pure returns (bytes memory) {
@@ -127,9 +136,9 @@ contract OutputExecutionTest is Test {
     function testVoucherExecutesAgainstAProposal() public {
         Recipient alice = new Recipient();
         uint256 index = appendOutput(voucher(address(alice), 1 ether));
-        (uint256 gameIndex, OutputRootProof memory proof) = propose(100, IN_PROGRESS);
+        (uint256 gameIndex, OutputRootProof memory proof, bytes[] memory slotProof) = propose(100, IN_PROGRESS);
 
-        validator.accept(gameIndex, proof);
+        validator.accept(gameIndex, proof, slotProof);
         executor.executeOutput(voucher(address(alice), 1 ether), proofFor(index));
 
         assertEq(alice.received(), 1 ether, "the voucher did not pay out");
@@ -140,8 +149,8 @@ contract OutputExecutionTest is Test {
     function testVoucherCannotBeReplayed() public {
         Recipient alice = new Recipient();
         uint256 index = appendOutput(voucher(address(alice), 1 ether));
-        (uint256 gameIndex, OutputRootProof memory proof) = propose(100, IN_PROGRESS);
-        validator.accept(gameIndex, proof);
+        (uint256 gameIndex, OutputRootProof memory proof, bytes[] memory slotProof) = propose(100, IN_PROGRESS);
+        validator.accept(gameIndex, proof, slotProof);
 
         executor.executeOutput(voucher(address(alice), 1 ether), proofFor(index));
         vm.expectRevert(abi.encodeWithSelector(OutputExecutor.OutputAlreadyExecuted.selector, index));
@@ -153,8 +162,8 @@ contract OutputExecutionTest is Test {
     function testForgedOutputIsRejected() public {
         Recipient alice = new Recipient();
         uint256 index = appendOutput(voucher(address(alice), 1 ether));
-        (uint256 gameIndex, OutputRootProof memory proof) = propose(100, IN_PROGRESS);
-        validator.accept(gameIndex, proof);
+        (uint256 gameIndex, OutputRootProof memory proof, bytes[] memory slotProof) = propose(100, IN_PROGRESS);
+        validator.accept(gameIndex, proof, slotProof);
 
         bytes memory forged = voucher(address(alice), 99 ether);
         vm.expectRevert();
@@ -174,18 +183,18 @@ contract OutputExecutionTest is Test {
     /// hash to it proves nothing.
     function testAcceptRejectsAProofThatDoesNotOpenTheClaim() public {
         appendOutput(voucher(address(0xbeef), 1 ether));
-        (uint256 gameIndex, OutputRootProof memory proof) = propose(100, IN_PROGRESS);
+        (uint256 gameIndex, OutputRootProof memory proof, bytes[] memory slotProof) = propose(100, IN_PROGRESS);
         proof.messagePasserStorageRoot = keccak256("a different outputs root");
         vm.expectRevert();
-        validator.accept(gameIndex, proof);
+        validator.accept(gameIndex, proof, slotProof);
     }
 
     /// A challenged game is never a source of truth, whatever the posture.
     function testAcceptRejectsAChallengedGame() public {
         appendOutput(voucher(address(0xbeef), 1 ether));
-        (uint256 gameIndex, OutputRootProof memory proof) = propose(100, CHALLENGER_WINS);
+        (uint256 gameIndex, OutputRootProof memory proof, bytes[] memory slotProof) = propose(100, CHALLENGER_WINS);
         vm.expectRevert(OPOutputsMerkleRootValidator.GameChallenged.selector);
-        validator.accept(gameIndex, proof);
+        validator.accept(gameIndex, proof, slotProof);
     }
 
     /// The strict posture a chain with a real proof system sets.
@@ -194,45 +203,45 @@ contract OutputExecutionTest is Test {
             IDisputeGameFactory(address(factory)), GAME_TYPE, address(executor), 1 days, true
         );
         appendOutput(voucher(address(0xbeef), 1 ether));
-        (uint256 unresolved, OutputRootProof memory proof) = propose(100, IN_PROGRESS);
+        (uint256 unresolved, OutputRootProof memory proof, bytes[] memory slotProof) = propose(100, IN_PROGRESS);
         vm.expectRevert(
             abi.encodeWithSelector(OPOutputsMerkleRootValidator.GameNotResolved.selector, IN_PROGRESS)
         );
-        strict.accept(unresolved, proof);
+        strict.accept(unresolved, proof, slotProof);
 
-        (uint256 resolved, OutputRootProof memory proof2) = propose(101, DEFENDER_WINS);
+        (uint256 resolved, OutputRootProof memory proof2, bytes[] memory slotProof2) = propose(101, DEFENDER_WINS);
         vm.expectRevert(); // still inside the maturity delay
-        strict.accept(resolved, proof2);
+        strict.accept(resolved, proof2, slotProof2);
 
         vm.warp(block.timestamp + 1 days);
-        strict.accept(resolved, proof2);
-        assertTrue(strict.isOutputsMerkleRootValid(address(executor), proof2.messagePasserStorageRoot));
+        strict.accept(resolved, proof2, slotProof2);
+        assertTrue(strict.isOutputsMerkleRootValid(address(executor), outputsRoot()));
     }
 
     /// The interface's other question, answered from the same preimage.
     function testMachineRootTracksTheHighestProposal() public {
         appendOutput(voucher(address(0xbeef), 1 ether));
-        (uint256 first, OutputRootProof memory p1) = propose(100, IN_PROGRESS);
-        validator.accept(first, p1);
+        (uint256 first, OutputRootProof memory p1, bytes[] memory sp1) = propose(100, IN_PROGRESS);
+        validator.accept(first, p1, sp1);
         assertEq(validator.getLastFinalizedMachineMerkleRoot(address(executor)), p1.stateRoot);
 
         appendOutput(voucher(address(0xbeef), 2 ether));
-        (uint256 second, OutputRootProof memory p2) = propose(200, IN_PROGRESS);
-        validator.accept(second, p2);
+        (uint256 second, OutputRootProof memory p2, bytes[] memory sp2) = propose(200, IN_PROGRESS);
+        validator.accept(second, p2, sp2);
         assertEq(validator.getLastFinalizedMachineMerkleRoot(address(executor)), p2.stateRoot);
 
         // An older proposal must not move it backwards.
-        validator.accept(first, p1);
+        validator.accept(first, p1, sp1);
         assertEq(validator.getLastFinalizedMachineMerkleRoot(address(executor)), p2.stateRoot);
     }
 
     /// One validator answers for one application.
     function testValidatorAnswersOnlyForItsApplication() public {
         appendOutput(voucher(address(0xbeef), 1 ether));
-        (uint256 gameIndex, OutputRootProof memory proof) = propose(100, IN_PROGRESS);
-        validator.accept(gameIndex, proof);
-        assertTrue(validator.isOutputsMerkleRootValid(address(executor), proof.messagePasserStorageRoot));
-        assertFalse(validator.isOutputsMerkleRootValid(address(0xdead), proof.messagePasserStorageRoot));
+        (uint256 gameIndex, OutputRootProof memory proof, bytes[] memory slotProof) = propose(100, IN_PROGRESS);
+        validator.accept(gameIndex, proof, slotProof);
+        assertTrue(validator.isOutputsMerkleRootValid(address(executor), outputsRoot()));
+        assertFalse(validator.isOutputsMerkleRootValid(address(0xdead), outputsRoot()));
     }
 
     /// The tree is cumulative, so an old output stays provable against a later
@@ -245,8 +254,8 @@ contract OutputExecutionTest is Test {
         for (uint256 i; i < 5; ++i) {
             appendOutput(voucher(address(0xbeef), i));
         }
-        (uint256 later, OutputRootProof memory proof) = propose(200, IN_PROGRESS);
-        validator.accept(later, proof);
+        (uint256 later, OutputRootProof memory proof, bytes[] memory slotProof) = propose(200, IN_PROGRESS);
+        validator.accept(later, proof, slotProof);
 
         executor.executeOutput(voucher(address(alice), 1 ether), proofFor(index));
         assertEq(alice.received(), 1 ether);

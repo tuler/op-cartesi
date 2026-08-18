@@ -5,6 +5,8 @@ import {IOutputsMerkleRootValidator} from "cartesi-rollups-contracts/src/consens
 import {IERC165} from "@openzeppelin-contracts-5.2.0/utils/introspection/IERC165.sol";
 
 import {IDisputeGame, IDisputeGameFactory} from "./interfaces/IDisputeGame.sol";
+import {SecureMerkleTrie} from "./vendor/optimism/SecureMerkleTrie.sol";
+import {RLPReader} from "./vendor/optimism/RLPReader.sol";
 
 /// @notice OP's OutputRootProof, the preimage of the root claim a proposal
 /// records on L1. Verbatim from the OP Stack's Types.sol, because the hash has
@@ -28,16 +30,28 @@ struct OutputRootProof {
 ///     keccak256(version ‖ stateRoot ‖ messagePasserStorageRoot ‖ blockHash)
 ///
 /// and on this chain `messagePasserStorageRoot` is the header's
-/// `withdrawalsRoot`, which is the Cartesi outputs Merkle root. So opening the
-/// claim's preimage on chain — four words and one keccak — turns a proposal
-/// made by stock `op-proposer` into an outputs root that stock
+/// `withdrawalsRoot` — the message passer storage trie the guest maintains.
+/// The Cartesi outputs Merkle root sits in that trie at a reserved slot
+/// (`keccak256("op-cartesi.outputsMerkleRoot")`), so opening a claim takes the
+/// preimage's four words plus one storage proof — verified by the *same*
+/// `SecureMerkleTrie` code `OptimismPortal.proveWithdrawalTransaction` runs
+/// against the same root, vendored rather than reimplemented. That turns a
+/// proposal made by stock `op-proposer` into an outputs root that stock
 /// `Application.executeOutput` will accept.
 ///
-/// Nothing here touches `OptimismPortal`. Its withdrawal path proves an MPT
-/// storage slot against the L2 state root, which cannot work when that root is
-/// a Cartesi hash tree; this sidesteps it rather than forking it, which is
-/// DESIGN §4's option 2.
+/// Nothing here touches `OptimismPortal`. Since the withdrawal trie is a
+/// genuine Ethereum storage trie, the portal's own withdrawal path works
+/// unmodified for OP `Withdrawal` messages the guest emits; this contract
+/// exists for the outputs the portal cannot execute — Cartesi vouchers and
+/// notices, ERC-20 withdrawals among them — which verify against the outputs
+/// root this contract records.
 contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
+    /// @notice The reserved slot of the withdrawal trie that holds the Cartesi
+    /// outputs Merkle root — the hash of a name rather than a small integer,
+    /// so it cannot collide with a sentMessages slot (those hash a 64-byte
+    /// mapping preimage) without a keccak collision.
+    bytes32 internal constant OUTPUTS_ROOT_SLOT = keccak256("op-cartesi.outputsMerkleRoot");
+
     /// @notice Game status values from OP's GameStatus enum.
     uint8 internal constant IN_PROGRESS = 0;
     uint8 internal constant CHALLENGER_WINS = 1;
@@ -83,6 +97,7 @@ contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
     error GameChallenged();
     error GameTooYoung(uint64 createdAt, uint256 maturesAt);
     error ProofDoesNotMatchClaim(bytes32 computed, bytes32 claimed);
+    error OutputsRootValueTooLong(uint256 length);
 
     constructor(
         IDisputeGameFactory factory_,
@@ -101,11 +116,17 @@ contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
     /// @notice Open a proposal's root claim and record the Cartesi outputs root
     /// it commits to.
     ///
-    /// Permissionless by design: the proof is checked against a claim already
-    /// on L1, so anyone submitting it can only make true statements. Whoever
-    /// wants to execute an output calls this once for the proposal they intend
-    /// to prove against.
-    function accept(uint256 gameIndex, OutputRootProof calldata proof) external {
+    /// Permissionless by design: both proofs are checked against a claim
+    /// already on L1, so anyone submitting them can only make true statements.
+    /// Whoever wants to execute an output calls this once for the proposal
+    /// they intend to prove against.
+    ///
+    /// @param outputsRootProof The storage proof of OUTPUTS_ROOT_SLOT against
+    /// the proposal's messagePasserStorageRoot: the RLP trie nodes
+    /// eth_getProof (or cartesi_getOutputProof) serves for that slot.
+    function accept(uint256 gameIndex, OutputRootProof calldata proof, bytes[] calldata outputsRootProof)
+        external
+    {
         (uint32 gt,, IDisputeGame game) = factory.gameAtIndex(gameIndex);
         if (gt != gameType) revert WrongGameType(gt, gameType);
 
@@ -126,12 +147,16 @@ contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
         bytes32 claimed = game.rootClaim();
         if (computed != claimed) revert ProofDoesNotMatchClaim(computed, claimed);
 
+        // The withdrawalsRoot is the message passer trie; the outputs root
+        // is the value its reserved slot holds. The same verifier the portal
+        // uses opens it, so the two consumers of the trie cannot drift.
+        bytes32 outputsMerkleRoot = _readOutputsRoot(proof.messagePasserStorageRoot, outputsRootProof);
+
         // The outputs tree is cumulative over the chain, so a later proposal
         // establishes a superset of what an earlier one did. Keeping the
         // highest block an outputs root was seen at makes that visible without
         // changing the answer.
         uint256 l2Block = game.l2BlockNumber();
-        bytes32 outputsMerkleRoot = proof.messagePasserStorageRoot;
         if (l2Block > acceptedAtL2Block[outputsMerkleRoot]) {
             acceptedAtL2Block[outputsMerkleRoot] = l2Block;
         }
@@ -140,6 +165,24 @@ contract OPOutputsMerkleRootValidator is IOutputsMerkleRootValidator {
             lastFinalizedMachineRoot = proof.stateRoot;
         }
         emit OutputsMerkleRootAccepted(outputsMerkleRoot, gameIndex, l2Block);
+    }
+
+    /// @notice Read the outputs root out of the withdrawal trie: a storage
+    /// proof of the reserved slot, then the RLP framing a storage value
+    /// carries, left-padded back to 32 bytes the way geth trims storage.
+    function _readOutputsRoot(bytes32 withdrawalsRoot, bytes[] calldata outputsRootProof)
+        internal
+        pure
+        returns (bytes32)
+    {
+        bytes memory value = SecureMerkleTrie.get(abi.encode(OUTPUTS_ROOT_SLOT), outputsRootProof, withdrawalsRoot);
+        bytes memory decoded = RLPReader.readBytes(RLPReader.toRLPItem(value));
+        if (decoded.length > 32) revert OutputsRootValueTooLong(decoded.length);
+        bytes32 padded;
+        assembly ("memory-safe") {
+            padded := mload(add(decoded, 32))
+        }
+        return padded >> (8 * (32 - decoded.length));
     }
 
     /// @inheritdoc IOutputsMerkleRootValidator
