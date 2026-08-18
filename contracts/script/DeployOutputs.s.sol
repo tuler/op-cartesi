@@ -11,7 +11,7 @@ import {OutputExecutor} from "../src/OutputExecutor.sol";
 /// opens OP proposals and the executor that runs app-specific outputs
 /// against it — and prints the addresses for the devnet scripts to pick up.
 /// Bridging deploys nothing here: ether and ERC-20 go through the stock OP
-/// contracts (DESIGN §7f–§7g).
+/// contracts (DESIGN §5–§6).
 ///
 /// The validator and the executor point at each other, so the executor's
 /// address is computed from the deployer's next nonce and baked into the

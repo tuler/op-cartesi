@@ -32,7 +32,7 @@ import (
 // What rawdb has no notion of is the machine: there is no analogue in an
 // op-geth chain, where the state simply *is* the database. So the machine is
 // checkpointed whole, at intervals, and the blocks after the newest checkpoint
-// are re-executed on startup. See DESIGN §7b for why that shape rather than a
+// are re-executed on startup. See DESIGN §7 for why that shape rather than a
 // per-block snapshot.
 type Store struct {
 	db  ethdb.Database

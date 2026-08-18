@@ -246,7 +246,7 @@ Deploying `OptimismPortal` also makes OP's own withdrawal path work:
 `proveWithdrawalTransaction` wants a storage proof of the
 L2ToL1MessagePasser's `sentMessages` trie, and the shim maintains exactly
 that trie as the header's `withdrawalsRoot`
-([DESIGN.md §7f](../docs/DESIGN.md)). Ether and ERC-20 withdrawals ride it —
+([DESIGN.md §5](../docs/DESIGN.md)). Ether and ERC-20 withdrawals ride it —
 see below. Cartesi vouchers remain for application outputs the portal has
 no notion of.
 
@@ -394,7 +394,7 @@ the output index and the block to prove it as of.
 
 ### Tokens
 
-ERC-20 goes through `L1StandardBridge`, the standard OP path (DESIGN §7g):
+ERC-20 goes through `L1StandardBridge`, the standard OP path (DESIGN §6):
 
 ```sh
 bun scripts/deposit-erc20.ts 1000000000000000000      # deploys a test token first time
@@ -409,7 +409,7 @@ ledger under the token's derived façade address. The withdrawal is
 the finalize message back through its `L2CrossDomainMessenger`, riding an OP
 `Withdrawal` the portal proves against the withdrawal trie — after which the
 L1 bridge releases its own escrow. No voucher, no executor, no custom
-contract on the path. The Cartesi-style portals are no longer in the repo;
+contract on the path. This repo ships no Cartesi-style portals;
 the guest still enforces escrow exclusivity — one fungible balance backed
 by two escrows would let a deposit into one drain the other — so a
 deployment that registers its own ERC-20 portal cannot also register the

@@ -1,4 +1,4 @@
-// The L2CrossDomainMessenger (0x4200…0007), adopted for real (DESIGN §7g):
+// The L2CrossDomainMessenger (0x4200…0007), adopted for real (DESIGN §6):
 // inbound, it authenticates relayMessage deposits from the aliased L1
 // messenger and dispatches them; outbound, sendCrossDomainMessage wraps a
 // message in relayMessage and emits it as an OP Withdrawal whose sender is

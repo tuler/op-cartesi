@@ -65,7 +65,7 @@ export class Config implements Handler {
                 if (kind !== PORTAL_ETHER && kind !== PORTAL_ERC20) {
                     return { kind: "revert", data: errorRevert("unknown portal kind") };
                 }
-                // Escrow paths are exclusive (DESIGN §7g): a Cartesi ERC-20
+                // Escrow paths are exclusive (DESIGN §6): a Cartesi ERC-20
                 // portal escrows in the application contract, the standard
                 // bridge escrows in L1StandardBridge, and one fungible
                 // ledger balance backed by two escrows lets a deposit into

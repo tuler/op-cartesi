@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Deposits ERC-20 tokens through the standard OP bridge (DESIGN §7g).
+// Deposits ERC-20 tokens through the standard OP bridge (DESIGN §6).
 //
 //   bun scripts/deposit-erc20.ts [amount] [token]
 //

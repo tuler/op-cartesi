@@ -96,12 +96,12 @@ Three observations, all visible in traffic the guest receives today:
    and sender second is the same information, organized the way every
    other Ethereum system organizes it.
 3. **Standard-bridge deposits arrive addressed to `0x4200…0007`** with two
-   layers of ABI (`relayMessage(…finalizeBridgeERC20…)`) that DESIGN §7d
+   layers of ABI (`relayMessage(…finalizeBridgeERC20…)`) that DESIGN §6
    already contemplates the guest decoding by hand. "Decode two ABI layers
    addressed to a known contract address" *is* contract routing, done once,
    inline, without a name.
 
-DESIGN §8's Level 0 — "design the input envelope as `(app_id, payload)`
+DESIGN §9's Level 0 — "design the input envelope as `(app_id, payload)`
 from day one, with a supervisor dispatching by app id" — is the same
 recommendation from the other direction. This design is Level 0 built, with
 one improvement: instead of inventing an app-id scheme, use the one the
@@ -178,7 +178,7 @@ capability: the router must decode *something* to learn the block context
 (number, timestamp, prevRandao — the machine has no other way to know), and
 an ABI-encoded envelope is as good a carrier as any. Two further reasons to
 not churn it: Dave's machine model (`MachineInstance::new_rollups_advanced_until`,
-DESIGN §7e) consumes rollups-style advance inputs, so staying
+DESIGN §8) consumes rollups-style advance inputs, so staying
 encoding-compatible keeps Dave's commitment builder and node machinery
 reusable; and the outputs side of the same guest-tools contract — vouchers
 as `Voucher(address,uint256,bytes)`, notices as `Notice(bytes)` — is pinned
@@ -216,7 +216,7 @@ them:
 - **The outputs accumulator.** libcmt maintains the Cartesi outputs Merkle
   root incrementally and reports it in the TX buffer at each accepted
   yield; `machine/remote_test.go` pins that behavior, the realmachine
-  tests check host and guest agree, and DESIGN §7e requirement 2 makes the
+  tests check host and guest agree, and DESIGN §8 requirement 2 makes the
   in-machine root settlement-critical (`DaveConsensus._validateOutputTree`
   proves exactly that leaf). The router MUST maintain the same accumulator
   and write the same buffer.
@@ -231,7 +231,7 @@ module's own header calls it the dominant cycle cost per transaction. The
 router is the natural moment to go native: a C or Rust router linking a
 real secp256k1 implementation cuts per-transaction cycles by orders of
 magnitude, and cycles are this chain's gas *and* its future proving cost
-(DESIGN §5, Plan B2). The accounts-drive C and Rust libraries already exist
+(DESIGN §8, track B2). The accounts-drive C and Rust libraries already exist
 and pass the same golden vectors as the Lua one, so the ledger side moves
 with it.
 
@@ -282,10 +282,10 @@ transaction executes as a call from `from` to `to` carrying `value`. For a
 simple ether deposit the observable result is what the current guest
 produces (recipient credited), but the rule is uniform, and it preserves
 OP's guarantee that a deposit's mint survives even when its call fails
-(§ below). The lockbox caveat of DESIGN §7c/§7d has since been resolved
-for ether by DESIGN §7f: `withdrawEther` now emits an OP `Withdrawal`
-message finalized by `OptimismPortal` from the lockbox itself, so OP-path
-ether no longer needs to be voucher-reachable.
+(§ below). Ether custody is symmetric: `withdrawEther` emits an OP
+`Withdrawal` message that `OptimismPortal` finalizes from the same lockbox
+the deposit filled (DESIGN §5), so OP-path ether never has to be
+voucher-reachable.
 
 ### Outcomes: applications never roll the machine back
 
@@ -385,7 +385,7 @@ Tooling that reads L1 context on OP chains starts working, and — more
 useful — *guest applications gain L1 context* they currently have no
 access to. `L2ToL1MessagePasser` (`0x4200…0016`) is adopted at both
 levels: the chain maintains its `sentMessages` storage trie as the
-header's `withdrawalsRoot` (DESIGN §7f), so `eth_getProof` for the
+header's `withdrawalsRoot` (DESIGN §5), so `eth_getProof` for the
 address and `proveWithdrawalTransaction` work — and the guest routes the
 address itself, serving `initiateWithdrawal(target, gasLimit, data)` (a
 burn of `msg.value` that becomes the `Withdrawal` message verbatim) and
@@ -393,8 +393,7 @@ the real passer's `receive()` for a plain transfer, so viem's
 `initiateWithdrawal` and the rest of the stock withdrawal flow run
 unchanged. The bridge built-in's `withdrawEther` remains as a
 convenience over the same burn. The messenger/standard-bridge pair
-(`0x4200…0007`/`…0010`) — deferred here while their withdrawal halves
-were unimplementable — is now adopted in full (DESIGN §7g): the
+(`0x4200…0007`/`…0010`) is adopted in full (DESIGN §6): the
 messenger relays deposits from the registered L1 messenger and sends
 withdrawals as messenger-shaped `Withdrawal` outputs, and the bridge
 speaks `bridgeERC20`/`finalizeBridgeERC20` over the ledger's token
@@ -451,7 +450,7 @@ transition, so changing it later means migrating every holder.
   squatting it forecloses the one clean outcome, and relocating a
   façade breaks every wallet holding it.
 - **This chain's own roadmap revives claimability.** "No deployment" is
-  a v1 statement, not an architectural one: §13 keeps DESIGN §8's
+  a v1 statement, not an architectural one: §13 keeps DESIGN §9's
   Level 1 (code as a transaction) and Level 2 (an EVM interpreter as
   one handler, owning a sub-space of addresses) open. The moment either
   lands — CREATE2 replay inside an EVM handler, or manifest-governed
@@ -555,7 +554,7 @@ work it belongs to.
 
 Receipts currently synthesize one log shape: `CartesiOutput(uint64,bytes)`
 from a system address. The doctrine behind it holds — only provable
-emissions may become logs, and reports must never (DESIGN §7). Events
+emissions may become logs, and reports must never (DESIGN §4). Events
 therefore ride the provable channel: a handler emits an event as a
 **notice** whose payload is
 
@@ -572,7 +571,7 @@ produces an actual `Transfer(address,address,uint256)` log that MetaMask,
 indexers and `cast logs` recognize — and on failure it falls back to the
 `CartesiOutput` form unchanged. Nothing here is consensus: `receiptsRoot`
 and the bloom stay empty, so the encoding can still move (the deliberate
-ordering of DESIGN §7 — serve receipts before committing them).
+ordering of DESIGN §4 — serve receipts before committing them).
 
 Two consequences worth stating. Every event is a permanent leaf in the
 cumulative outputs tree — capacity 2^63, cost a few keccaks per emission,
@@ -613,7 +612,7 @@ itself (destroying the ether on L2) and emits an OP `Withdrawal` message
 — a notice carrying the WithdrawalTransaction fields, whose hash's
 sentMessages slot the shim commits into the block's withdrawal trie, and
 which `OptimismPortal.proveWithdrawalTransaction` then finalizes from the
-lockbox (DESIGN §7f). Its nonce is derived from the chain-wide input
+lockbox (DESIGN §5). Its nonce is derived from the chain-wide input
 index plus a per-input ordinal — unique with no stored guest counter.
 `withdrawERC20(address token, address to, uint256 amount)`: debits
 `msg.sender`'s holding of the token (named by its L2 façade address,
@@ -753,8 +752,8 @@ block.)*
 compatibility — Solidity deploys and all — but it abandons the premise.
 Native code is the point of this chain, and an EVM drags in the gas
 schedule, the state trie, and the deployment model, i.e. everything
-ACCOUNTS.md §4 and DESIGN §8 kept out. The honest place for an EVM is
-DESIGN §8 Level 2: *one handler* owning a sub-space of addresses,
+ACCOUNTS.md §4 and DESIGN §9 kept out. The honest place for an EVM is
+DESIGN §9 Level 2: *one handler* owning a sub-space of addresses,
 additive under this same routing standard, if a product case ever wants
 it. Routing makes that possible later without making it foundational now.
 
@@ -766,7 +765,7 @@ the single-app model is the actual complaint.
 **Fake contracts in the shim** (answer `balanceOf` host-side from the
 drive, synthesize events host-side): tempting because the host can read
 the drive — but it moves semantics outside the proven state transition,
-the exact move DESIGN §7e forbids for anything a referee might one day
+the exact move DESIGN §8 forbids for anything a referee might one day
 adjudicate. The guest is the execution layer; the shim serves what the
 guest did.
 
@@ -776,12 +775,12 @@ guest did.
 
 - **Dynamic deployment.** All handlers ship in the snapshot; adding one is
   a machine-template upgrade, governed like any prestate change (exactly
-  ACCOUNTS.md §8's answer for drive geometry). DESIGN §8 Level 1 — code as
+  ACCOUNTS.md §8's answer for drive geometry). DESIGN §9 Level 1 — code as
   a transaction — remains the designed-for future: the manifest becomes
   writable state, and nothing else in this standard moves.
 - **Cross-handler calls.** v1 handlers compose through the ledger API and
   through users' transactions, not through each other. Synchronous native
-  calls are cheap and DESIGN §8 names them as the composability prize, but
+  calls are cheap and DESIGN §9 names them as the composability prize, but
   reentrancy and capability rules deserve their own document, not a
   paragraph here.
 - **Fee market.** This design supplies the missing simulation entry and
@@ -845,9 +844,9 @@ guest did.
 
 ## References
 
-- This repo: DESIGN.md §3 (envelope decision), §7 (outputs/receipts
-  doctrine), §7c–d (bridge custody), §7e (what settlement requires of the
-  guest), §8 (multi-app levels); ACCOUNTS.md (the drive, enforcement,
+- This repo: DESIGN.md §3 (envelope decision), §4 (outputs/receipts
+  doctrine), §5–§6 (commitments and bridge custody), §8 (what settlement
+  requires of the guest), §9 (multi-app levels); ACCOUNTS.md (the drive, enforcement,
   exhaustion economics); ACCOUNTS-DRIVE-SPEC.md (the ledger this design
   routes onto).
 - OP predeploys (`L1Block`, the attributes deposit, address aliasing):

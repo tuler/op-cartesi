@@ -164,7 +164,7 @@ export class Router {
         this.manifest.set(addrKey(BRIDGE_ADDRESS), new Bridge());
         this.manifest.set(addrKey(CONFIG_ADDRESS), new Config(cfg.owner, CONFIG_ADDRESS));
         this.manifest.set(addrKey(L1BLOCK_ADDRESS), this.l1Block);
-        // The standard messaging pair (DESIGN §7g): routed always, live only
+        // The standard messaging pair (DESIGN §6): routed always, live only
         // once the owner registers the L1 side — until then both revert.
         const messenger = new Messenger();
         const l2Bridge = new L2Bridge();

@@ -2,7 +2,7 @@
 // Deploys the contracts that make app-specific Cartesi outputs executable on
 // L1 against OP proposals, and registers the standard messenger pair with
 // the guest. Bridging itself deploys nothing: ether and ERC-20 go through
-// the stock OP contracts (DESIGN §7f–§7g).
+// the stock OP contracts (DESIGN §5–§6).
 //
 // See contracts/ for the Foundry project; this only supplies the addresses the
 // devnet already knows and records what came back.
