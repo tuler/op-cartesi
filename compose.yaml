@@ -1,0 +1,370 @@
+# The devnet as a set of containers: anvil as L1, the OP Stack L1 contracts, a
+# Cartesi Machine, op-cartesi as the execution engine, op-node sequencing on
+# top, a batcher, a proposer, and a second node verifying from L1 alone.
+#
+#   docker compose up                    the lot
+#   docker compose up op-node            sequencer only — and what it needs
+#   docker compose run --rm outputs      the outputs suite, once there is a
+#                                        proposal to deploy it against
+#
+# This is the same stack devnet/start-devnet.ts brings up under mprocs, and the
+# alternative it is experimenting with is the bring-up, not the chain: no
+# marker files, no port polling, no pid records. The ordering is `depends_on`,
+# the readiness is a healthcheck, and the steps that finish rather than run —
+# the L1 deployment, the rollup config — are containers that exit 0 and are
+# waited for with `service_completed_successfully`.
+#
+# The ports are the ones devnet/lib/env.ts defaults to, so everything that
+# talks to the running stack — scripts/deposit.ts, cast, the README's
+# examples — works against this devnet with no configuration at all. The
+# generated files land in devnet/ for the same reason: they are bind-mounted
+# back out, not kept in a volume.
+#
+# Prerequisites: docker, and a machine snapshot at demo/.cartesi/image
+# (./scripts/build-snapshot.ts, once). Nothing else — no bun, no go, no
+# foundry, no op-deployer on the host.
+#
+# See devnet/compose/README.md.
+
+name: op-cartesi-devnet
+
+x-node: &node
+  build:
+    context: .
+    dockerfile: devnet/compose/Dockerfile
+    target: node
+  image: op-cartesi/devnet-node
+  restart: "no"
+
+x-tools: &tools
+  build:
+    context: .
+    dockerfile: devnet/compose/Dockerfile
+    target: tools
+  image: op-cartesi/devnet-tools
+  restart: "no"
+  environment:
+    L1_RPC: http://l1:8600
+    L2_RPC: http://engine:8545
+  volumes:
+    # The deploys write into the repo, where the host's scripts read them back.
+    - ./devnet:/repo/devnet
+    # ...except the container's own dependencies, which the mount above would
+    # otherwise cover with the host's.
+    - /repo/devnet/node_modules
+    # deploy-outputs.ts runs forge in here.
+    - ./contracts:/repo/contracts
+
+services:
+  # --- L1 -------------------------------------------------------------------
+  l1:
+    image: ${FOUNDRY_IMAGE:-ghcr.io/foundry-rs/foundry:v1.3.0}
+    # foundry's image runs whatever it is given through a shell; naming the
+    # binary is clearer, and it makes the flags a list like every other
+    # service's. Deliberately not --silent: `docker compose logs l1` is where
+    # you watch L1 accept the batcher's calldata and the proposer's games.
+    entrypoint: ["anvil"]
+    command:
+      - --host=0.0.0.0
+      - --port=8600
+      - --chain-id=${L1_CHAIN_ID:-900}
+      - --block-time=${L1_BLOCK_TIME:-2}
+    ports:
+      - "127.0.0.1:8600:8600"
+    healthcheck:
+      test: ["CMD", "cast", "block-number", "--rpc-url", "http://127.0.0.1:8600"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # The OP Stack L1 suite, with op-deployer. Runs once and exits; everything
+  # downstream waits for it, because the rollup has to be anchored at a block
+  # where the SystemConfig already exists.
+  l1-contracts:
+    <<: *tools
+    command: ["bun", "devnet/deploy-l1.ts"]
+    depends_on:
+      l1:
+        condition: service_healthy
+
+  # --- genesis --------------------------------------------------------------
+  # Its own machine server, because a server holds exactly one machine and the
+  # sequencer's is about to hold the chain's. compose/genesis.ts shuts this one
+  # down when it is done with it, so the container exits rather than idling
+  # with a booted machine in it.
+  genesis-machine:
+    <<: *node
+    command: ["cartesi-jsonrpc-machine", "--server-address=0.0.0.0:6300"]
+    volumes:
+      # Long form for create_host_path: a missing snapshot is a mistake to be
+      # told about, and the short form would silently mount an empty directory
+      # docker made up on the spot.
+      - type: bind
+        source: ${SNAPSHOT_DIR:-./demo/.cartesi/image}
+        target: /snapshot
+        read_only: true
+        bind:
+          create_host_path: false
+    healthcheck: &machine-healthcheck
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 2 -X POST -H 'content-type: application/json'
+          -d '{"jsonrpc":"2.0","id":1,"method":"get_version","params":[]}'
+          http://127.0.0.1:6300
+      interval: 2s
+      timeout: 5s
+      retries: 30
+
+  # Anchors the rollup to the L1 block the contracts landed in, writes
+  # rollup.json, the JWT secret, and the chain flags the engines must run with.
+  genesis:
+    <<: *tools
+    command: ["bun", "devnet/compose/genesis.ts"]
+    environment:
+      L1_RPC: http://l1:8600
+      L2_RPC: http://engine:8545
+      MACHINE_REMOTE: http://genesis-machine:6300
+      MACHINE_SNAPSHOT: /snapshot
+    depends_on:
+      l1-contracts:
+        condition: service_completed_successfully
+      genesis-machine:
+        condition: service_healthy
+
+  # --- the sequencing node --------------------------------------------------
+  machine:
+    <<: *node
+    command: ["cartesi-jsonrpc-machine", "--server-address=0.0.0.0:6300"]
+    volumes:
+      # Long form for create_host_path: a missing snapshot is a mistake to be
+      # told about, and the short form would silently mount an empty directory
+      # docker made up on the spot.
+      - type: bind
+        source: ${SNAPSHOT_DIR:-./demo/.cartesi/image}
+        target: /snapshot
+        read_only: true
+        bind:
+          create_host_path: false
+      - chaindata:/data
+    healthcheck: *machine-healthcheck
+
+  # op-cartesi: the authenticated Engine API op-node drives on :8551, and the
+  # public eth_* RPC everything else uses on :8545. It binds both only once the
+  # chain is open and the machine has booted, so the healthcheck below is
+  # exact rather than approximate — an engine that answers can serve.
+  engine:
+    <<: *node
+    command: ["engine.sh"]
+    environment:
+      MACHINE_REMOTE: http://machine:6300
+      MACHINE_SNAPSHOT: /snapshot
+      # A path inside the containers, shared with `machine` — the engine keeps
+      # blocks in it, and the machine server writes its checkpoints there.
+      # Empty keeps the chain in memory, which is the default.
+      DATA_DIR: ${DATA_DIR:-}
+    volumes:
+      - ./devnet:/devnet:ro
+      - chaindata:/data
+    ports:
+      - "127.0.0.1:8545:8545"
+      - "127.0.0.1:8551:8551"
+    healthcheck: &engine-healthcheck
+      test:
+        - CMD-SHELL
+        - >-
+          curl -fsS -m 2 -H 'content-type: application/json'
+          -d '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}'
+          http://127.0.0.1:8545
+      interval: 2s
+      timeout: 5s
+      retries: 60
+    depends_on:
+      genesis:
+        condition: service_completed_successfully
+      machine:
+        condition: service_healthy
+
+  # op-node in sequencer mode: it drives block production, and every L2 block
+  # carries the L1-attributes deposit it injects. Everything it needs to know
+  # about the deployment is inside rollup.json, so its command line is fixed.
+  op-node:
+    image: ${OP_NODE_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.3}
+    command:
+      - op-node
+      - --l1=http://l1:8600
+      - --l1.rpckind=basic
+      - --l1.trustrpc
+      - --rollup.l1-chain-config=/devnet/l1-chain-config.json
+      - --l2=http://engine:8551
+      - --l2.jwt-secret=/devnet/jwt.hex
+      - --rollup.config=/devnet/rollup.json
+      - --sequencer.enabled
+      - --sequencer.l1-confs=0
+      - --verifier.l1-confs=0
+      - --p2p.disable
+      - --l1.beacon.ignore
+      - --rpc.addr=0.0.0.0
+      - --rpc.port=9545
+    volumes:
+      - ./devnet:/devnet:ro
+    ports:
+      - "127.0.0.1:9545:9545"
+    depends_on:
+      engine:
+        condition: service_healthy
+    restart: on-failure
+
+  # Posts the sequenced blocks to L1 as calldata, which is what advances the
+  # safe head — and what the verifier rebuilds the chain from. Calldata rather
+  # than blobs: blobs would need a beacon endpoint, and this devnet
+  # deliberately runs without one.
+  #
+  # The OP images carry no shell, so there is no healthcheck to depend on for
+  # op-node; `restart: on-failure` covers the seconds between its container
+  # starting and its RPC answering.
+  op-batcher:
+    image: ${OP_BATCHER_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.16.11}
+    command:
+      - op-batcher
+      - --l1-eth-rpc=http://l1:8600
+      - --l2-eth-rpc=http://engine:8545
+      - --rollup-rpc=http://op-node:9545
+      - --private-key=${BATCHER_KEY:-0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80}
+      - --data-availability-type=calldata
+      - --sub-safety-margin=4
+      - --poll-interval=2s
+      - --num-confirmations=1
+      - --max-channel-duration=2
+      - --rpc.addr=0.0.0.0
+      - --rpc.port=8548
+    ports:
+      - "127.0.0.1:8548:8548"
+    depends_on:
+      engine:
+        condition: service_healthy
+      op-node:
+        condition: service_started
+    restart: on-failure
+
+  # Reads optimism_outputAtBlock from op-node and creates a game per proposal.
+  # --allow-non-finalized because anvil has no beacon chain to finalize
+  # anything, so a proposer that waited for finality would never propose.
+  #
+  # The one address compose cannot write down in advance is the game factory's,
+  # which does not exist until op-deployer has run; proposer.sh reads it from
+  # the file the deploy wrote.
+  op-proposer:
+    image: ${OP_PROPOSER_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:v1.16.3}
+    entrypoint: ["/bin/sh", "/devnet/compose/proposer.sh"]
+    command:
+      - --l1-eth-rpc=http://l1:8600
+      - --rollup-rpc=http://op-node:9545
+      - --game-type=${DISPUTE_GAME_TYPE:-1}
+      - --private-key=${PROPOSER_KEY:-0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a}
+      - --proposal-interval=20s
+      - --poll-interval=4s
+      - --allow-non-finalized
+      - --wait-node-sync
+      - --rpc.addr=0.0.0.0
+      - --rpc.port=8560
+    volumes:
+      - ./devnet:/devnet:ro
+    ports:
+      - "127.0.0.1:8560:8560"
+    depends_on:
+      l1-contracts:
+        condition: service_completed_successfully
+      op-node:
+        condition: service_started
+    restart: on-failure
+
+  # --- the verifying node ---------------------------------------------------
+  # A second op-cartesi that sequences nothing and learns the chain only from
+  # what the batcher posted to L1. That it agrees block for block is the
+  # property that makes this a rollup rather than a database with an RPC.
+  #
+  # Same images and the same script as the sequencer, with its own machine and
+  # its own store — a pebble database is held by one process, so the two nodes
+  # cannot share a volume.
+  verifier-machine:
+    <<: *node
+    command: ["cartesi-jsonrpc-machine", "--server-address=0.0.0.0:6300"]
+    volumes:
+      # Long form for create_host_path: a missing snapshot is a mistake to be
+      # told about, and the short form would silently mount an empty directory
+      # docker made up on the spot.
+      - type: bind
+        source: ${SNAPSHOT_DIR:-./demo/.cartesi/image}
+        target: /snapshot
+        read_only: true
+        bind:
+          create_host_path: false
+      - verifier-chaindata:/data
+    healthcheck: *machine-healthcheck
+
+  verifier-engine:
+    <<: *node
+    command: ["engine.sh"]
+    environment:
+      MACHINE_REMOTE: http://verifier-machine:6300
+      MACHINE_SNAPSHOT: /snapshot
+      DATA_DIR: ${DATA_DIR:-}
+    volumes:
+      - ./devnet:/devnet:ro
+      - verifier-chaindata:/data
+    ports:
+      - "127.0.0.1:8565:8545"
+      - "127.0.0.1:8571:8551"
+    healthcheck: *engine-healthcheck
+    depends_on:
+      genesis:
+        condition: service_completed_successfully
+      verifier-machine:
+        condition: service_healthy
+
+  verifier-node:
+    image: ${OP_NODE_IMAGE:-us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.3}
+    command:
+      - op-node
+      - --l1=http://l1:8600
+      - --l1.rpckind=basic
+      - --l1.trustrpc
+      - --rollup.l1-chain-config=/devnet/l1-chain-config.json
+      - --l2=http://verifier-engine:8551
+      - --l2.jwt-secret=/devnet/jwt.hex
+      - --rollup.config=/devnet/rollup.json
+      - --verifier.l1-confs=0
+      - --p2p.disable
+      - --l1.beacon.ignore
+      - --rpc.addr=0.0.0.0
+      - --rpc.port=9545
+    volumes:
+      - ./devnet:/devnet:ro
+    ports:
+      - "127.0.0.1:9555:9545"
+    depends_on:
+      verifier-engine:
+        condition: service_healthy
+    restart: on-failure
+
+  # --- the steps you take yourself ------------------------------------------
+  # Neither of these starts with the stack: `docker compose run --rm outputs`,
+  # `docker compose run --rm guest`.
+  outputs:
+    <<: *tools
+    profiles: ["manual"]
+    command: ["bun", "devnet/deploy-outputs.ts"]
+
+  guest:
+    <<: *tools
+    profiles: ["manual"]
+    command: ["bun", "devnet/guest-log.ts", "http://engine:8545"]
+
+volumes:
+  # One store per node, because a pebble database is held by one process — and
+  # each volume is shared by an engine and its machine server, which is the
+  # other half of a node's state: the engine writes the blocks, the machine
+  # server writes the checkpoints, both under DATA_DIR.
+  chaindata:
+  verifier-chaindata:

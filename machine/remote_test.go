@@ -635,3 +635,28 @@ func TestRemoteGetProof(t *testing.T) {
 		t.Fatalf("page bytes hash to %s, proof claims %s", level[0], proof.TargetHash)
 	}
 }
+
+// TestForkEndpoint covers the address arithmetic that lets a machine server
+// run somewhere other than this host: the server reports its forks at the
+// address it binds, which for a server reachable over a network is the
+// wildcard, and a wildcard is not something a client can dial.
+func TestForkEndpoint(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		parent string
+		fork   string
+		want   string
+	}{
+		{"wildcard takes the parent's host", "http://machine:6300", "0.0.0.0:42693", "http://machine:42693"},
+		{"loopback parent, loopback fork", "http://127.0.0.1:6300", "0.0.0.0:42693", "http://127.0.0.1:42693"},
+		{"ipv6 wildcard", "http://machine:6300", "[::]:42693", "http://machine:42693"},
+		{"a named host is meant", "http://machine:6300", "10.1.2.3:42693", "http://10.1.2.3:42693"},
+		{"a scheme is kept", "http://machine:6300", "http://0.0.0.0:42693", "http://machine:42693"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := forkEndpoint(tc.parent, tc.fork); got != tc.want {
+				t.Errorf("forkEndpoint(%q, %q) = %q, want %q", tc.parent, tc.fork, got, tc.want)
+			}
+		})
+	}
+}

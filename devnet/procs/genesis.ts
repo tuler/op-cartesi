@@ -8,17 +8,18 @@
 //                             reads it back, which is how the engine — a
 //                             different process, started from a different
 //                             pane — ends up on the same genesis as op-node.
+//                             Written by lib/genesis.ts, which the compose
+//                             bring-up shares.
 //   devnet/rollup.json        what op-node derives the chain from.
 //
 // Generating rollup.json loads the snapshot, so this needs a machine server of
 // its own; it is started and stopped here rather than shared with the node's,
 // because a server holds exactly one machine.
 
-import { writeFileSync } from "node:fs";
-import { chainParams, paths, stack } from "../lib/env.ts";
+import { stack } from "../lib/env.ts";
+import { anchorRollup } from "../lib/genesis.ts";
 import { generateRollupConfig, startMachineServer } from "../lib/opcartesi.ts";
-import { clearReady, die, markReady, procInit, say, waitForPort, waitReady } from "../lib/proc.ts";
-import { l1Public } from "../lib/wallet.ts";
+import { clearReady, markReady, procInit, say, waitForPort, waitReady } from "../lib/proc.ts";
 
 procInit("genesis");
 clearReady("genesis");
@@ -28,41 +29,7 @@ if (stack.withContracts) {
     await waitReady("l1-contracts", "the L1 contract deployment");
 }
 
-const l1 = l1Public();
-// With contracts, the anchor is the block they landed in, which the deploy
-// recorded; without them there is nothing to anchor to but L1 genesis.
-const recorded = stack.withContracts ? chainParams() : undefined;
-const anchorNumber = recorded ? BigInt(recorded.l1GenesisNumber) : 0n;
-const anchor = await l1.getBlock({ blockNumber: anchorNumber });
-// The hash op-deployer recorded is the one the deployment committed to; this
-// only reads the block again for its timestamp. If the two disagree the L1
-// moved under the deployment, and anchoring to either would be a guess.
-if (recorded && recorded.l1GenesisHash !== anchor.hash) {
-    die(
-        `L1 block ${anchorNumber} is ${anchor.hash}, but the deployment recorded ` +
-            `${recorded.l1GenesisHash} — the L1 reorged; redeploy`,
-    );
-}
-
-writeFileSync(
-    paths.chainGenesis,
-    [
-        "# Written by devnet/procs/genesis.ts. Read back by devnet/lib/env.ts.",
-        "# The L1 anchor of this rollup, and the L2 genesis timestamp derived",
-        "# from it. Both are consensus-relevant: op-node and the engine must",
-        "# agree on them or the engine serves a genesis op-node rejects.",
-        `L1_GENESIS_HASH=${anchor.hash}`,
-        `L1_GENESIS_NUMBER=${anchor.number}`,
-        // The L2 genesis timestamp is anchored to the L1 block the rollup
-        // starts after, so op-node's derivation clock and the engine's genesis
-        // agree.
-        `GENESIS_TIMESTAMP=${anchor.timestamp}`,
-        "",
-    ].join("\n"),
-);
-say(
-    `anchored at L1 block ${anchor.number} (${anchor.hash}), genesis timestamp ${anchor.timestamp}`,
-);
+await anchorRollup();
 
 say("booting a machine to read the genesis state root off the snapshot");
 const server = startMachineServer(stack.genesisMachinePort);
