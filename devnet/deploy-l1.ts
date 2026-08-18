@@ -169,6 +169,7 @@ export async function deployL1(): Promise<void> {
         `BATCH_INBOX_ADDRESS=${rollupOut.batch_inbox_address}`,
         `DISPUTE_GAME_FACTORY_ADDRESS=${l1Out.DisputeGameFactoryProxy}`,
         `L1_STANDARD_BRIDGE_ADDRESS=${l1Out.L1StandardBridgeProxy}`,
+        `L1_CROSS_DOMAIN_MESSENGER_ADDRESS=${l1Out.L1CrossDomainMessengerProxy}`,
         `ANCHOR_STATE_REGISTRY_ADDRESS=${l1Out.AnchorStateRegistryProxy}`,
         "# The rollup starts after the block the contracts landed in, not",
         "# at L1 genesis: before this block there is no SystemConfig to read.",

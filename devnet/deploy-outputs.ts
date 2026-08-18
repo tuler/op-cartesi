@@ -30,7 +30,10 @@ const registerGasLimit = BigInt(process.env.REGISTER_GAS_LIMIT ?? "100000");
 const portalAbi = parseAbi([
     "function depositTransaction(address to, uint256 value, uint64 gasLimit, bool isCreation, bytes data)",
 ]);
-const registerAbi = parseAbi(["function registerPortal(uint8 kind, address portal)"]);
+const registerAbi = parseAbi([
+    "function registerPortal(uint8 kind, address portal)",
+    "function registerMessenger(address l1Messenger, address l1Bridge)",
+]);
 
 export async function deployOutputs(): Promise<void> {
     // Read fresh rather than from the import-time snapshot: this runs after a
@@ -131,12 +134,7 @@ export async function deployOutputs(): Promise<void> {
             `the deploy key is not the guest's owner (${a.guestOwner}); the guest will ignore this registration`,
         );
     }
-    const registerPortal = async (kind: number, portal: Address) => {
-        const data: Hex = encodeFunctionData({
-            abi: registerAbi,
-            functionName: "registerPortal",
-            args: [kind, portal],
-        });
+    const registerConfig = async (data: Hex) => {
         const hash = await wallet.writeContract({
             address: optimismPortal,
             abi: portalAbi,
@@ -145,12 +143,35 @@ export async function deployOutputs(): Promise<void> {
         });
         await l1.waitForTransactionReceipt({ hash });
     };
-    await registerPortal(0, etherPortal);
-    await registerPortal(1, erc20Portal);
+    // The ether portal stays: ether custody is the lockbox either way, so
+    // the Cartesi-style deposit path coexists with portal withdrawals.
+    await registerConfig(
+        encodeFunctionData({
+            abi: registerAbi,
+            functionName: "registerPortal",
+            args: [0, etherPortal],
+        }),
+    );
+    // ERC-20 goes through the standard bridge instead of OPERC20Portal
+    // (DESIGN §7g): the messenger registration is what turns the
+    // L2CrossDomainMessenger and L2StandardBridge predeploys live, and the
+    // guest's escrow-exclusivity rule would refuse an ERC-20 portal from
+    // here on. OPERC20Portal is still deployed above for the non-OP
+    // configuration, but this devnet does not register it.
+    if (!a.l1CrossDomainMessenger || !a.l1StandardBridge) {
+        die("deploy-l1.ts did not record the messenger/bridge addresses; rerun it");
+    }
+    await registerConfig(
+        encodeFunctionData({
+            abi: registerAbi,
+            functionName: "registerMessenger",
+            args: [a.l1CrossDomainMessenger, a.l1StandardBridge],
+        }),
+    );
 
     say(`wrote ${paths.outputsAddresses}`);
     for (const [name, address] of deployed) console.log(`  ${name}_ADDRESS=${address}`);
-    console.log("  registered both portals with the guest");
+    console.log("  registered the ether portal and the standard messenger with the guest");
 }
 
 if (import.meta.main) await deployOutputs();
