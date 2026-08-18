@@ -83,7 +83,7 @@ func buildReceipts(b *Block, txOutputs []TxOutputs, firstOutputIndex uint64, cfg
 			}
 		}
 		for _, output := range txo.Outputs {
-			receipt.Logs = append(receipt.Logs, &types.Log{
+			log := &types.Log{
 				Address: OutputsEmitterAddress,
 				// The output's chain-wide index is a topic so that a client
 				// reading this receipt has everything an on-chain output proof
@@ -98,7 +98,20 @@ func buildReceipts(b *Block, txOutputs []TxOutputs, firstOutputIndex uint64, cfg
 				TxIndex:     uint(txo.TxIndex),
 				BlockHash:   b.Hash(),
 				Index:       logIndex,
-			})
+			}
+			// A guest event decodes into a real log — the guest's own
+			// emitter, topics and data — which is what event-matching
+			// tooling (viem's getWithdrawals over MessagePassed, indexers
+			// reading Transfer) expects. Other outputs keep the raw
+			// CartesiOutput form; either way the output's chain-wide index
+			// stays available via cartesi_getTransactionEmissions, and
+			// nothing here is consensus — the receipts root is uncommitted.
+			if evmLog, ok := ParseEvmLogOutput(output); ok {
+				log.Address = evmLog.Emitter
+				log.Topics = evmLog.Topics
+				log.Data = evmLog.Data
+			}
+			receipt.Logs = append(receipt.Logs, log)
 			outputIndex++
 			logIndex++
 		}
