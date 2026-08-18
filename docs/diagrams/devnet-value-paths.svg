@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 252" role="img">
-<title>Two value paths: a deposit travels from deposit.ts through the OptimismPortal, op-node derivation and an EvmAdvance input to the guest's portal receiver, which credits the accounts drive. A withdrawal travels from withdraw.ts through the bridge handler's voucher, the L2 header's withdrawalsRoot, the proposer's dispute game, and execute-voucher.ts, which proves and executes it on L1.</title>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 420" role="img">
+<title>Three value paths. A deposit travels from deposit.ts — or from deposit-erc20.ts through L1StandardBridge — into the OptimismPortal, is derived by op-node into an L2 deposit transaction, reaches the machine as an EvmAdvance input, and is credited to the routed guest's accounts drive. A withdrawal leaves from withdraw.ts through the L2ToL1MessagePasser predeploy — or from withdraw-erc20.ts through the L2StandardBridge and messenger — into the block's withdrawal trie, which is the header's withdrawalsRoot, is proposed by op-proposer as a dispute game, and is proven and finalized on the OptimismPortal, which pays from the ether lockbox or lets L1StandardBridge release its escrow. An application's own voucher enters the outputs tree, whose root sits at a reserved slot of the same withdrawal trie, and after a proposal the outputs validator opens the root claim so execute-voucher.ts can run the voucher through OutputExecutor.</title>
 <style>
   .b     { fill: #ffffff; stroke: #9fada5; stroke-width: 1.2; }
   .b-acc { fill: #ffffff; stroke: #0b7a63; stroke-width: 1.6; }
@@ -15,47 +15,99 @@
   </marker>
 </defs>
 
-<rect width="1000" height="252" fill="#f2f5f2"/>
+<rect width="1000" height="420" fill="#f2f5f2"/>
 
-<text class="lane" x="30" y="34">DEPOSIT — L1 → L2</text>
-<rect class="b-acc" x="30" y="46" width="150" height="46" rx="7"/>
-<text class="ts" x="42" y="65">deposit.ts</text>
-<text class="m" x="42" y="82">depositTransaction</text>
-<rect class="b" x="212" y="46" width="160" height="46" rx="7"/>
-<text class="ts" x="224" y="65">OptimismPortal · L1</text>
-<text class="m" x="224" y="82">TransactionDeposited</text>
-<rect class="b" x="404" y="46" width="130" height="46" rx="7"/>
-<text class="ts" x="416" y="65">op-node</text>
-<text class="m" x="416" y="82">derives deposit tx</text>
-<rect class="b" x="566" y="46" width="150" height="46" rx="7"/>
-<text class="ts" x="578" y="65">shim → machine</text>
-<text class="m" x="578" y="82">EvmAdvance input</text>
-<rect class="b-acc" x="748" y="46" width="212" height="46" rx="7"/>
-<text class="ts" x="760" y="65">portal receiver (guest)</text>
-<text class="m" x="760" y="82">credits accounts drive</text>
-<path class="edge" d="M 180 69 L 208 69" marker-end="url(#ah2)"/>
-<path class="edge" d="M 372 69 L 400 69" marker-end="url(#ah2)"/>
-<path class="edge" d="M 534 69 L 562 69" marker-end="url(#ah2)"/>
-<path class="edge" d="M 716 69 L 744 69" marker-end="url(#ah2)"/>
+<!-- deposits -->
+<text class="lane" x="24" y="30">DEPOSIT — L1 → L2 · stock OP contracts</text>
 
-<text class="lane" x="30" y="152">WITHDRAWAL — L2 → L1</text>
-<rect class="b-acc" x="30" y="164" width="150" height="46" rx="7"/>
-<text class="ts" x="42" y="183">withdraw.ts</text>
-<text class="m" x="42" y="200">bridge.withdrawEther</text>
-<rect class="b-acc" x="212" y="164" width="170" height="46" rx="7"/>
-<text class="ts" x="224" y="183">bridge handler</text>
-<text class="m" x="224" y="200">voucher → outputs tree</text>
-<rect class="b" x="414" y="164" width="180" height="46" rx="7"/>
-<text class="ts" x="426" y="183">L2 header</text>
-<text class="m" x="426" y="200">withdrawalsRoot = root</text>
-<rect class="b" x="626" y="164" width="130" height="46" rx="7"/>
-<text class="ts" x="638" y="183">op-proposer</text>
-<text class="m" x="638" y="200">game @ factory</text>
-<rect class="b-acc" x="788" y="164" width="172" height="46" rx="7"/>
-<text class="ts" x="800" y="183">execute-voucher.ts</text>
-<text class="m" x="800" y="200">proof → executeOutput</text>
-<path class="edge" d="M 180 187 L 208 187" marker-end="url(#ah2)"/>
-<path class="edge" d="M 382 187 L 410 187" marker-end="url(#ah2)"/>
-<path class="edge" d="M 594 187 L 622 187" marker-end="url(#ah2)"/>
-<path class="edge" d="M 756 187 L 784 187" marker-end="url(#ah2)"/>
+<rect class="b-acc" x="24" y="42" width="170" height="46" rx="7"/>
+<text class="ts" x="36" y="61">deposit.ts</text>
+<text class="m" x="36" y="78">depositTransaction</text>
+
+<rect class="b-acc" x="24" y="98" width="170" height="46" rx="7"/>
+<text class="ts" x="36" y="117">deposit-erc20.ts</text>
+<text class="m" x="36" y="134">L1StandardBridge</text>
+
+<rect class="b" x="218" y="42" width="170" height="46" rx="7"/>
+<text class="ts" x="230" y="61">OptimismPortal · L1</text>
+<text class="m" x="230" y="78">TransactionDeposited</text>
+
+<rect class="b" x="412" y="42" width="170" height="46" rx="7"/>
+<text class="ts" x="424" y="61">op-node</text>
+<text class="m" x="424" y="78">derives deposit tx</text>
+
+<rect class="b-acc" x="606" y="42" width="170" height="46" rx="7"/>
+<text class="ts" x="618" y="61">shim → machine</text>
+<text class="m" x="618" y="78">EvmAdvance input</text>
+
+<rect class="b-acc" x="800" y="42" width="170" height="46" rx="7"/>
+<text class="ts" x="812" y="61">routed guest</text>
+<text class="m" x="812" y="78">credits accounts drive</text>
+
+<path class="edge" d="M 198 65 L 214 65" marker-end="url(#ah2)"/>
+<path class="edge" d="M 392 65 L 408 65" marker-end="url(#ah2)"/>
+<path class="edge" d="M 586 65 L 602 65" marker-end="url(#ah2)"/>
+<path class="edge" d="M 780 65 L 796 65" marker-end="url(#ah2)"/>
+<path class="edge" d="M 198 121 L 303 121 L 303 92" marker-end="url(#ah2)"/>
+
+<!-- withdrawals -->
+<text class="lane" x="24" y="186">WITHDRAWAL — L2 → L1 · OP messages</text>
+
+<rect class="b-acc" x="24" y="198" width="170" height="46" rx="7"/>
+<text class="ts" x="36" y="217">withdraw.ts</text>
+<text class="m" x="36" y="234">L2ToL1MessagePasser</text>
+
+<rect class="b-acc" x="24" y="254" width="170" height="46" rx="7"/>
+<text class="ts" x="36" y="273">withdraw-erc20.ts</text>
+<text class="m" x="36" y="290">bridge → messenger</text>
+
+<rect class="b-acc" x="218" y="198" width="170" height="46" rx="7"/>
+<text class="ts" x="230" y="217">withdrawal trie</text>
+<text class="m" x="230" y="234">header withdrawalsRoot</text>
+
+<rect class="b" x="412" y="198" width="170" height="46" rx="7"/>
+<text class="ts" x="424" y="217">op-proposer</text>
+<text class="m" x="424" y="234">output root → game</text>
+
+<rect class="b" x="606" y="198" width="170" height="46" rx="7"/>
+<text class="ts" x="618" y="217">OptimismPortal · L1</text>
+<text class="m" x="618" y="234">prove · finalize</text>
+
+<rect class="b" x="800" y="198" width="170" height="46" rx="7"/>
+<text class="ts" x="812" y="217">L1 payout</text>
+<text class="m" x="812" y="234">lockbox · bridge escrow</text>
+
+<path class="edge" d="M 198 221 L 214 221" marker-end="url(#ah2)"/>
+<path class="edge" d="M 392 221 L 408 221" marker-end="url(#ah2)"/>
+<path class="edge" d="M 586 221 L 602 221" marker-end="url(#ah2)"/>
+<path class="edge" d="M 780 221 L 796 221" marker-end="url(#ah2)"/>
+<path class="edge" d="M 198 277 L 303 277 L 303 248" marker-end="url(#ah2)"/>
+
+<!-- cartesi outputs -->
+<text class="lane" x="24" y="342">CARTESI OUTPUT — an application's own voucher</text>
+
+<rect class="b-acc" x="24" y="354" width="170" height="46" rx="7"/>
+<text class="ts" x="36" y="373">guest voucher</text>
+<text class="m" x="36" y="390">leaf in outputs tree</text>
+
+<rect class="b-acc" x="218" y="354" width="170" height="46" rx="7"/>
+<text class="ts" x="230" y="373">withdrawal trie</text>
+<text class="m" x="230" y="390">outputs root at a slot</text>
+
+<rect class="b" x="412" y="354" width="170" height="46" rx="7"/>
+<text class="ts" x="424" y="373">op-proposer</text>
+<text class="m" x="424" y="390">root claim → game</text>
+
+<rect class="b-acc" x="606" y="354" width="170" height="46" rx="7"/>
+<text class="ts" x="618" y="373">outputs validator</text>
+<text class="m" x="618" y="390">opens the root claim</text>
+
+<rect class="b-acc" x="800" y="354" width="170" height="46" rx="7"/>
+<text class="ts" x="812" y="373">execute-voucher.ts</text>
+<text class="m" x="812" y="390">proof → OutputExecutor</text>
+
+<path class="edge" d="M 198 377 L 214 377" marker-end="url(#ah2)"/>
+<path class="edge" d="M 392 377 L 408 377" marker-end="url(#ah2)"/>
+<path class="edge" d="M 586 377 L 602 377" marker-end="url(#ah2)"/>
+<path class="edge" d="M 780 377 L 796 377" marker-end="url(#ah2)"/>
 </svg>
