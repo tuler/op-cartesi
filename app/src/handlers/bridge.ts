@@ -47,7 +47,7 @@ export class Bridge implements Handler {
                 // Under the standard bridge, tokens are escrowed in
                 // L1StandardBridge, which no voucher can release — only a
                 // finalizeBridgeERC20 message can. The paths are exclusive
-                // (DESIGN §7g), so this refusal is what keeps a voucher from
+                // (DESIGN §6), so this refusal is what keeps a voucher from
                 // being minted against an escrow it cannot reach.
                 if (ledger.crossDomain()) {
                     return {

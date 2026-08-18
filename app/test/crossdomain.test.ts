@@ -1,4 +1,4 @@
-// The standard messaging pair end to end (DESIGN §7g): registration and
+// The standard messaging pair end to end (DESIGN §6): registration and
 // escrow exclusivity, inbound finalizeBridgeERC20/ETH relayed from the L1
 // messenger, failed-relay recording and replay, and outbound bridgeERC20
 // producing the messenger-shaped withdrawal L1CrossDomainMessenger accepts.

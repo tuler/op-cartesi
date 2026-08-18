@@ -1,4 +1,4 @@
-// The OP Stack cross-domain messaging vocabulary (DESIGN §7g): what the
+// The OP Stack cross-domain messaging vocabulary (DESIGN §6): what the
 // guest needs to *be* L2CrossDomainMessenger and L2StandardBridge — the
 // relayMessage call encoding, the versioned nonce, the v1 message hash the
 // messengers key replay protection by, the baseGas formula, and the events

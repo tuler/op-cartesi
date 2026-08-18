@@ -1,4 +1,4 @@
-// The L2StandardBridge (0x4200…0010), adopted for real (DESIGN §7g).
+// The L2StandardBridge (0x4200…0010), adopted for real (DESIGN §6).
 //
 // Outbound, bridgeERC20/bridgeERC20To debit the sender's ledger holding and
 // send finalizeBridgeERC20 to L1StandardBridge through the messenger — the

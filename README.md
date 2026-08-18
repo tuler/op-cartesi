@@ -4,11 +4,51 @@ An OP Stack L2 whose execution layer is a [Cartesi Machine](https://github.com/c
 
 The core of this project is an **Engine API shim**: a service that sits where op-geth normally sits — speaking the Engine API and a minimal `eth_*` subset to `op-node` on one side, and driving a Cartesi Machine through its CMIO input/output protocol on the other. The machine's Merkle root hash serves as the L2 state root. Everything else — sequencing, data availability, derivation, L1 bridging, and dispute tooling — is reused from the OP Stack.
 
+Start here, then read **[docs/DESIGN.md](docs/DESIGN.md)** for the architecture in full: what the Cartesi Machine provides as an execution layer, why the OP Stack is the right chassis, how Cartesi outputs and reports map onto withdrawals and logs, and what a fault proof for this chain would require.
+
 ## Status
 
-**Roadmap steps 1 to 3 are done.** On a live devnet the chain sequences, batches to L1, is re-derived block-for-block by an independent verifier, proposes to a `DisputeGameFactory`, survives a restart, and settles withdrawals of both ether and ERC-20 through Cartesi vouchers proven against those proposals. Since then the withdrawal commitment has become a **real Ethereum storage trie** — the header's `withdrawalsRoot` is now the `L2ToL1MessagePasser` storage root the OP Stack expects, with the Cartesi outputs root at a reserved slot inside it — so ether withdrawals target stock `OptimismPortal.proveWithdrawalTransaction` (see [DESIGN.md §7f](docs/DESIGN.md)) — and ERC-20 bridging now runs both directions through `L1StandardBridge` and adopted `L2CrossDomainMessenger`/`L2StandardBridge` predeploys ([§7g](docs/DESIGN.md)); the suites pin all of it against geth's and Optimism's own verifiers and libraries, and a devnet re-run of the new paths is the next thing to do. What is *not* done is disputing a proposal — that, and the gaps that have nothing to do with proofs, are in the [roadmap](#roadmap). The shim implements the full sequencing loop — `engine_forkchoiceUpdatedV3` (with OP payload attributes) → `engine_getPayloadV4` → `engine_newPayloadV4` — plus verifier-side re-execution, reorg handling via machine snapshots, JWT auth, and the `eth_*` subset op-node and op-batcher read. It generates the `rollup.json` op-node consumes, and runs every fork through Isthmus from genesis (see [Fork support](#fork-support)).
+The chain runs. On a devnet it sequences L2 blocks, batches them to L1, is re-derived block-for-block by an independent verifier reading only L1, proposes to a `DisputeGameFactory`, and survives a restart. Both bridges — ether through the stock `OptimismPortal`, ERC-20 through `L1StandardBridge` — are covered end to end by the Go, TypeScript and Foundry suites, against Optimism's and geth's own verifiers; their live devnet re-run is the next thing on the list. Roadmap steps 1–3 are done; step 4 — [a provable definition of the computation](#roadmap) — is next.
 
-Compatibility is verified against **op-node's own types** rather than hand-written JSON: the [`integration`](integration/) suite drives the shim over authenticated HTTP using `op-service/eth`, and checks each block with op-node's `ExecutionPayloadEnvelope.CheckBlockHash`, which independently reconstructs the header. A deliberate one-field mutation to header construction is caught there, so the check has teeth.
+What is **not** done is disputing a proposal. Proposals go into OP's permissioned game type and nobody can challenge them, because no fault-proof VM can execute a Cartesi Machine today. That is the chain's one remaining trust assumption, and it is a constructor argument on the validator rather than a hidden one — [DESIGN §8](docs/DESIGN.md) sets out exactly what closing it takes. The gaps that have nothing to do with proofs are listed under [Known gaps](#known-gaps-that-are-not-about-proofs).
+
+## How it works
+
+**Blocks are Ethereum-shaped.** Transactions are ordinary signed Ethereum transactions, plus the OP deposit transactions op-node injects, which is what lets stock op-node and op-batcher handle these blocks unmodified. Each one reaches the machine wrapped in Cartesi's **`EvmAdvance` envelope**, with the raw transaction as the payload:
+
+```
+EvmAdvance(chainId, appContract, msgSender, blockNumber, blockTimestamp, prevRandao, index, payload)
+```
+
+That is the encoding Cartesi's guest tools already decode, so a stock guest-tools rootfs and existing Cartesi applications run unmodified. It also carries the L2 block context the guest could not otherwise learn, since the machine has no clock and no view of the chain. `msgSender` is the transaction's own sender (for a deposit, the L1 originator it carries); `index` is chain-wide, so the guest sees one gapless input sequence as it would from an InputBox. Every field is derivable from the block header, so a verifier re-executing a block reconstructs the exact context the builder used.
+
+**The header carries two commitments.** `stateRoot` is the machine's Merkle root. `withdrawalsRoot` is a genuine Ethereum storage trie over the `L2ToL1MessagePasser.sentMessages` slots of every OP `Withdrawal` the guest has emitted — the commitment the OP Stack expects there — with the **Cartesi outputs Merkle root** at the reserved slot `keccak256("op-cartesi.outputsMerkleRoot")`. One commitment therefore serves both the portal's storage proofs and Cartesi's output proofs, and op-node turns it into the L2 output root with no changes. Verifiers re-derive both from re-execution, so a payload claiming outputs or withdrawals the machine did not produce is rejected. See [DESIGN §5](docs/DESIGN.md).
+
+**Both bridges are stock OP.** `OptimismPortal.depositTransaction` funds accounts; ether leaves through `proveWithdrawalTransaction` / `finalizeWithdrawalTransaction`, paid from the lockbox the deposits filled. ERC-20 rides `L1StandardBridge` in both directions, against `L2CrossDomainMessenger` (0x4200…0007) and `L2StandardBridge` (0x4200…0010) adopted as real predeploys in the guest — no custom contract on the path. Cartesi vouchers remain for what an application emits for its own reasons, proven against the same proposal through one small contract, [`OPOutputsMerkleRootValidator`](contracts/src/OPOutputsMerkleRootValidator.sol). Nothing forks `OptimismPortal`. See [DESIGN §6](docs/DESIGN.md).
+
+**The chain survives a restart.** `-datadir` gives the node a store: blocks and the machine's per-transaction emissions go into a pebble database through go-ethereum's own `rawdb`, and the machine itself is checkpointed whole at intervals with Cartesi's `cm_store`. Restarting loads the newest checkpoint and re-executes the blocks after it — on a 39-block devnet run, back and serving in about a second. Replay is not a shortcut around verification: each replayed block is checked against the state root and outputs commitment it was stored with, so a drifted checkpoint fails the restart rather than serving a wrong chain. See [DESIGN §7](docs/DESIGN.md).
+
+### Outputs and receipts
+
+The machine's emissions are recorded per transaction (`chain.TxOutputs`), split along the Cartesi provability boundary: **outputs** (vouchers and notices) are provable and enter the block's outputs commitment; **reports** are diagnostic and must never enter a commitment. Outputs of a rejected input are dropped, since a rejection rolls the machine back; its reports are kept, because they usually explain the failure.
+
+Provable outputs accumulate into a Merkle tree that matches Cartesi's on-chain tree exactly — height 63, leaves `keccak256(output)`, parents `keccak256(left‖right)`, zero-padded — so existing voucher proofs verify against it unchanged. The tree is cumulative over the chain, and its root is committed through the withdrawal trie described above.
+
+Receipts are synthesized from those records: outputs become logs, acceptance becomes `status`, mcycles become `gasUsed`. Each log carries the output's chain-wide index as a topic next to the raw bytes, which is exactly what a Cartesi output validity proof needs — so the receipt is enough to build the L1 proof later. Nothing on the OP Stack's critical path reads L2 receipts, so `receiptsRoot` and the header bloom stay empty and the encoding is not frozen into consensus while it is still moving.
+
+Reports are not logs, because a log implies provability. They are served through the `cartesi_` namespace instead, alongside the output indices and the outputs commitment — see [JSON-RPC](#json-rpc) for every method the node serves.
+
+## Running it
+
+`./devnet/start-devnet.ts` brings up the whole stack: anvil as L1, the OP Stack L1 suite deployed with `op-deployer`, a Cartesi Machine, op-cartesi, op-node in sequencer mode, op-batcher and op-proposer — plus a **second node** with its own machine, engine and op-node that sequences nothing and rebuilds the chain purely from what the batcher posted to L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
+
+Each piece runs in its own [mprocs](https://github.com/pvolok/mprocs) pane — including the machine's console and the guest's own per-transaction reports — so the whole stack is one screen you can watch, stop and restart a piece at a time. Client scripts drive it: `bun scripts/deposit.ts <address> <wei>`, `bun scripts/withdraw.ts <address> <wei>`, and the ERC-20 pair. See **[devnet/README.md](devnet/README.md)**.
+
+The stack has been run against the **official released images** — op-node v1.19.3 and op-batcher v1.16.11 — as well as against locally built binaries. The OP monorepo ships no binaries of its own, so `./devnet/start-devnet.ts` falls back to docker when they are not on your `PATH`; nothing needs compiling but op-cartesi itself.
+
+## Verification
+
+Compatibility is checked against **op-node's own types** rather than hand-written JSON: the [`integration`](integration/) suite drives the shim over authenticated HTTP using `op-service/eth`, and checks each block with op-node's `ExecutionPayloadEnvelope.CheckBlockHash`, which independently reconstructs the header. A deliberate one-field mutation to header construction is caught there, so the check has teeth.
 
 The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client is pinned to machine-emulator 0.21.0 by probing a running server, and `chain` and `machine` carry tests that load a real machine, build blocks on it, re-execute them as a verifier, and check that the outputs commitment the host computes is byte-identical to the one the guest maintains. They are skipped unless a snapshot is supplied:
 
@@ -18,50 +58,9 @@ OP_CARTESI_TEST_SNAPSHOT=./demo/.cartesi/image \
 OP_CARTESI_TEST_LEDGER_SNAPSHOT=./demo/.cartesi/image go test ./...
 ```
 
-The second variable turns on the deposit and token tests, which need a guest that means something by its inputs rather than merely consuming them — the routed guest of [`demo`](demo/README.md) (docs/EVM-COMPAT.md), which is what the snapshot script builds.
+The second variable turns on the deposit and token tests, which need a guest that means something by its inputs rather than merely consuming them — the routed guest of [`demo`](demo/README.md), which is what the snapshot script builds.
 
-**The chain round-trips through L1.** `./devnet/start-devnet.ts` brings up anvil as L1, a Cartesi Machine, op-cartesi, and op-node in sequencer mode; op-node sequences L2 blocks continuously, each carrying the L1-attributes deposit it injects, wrapped in the `EvmAdvance` envelope and executed by the machine. The block's state root is the machine's Merkle root and its `withdrawalsRoot` is the withdrawal trie root, which commits to the outputs tree. Each piece runs in its own [mprocs](https://github.com/pvolok/mprocs) pane — including the machine's console and the guest's own per-transaction reports — so the whole stack is one screen you can watch, stop and restart a piece at a time. See [devnet/README.md](devnet/README.md).
-
-`op-batcher` posts those blocks to L1 as calldata batches, which advances the safe head. A **second node** then runs alongside — its own machine, engine and op-node, sequencing nothing — and rebuilds the chain purely from what the batcher put on L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
-
-The stack has been run against the **official released images** — op-node v1.19.3 and op-batcher v1.16.11 — as well as against locally built binaries. The OP monorepo ships no binaries of its own, so `./devnet/start-devnet.ts` falls back to docker when they are not on your `PATH`; nothing needs compiling but op-cartesi itself.
-
-**Deposits reach the guest.** `bun scripts/deposit.ts <address> <wei>` calls `OptimismPortal.depositTransaction` on L1; op-node derives it into an L2 deposit transaction, and the guest — the routed [`demo`](demo/README.md) — credits the recipient on its accounts drive. The balance is machine state, so the state root commits to it, and `eth_getBalance` reads it straight out of machine memory. The verifier, deriving from L1 alone, arrives at the same balance.
-
-**Proposals land on L1.** The devnet deploys the full OP Stack L1 suite with `op-deployer` and runs `op-proposer` against the `DisputeGameFactory`. The claim it submits is `keccak(0³² ‖ stateRoot ‖ withdrawalsRoot ‖ blockHash)` — recomputed independently and matched against the on-chain game — so the root claim on L1 commits to the machine's Merkle root *and* the Cartesi outputs tree. Deposits go through the real `OptimismPortal.depositTransaction`.
-
-**Ether withdrawals go through the standard OP portal.** `bun scripts/withdraw.ts <address> <wei>` asks the guest to withdraw; the guest emits an OP `Withdrawal` message (as a notice — provable, but with no second executor to double-pay it), the message's `sentMessages` storage slot enters the block's withdrawal trie, and from there it is the flow every OP chain runs: `eth_getProof` for the slot, `OptimismPortal.proveWithdrawalTransaction`, the proof maturity delay, `finalizeWithdrawalTransaction` — paying from the same lockbox the deposits funded, so both directions of the ether bridge agree about who holds the money. The trie and proofs are pinned against geth's verifier in Go and against Optimism's own `SecureMerkleTrie` in the Foundry suite — the portal's exact check, down to the `0x01` value byte; the live devnet re-run of this path is pending. The earlier voucher path for ether was verified end to end on the devnet before being replaced.
-
-**ERC-20 withdrawals stay on Cartesi vouchers**, because the tokens are escrowed in the application contract, which only a voucher executing from that contract's context can move. The bridge for them is still one small contract: a Cartesi `Application` asks one question before executing an output — `isOutputsMerkleRootValid` — and an OP proposal commits to the answer, since op-node's root claim is `keccak(version ‖ stateRoot ‖ withdrawalsRoot ‖ blockHash)`, `withdrawalsRoot` is the withdrawal trie root, and the Cartesi outputs root sits at a reserved slot in that trie. [`OPOutputsMerkleRootValidator`](contracts/src/OPOutputsMerkleRootValidator.sol) opens the preimage and the storage slot on chain — the slot with the *same* vendored `SecureMerkleTrie` the portal runs, so the trie's two consumers cannot drift; voucher verification uses Cartesi's own `LibOutputValidityProof`, pulled in as a dependency rather than reimplemented. Nothing forks `OptimismPortal`.
-
-**Tokens bridge through the standard OP bridge.** The guest adopts `L2CrossDomainMessenger` (0x4200…0007) and `L2StandardBridge` (0x4200…0010) as real predeploys: deposits arrive as `finalizeBridgeERC20` relayed from the aliased `L1CrossDomainMessenger` and credit the ledger under the token's derived façade address; withdrawals are `bridgeERC20To` calls whose message rides an OP `Withdrawal` with the messenger as sender — exactly what `L1CrossDomainMessenger` requires of the portal's `l2Sender` — so `L1StandardBridge` releases its own escrow with no custom contract on the path. The messenger encodings (`relayMessage`, the v1 message hash, `baseGas`) are pinned byte-for-byte against OP's own vendored `Encoding`/`Hashing` libraries. The Cartesi-style L1 portals (`OPEtherPortal`, `OPERC20Portal`) are gone from the repo — superseded, not just unused — though the guest still speaks their protocol for anyone who deploys their own, and keeps the two escrows exclusive: registering the messenger refuses ERC-20 portals and vice versa, because one fungible ledger balance backed by two escrows would let a deposit into one drain the other. See [DESIGN.md §7g](docs/DESIGN.md).
-
-The earlier Cartesi-portal round trip (1 TST in through `OPERC20Portal`, 0.5 TST out as a voucher against an `op-proposer` proposal) was verified end to end on the devnet before being superseded; the standard-bridge round trip replaces it and awaits its own devnet run. A forged relay from a sender that is not the registered messenger credits nothing.
-
-The guest authenticates a portal by its address, which raises the one question the ETH path never had: the portals do not exist when the snapshot that *is* L2 genesis is built. So the guest carries a single owner address — chosen before anything is deployed, substituted into the app at snapshot time, and therefore covered by the genesis state root — and takes the portal addresses from that owner as an ordinary L1 deposit. Trusting any sender instead would let any contract mint claims against tokens the application really holds.
-
-Proposals still use the permissioned game type and are never disputed: no fault proof VM can execute a Cartesi Machine. That is the remaining trust assumption, and it is a constructor argument on the validator rather than a hidden one. See [DESIGN.md](docs/DESIGN.md) §4 and §7c.
-
-**The chain survives a restart.** `-datadir` gives the node a store: blocks and the machine's per-transaction emissions go into a pebble database through go-ethereum's own `rawdb`, and the machine itself is checkpointed whole at intervals with Cartesi's `cm_store`. Restarting loads the newest checkpoint and re-executes the blocks after it — on a 39-block devnet run, back and serving in about a second. Replay is not a shortcut around verification: each replayed block is checked against the state root and outputs commitment it was stored with, so a checkpoint that has drifted fails the restart rather than serving a wrong chain.
-
-See **[docs/DESIGN.md](docs/DESIGN.md)** for the full architecture analysis, covering:
-
-- What the Cartesi Machine provides as an execution layer (Merkleized state, CMIO, provable stepping, ZK pipeline)
-- Why the OP Stack is the right chassis (and why Arbitrum Nitro is not)
-- The Engine API shim — the one genuinely new component
-- Two settlement plans: Cartesi-native (Dave/PRT + `machine-solidity-step`) vs. OP-native proving (Asterisc or Kailua-style ZK)
-- How Cartesi outputs, reports and inspect map onto withdrawals, logs and `eth_call` — and why the withdrawal path forces Isthmus
-- The app-chain dimension: hosting multiple applications on one machine, with cycle-based metering
-
-## Outputs and receipts
-
-The machine's emissions are recorded per transaction (`chain.TxOutputs`), split along the Cartesi provability boundary: **outputs** (vouchers and notices) are provable and destined for the block's outputs commitment; **reports** are diagnostic and must never enter a commitment. Outputs of a rejected input are dropped, since a rejection rolls the machine back; its reports are kept, because they usually explain the failure.
-
-Provable outputs accumulate into a Merkle tree that matches Cartesi's on-chain tree exactly — height 63, leaves `keccak256(output)`, parents `keccak256(left‖right)`, zero-padded — so existing voucher proofs verify against it unchanged. The tree is cumulative over the chain. Its root is committed through the **withdrawal trie**: a genuine Ethereum storage trie over the `L2ToL1MessagePasser.sentMessages` slots of every OP `Withdrawal` message the guest has emitted, with the Cartesi outputs root at the reserved slot `keccak256("op-cartesi.outputsMerkleRoot")`. The trie's root is every header's `withdrawalsRoot`, which is what op-node turns into the L2 output root — so one commitment serves both the portal's storage proofs and Cartesi's output proofs. Verifiers re-derive it from re-execution, so a payload claiming outputs or withdrawals the machine did not produce is rejected.
-
-Receipts are synthesized from those records: outputs become logs, acceptance becomes `status`, mcycles become `gasUsed`. Each log carries the output's chain-wide index as a topic next to the raw bytes, which is exactly what a Cartesi output validity proof needs — so the receipt is enough to build the L1 proof later. Nothing on the OP Stack's critical path reads L2 receipts, so `receiptsRoot` and the header bloom stay empty and the encoding is not frozen into consensus while it is still moving.
-
-Reports are not logs, because a log implies provability. They are served through the `cartesi_` namespace instead, alongside the output indices and the outputs commitment — see [JSON-RPC](#json-rpc) for every method the node serves.
+The withdrawal trie and the cross-domain encodings are pinned in three directions: Go against the guest's TypeScript encoders, Go against geth's own trie verifier, and Go against the vendored Solidity — Optimism's real `SecureMerkleTrie`, `Encoding` and `Hashing`, so the bytes are judged by the exact code that will judge them on L1.
 
 ## JSON-RPC
 
@@ -133,18 +132,6 @@ Only these versions are served, for the reason in [Fork support](#fork-support).
 | `devnet` | Brings the devnet up: anvil, the OP Stack L1 suite, the machine, the shim and op-node, one mprocs pane each. |
 | `scripts` | Client scripts for a running devnet — deposits, withdrawals, balances — and the machine snapshot they run against. |
 
-Transactions are ordinary signed Ethereum transactions (plus OP deposit transactions injected by op-node), which is what lets stock op-node and op-batcher handle our blocks unmodified.
-
-Each one reaches the machine wrapped in Cartesi's **`EvmAdvance` envelope**, with the raw transaction as the payload:
-
-```
-EvmAdvance(chainId, appContract, msgSender, blockNumber, blockTimestamp, prevRandao, index, payload)
-```
-
-That is the encoding Cartesi's guest tools already decode, so a stock guest-tools rootfs and existing Cartesi applications run unmodified — the same reuse argument that picked the OP Stack. It also carries the L2 block context the guest could not otherwise learn, since the machine has no clock and no view of the chain. `msgSender` is the transaction's own sender (for a deposit, the L1 originator it carries); `index` is chain-wide, so the guest sees one gapless input sequence as it would from an InputBox. `appContract` is configurable and becomes load-bearing only when vouchers are executed through a Cartesi `Application` contract.
-
-Every field of the envelope is derivable from the block header, so a verifier re-executing a block reconstructs the exact context the builder used.
-
 ## Development
 
 ```sh
@@ -186,7 +173,7 @@ The chain flags passed to `genesis` and `run` must match: they determine the L2 
 
 ## Fork support
 
-The fork schedule is **fixed**, not configurable: every fork through **Isthmus** is active from genesis. A new chain has no pre-fork history to preserve, and Isthmus is not optional — pre-Isthmus, op-node computes the L2 output root by proving the L2ToL1MessagePasser account against the block's state root, which cannot work for a Cartesi execution layer with no Ethereum MPT. A pre-Isthmus chain could never be proposed, so the shim does not offer one. See [DESIGN.md §7](docs/DESIGN.md).
+The fork schedule is **fixed**, not configurable: every fork through **Isthmus** is active from genesis. A new chain has no pre-fork history to preserve, and Isthmus is not optional — pre-Isthmus, op-node computes the L2 output root by proving the L2ToL1MessagePasser account against the block's state root, which cannot work for a Cartesi execution layer with no Ethereum MPT. A pre-Isthmus chain could never be proposed, so the shim does not offer one. See [DESIGN §4](docs/DESIGN.md).
 
 That fixes the wire protocol too: `engine_forkchoiceUpdatedV3` plus the **V4** payload methods, which is exactly what op-node calls for an Isthmus chain. Holocene's EIP-1559 parameters are encoded into header `extraData` with op-geth's own encoder, so the bytes match what an op-geth engine would commit to.
 
@@ -196,23 +183,32 @@ Jovian and later are not supported: Jovian adds a minimum-base-fee field the shi
 
 1. **Shim MVP** *(done)* — a Cartesi Machine and op-node in sequencer mode on an L1 devnet. Milestone: deposits credited in-guest, and a second verifier node deriving identical blocks from L1 data alone.
 2. **Batcher, proposer, persistence** *(done)* — the L1 contract suite through `op-deployer`, `op-batcher` posting calldata batches, `op-proposer` creating games, and a store that survives a restart by replaying from a machine checkpoint.
-3. **Withdrawals** *(done)* — the withdrawal trie in `withdrawalsRoot` (the OP message passer storage trie, holding the Cartesi outputs root at a reserved slot), ether withdrawals through stock `OptimismPortal.proveWithdrawalTransaction`, ERC-20 both directions through `L1StandardBridge` and the adopted messenger/bridge predeploys, output validity proofs, and an L1 contract that opens a proposal's root claim so Cartesi's own verifier can execute app-specific vouchers. The live devnet re-run of the OP-path withdrawals is pending. See [DESIGN.md §7f–§7g](docs/DESIGN.md).
-4. **A provable definition of the computation** *(next)* — the prerequisite for *either* settlement track, and a design decision before it is a coding task. Two questions, both answered in [DESIGN.md §7e](docs/DESIGN.md):
-   - **Which state transition function?** Dave already specifies one: a fixed `2^68` meta-cycle span per input, indexed as (input, big-arch cycle, uarch cycle), with the state a fixpoint once the machine yields. This chain's rule is `MaxCyclesPerInput` with a rejection branch when the budget is exceeded. Those are different functions, and ours is the one that would have to move.
-   - **How does a referee check an input?** Cartesi's answer is that every input is hashed on L1 in an `InputBox`; OP's is that derivation runs inside the fault-proof VM. This chain has neither — its inputs are op-node's derivation output from compressed channel frames plus L1 logs, which no contract can re-derive. Mirroring inputs to L1 or proving derivation are the two honest options; both are real work.
-
-   A third requirement falls out of the same reading: the outputs Merkle root has to live *inside* the machine's memory, because a referee cannot dispute a value that is not in the proven state. Today the shim computes it in Go.
-5. **Settlement track A** — Dave/PRT. Note that `DaveConsensus` already implements `IOutputsMerkleRootValidator`, the interface `OutputExecutor` calls today, so pointing the executor at Dave is a smaller change than wrapping Dave as an OP `IDisputeGame`. Neither escapes step 4.
+3. **Withdrawals** *(done)* — the withdrawal trie in `withdrawalsRoot`, ether through stock `OptimismPortal`, ERC-20 both directions through `L1StandardBridge` and the adopted messenger/bridge predeploys, Cartesi output validity proofs, and an L1 contract that opens a proposal's root claim so Cartesi's own verifier can execute app-specific vouchers. See [DESIGN §5–§6](docs/DESIGN.md).
+4. **A provable definition of the computation** *(next)* — the prerequisite for *either* settlement track, and a design decision before it is a coding task. Three questions, all answered in [DESIGN §8](docs/DESIGN.md):
+   - **Which state transition function?** Dave specifies a fixed `2^68` meta-cycle span per input, indexed as (input, big-arch cycle, uarch cycle), with the state a fixpoint once the machine yields. This chain's rule is `MaxCyclesPerInput` with a rejection branch when the budget is exceeded. Those are different functions, and ours is the one that would have to move.
+   - **How does a referee check an input?** Cartesi hashes every input on L1 in an `InputBox`; OP runs derivation inside the fault-proof VM. This chain has neither — its inputs are op-node's derivation output from compressed channel frames plus L1 logs, which no contract can re-derive. Mirroring inputs to L1 or proving derivation are the two honest options; both are real work.
+   - **Where does the outputs root live?** Inside the machine's memory, because a referee cannot dispute a value that is not in the proven state. Today the shim computes it in Go.
+5. **Settlement track A** — Dave/PRT. `DaveConsensus` already implements `IOutputsMerkleRootValidator`, the interface `OutputExecutor` calls today, so pointing the executor at Dave is a smaller change than wrapping Dave as an OP `IDisputeGame`. Neither escapes step 4.
 6. **Settlement track B** — benchmark the freestanding emulator inside a RISC Zero guest and get a cost per block; go/no-go on ZK settlement. Worth doing early: the number may redirect the choice, and it commits to nothing.
 
 ### Known gaps that are not about proofs
 
-These do not change the trust model, which is why they sit outside the numbered steps — but a chain that ran for real would need them, and they are cheap to state plainly.
+These do not change the trust model, which is why they sit outside the numbered steps — but a chain that ran for real would need them.
 
-- **Inputs are free.** There is no fee market and no metering charged to anyone, so nothing rate-limits the sequencer's ingress. `MaxCyclesPerInput` bounds one input's execution; it does not bound a sender. This is the substantive question hiding behind the next two entries — once an input costs something, the payer needs an identity, and the rest follows from that rather than being bolted on ahead of it.
-- **The account model reaches the shim — and, since v1, the rules (next bullet).** The devnet guest now keeps its ledger on a standard *accounts drive* inside the machine — [docs/ACCOUNTS.md](docs/ACCOUNTS.md), byte-level format in [docs/ACCOUNTS-DRIVE-SPEC.md](docs/ACCOUNTS-DRIVE-SPEC.md) — and the shim serves `eth_getBalance` and `eth_getTransactionCount` by reading the record straight out of machine memory, no fork, no execution (ACCOUNTS.md roadmap v0). The gas methods are now served too, so a plain `cast send` needs no gas flags: `eth_gasPrice`, `eth_maxPriorityFeePerGas` and `eth_feeHistory` are synthesized from headers — a constant base fee and zero tips, which *is* the truth until there is a fee market to describe — and `eth_estimateGas` returns the per-input cycle budget (`MaxCyclesPerInput` at `CyclesPerGas`) expressed as gas: an upper bound the chain will accept, not a measurement. A true estimate would run the payload on a discarded fork and report its cycles, but an estimate arrives unsigned and the guest now enforces sender and nonce (next bullet), so an unsigned replay would measure the rejection; measurement needs a signature-less simulation entry point in the guest, which belongs to the fee-market work.
-- **Replay protection: now enforced in the guest.** For ordinary L2 transactions the guest recovers the sender from the signature (viem's secp256k1 in the routed guest; its Lua predecessor carried a pure-Lua implementation pinned against go-ethereum vectors), requires the transaction's nonce to equal the sender's accounts-drive record, bumps it on acceptance, and debits a flat per-transaction fee — deposits are exempt and keep their L1-origin authentication. The mempool applies the same nonce check at ingress, but only as a courtesy filter: the guest is the enforcer, inside the state the root commits to. The fee parameter is owner-settable and **defaults to 0 on the devnet** — fresh devnet senders hold no ether to charge until someone deposits — so nonce records are still free to mint until a deployment sets it nonzero (ACCOUNTS.md §5.7 is why one should). This was the v1 step of [docs/ACCOUNTS.md](docs/ACCOUNTS.md).
+- **Inputs are free.** There is no fee market and no metering charged to anyone, so nothing rate-limits the sequencer's ingress. `MaxCyclesPerInput` bounds one input's execution; it does not bound a sender. This is the substantive question behind the next two entries — once an input costs something, the payer needs an identity, and the rest follows.
+- **Gas is a constant, not a measurement.** `eth_gasPrice`, `eth_maxPriorityFeePerGas` and `eth_feeHistory` are synthesized from headers — a constant base fee and zero tips, which *is* the truth until there is a fee market to describe — and `eth_estimateGas` returns the per-input cycle budget (`MaxCyclesPerInput` at `CyclesPerGas`) expressed as gas: an upper bound the chain will accept. A true estimate would run the payload on a discarded fork and report its cycles, but an estimate arrives unsigned and the guest enforces sender and nonce, so an unsigned replay would measure the rejection. Measurement needs a signature-less simulation entry point in the guest, which belongs with the fee-market work.
+- **Replay protection is enforced, but free.** The guest recovers the sender from the signature, requires the transaction's nonce to equal the sender's accounts-drive record, bumps it on acceptance, and debits a flat per-transaction fee — deposits are exempt and keep their L1-origin authentication. The mempool applies the same nonce check at ingress as a courtesy filter; the guest is the enforcer, inside the state the root commits to. The fee parameter is owner-settable and **defaults to 0 on the devnet** — fresh senders hold no ether to charge until someone deposits — so nonce records are still free to mint until a deployment sets it nonzero ([ACCOUNTS.md §5.7](docs/ACCOUNTS.md) is why one should).
 - **P2P is disabled**, so unsafe-head gossip and the reorg paths that come with it are untested.
 - **Blob DA is unexercised** — batches are calldata only.
 - **No snapshot sync.** A new node replays from genesis, or from a checkpoint it already has.
 - **Proof construction walks the chain.** `leavesThrough` is linear in chain length, which is fine while outputs are rare and will not be at any other scale; it wants an index from output index to block.
+
+## Further reading
+
+| Document | What it covers |
+|---|---|
+| [docs/DESIGN.md](docs/DESIGN.md) | The architecture: the shim, the commitments, bridging, persistence, and what settlement requires. |
+| [docs/EVM-COMPAT.md](docs/EVM-COMPAT.md) | How the guest speaks EVM at the ABI boundary — `to`-address routing to native handlers, ERC-20 façades, events, `eth_call`. |
+| [docs/ACCOUNTS.md](docs/ACCOUNTS.md) · [ACCOUNTS-DRIVE-SPEC.md](docs/ACCOUNTS-DRIVE-SPEC.md) | The guest's account model, and the byte-level drive format the host reads balances and nonces out of. |
+| [docs/ABI-DRIVE-SPEC.md](docs/ABI-DRIVE-SPEC.md) | The drive recording which addresses the guest routes and what ABI each speaks. |
+| [devnet/README.md](devnet/README.md) | Running the devnet, pane by pane. |

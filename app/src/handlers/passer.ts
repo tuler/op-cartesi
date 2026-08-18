@@ -1,4 +1,4 @@
-// The adopted OP predeploy (DESIGN §7f): L2ToL1MessagePasser at 0x4200…0016,
+// The adopted OP predeploy (DESIGN §5): L2ToL1MessagePasser at 0x4200…0016,
 // the contract viem's initiateWithdrawal targets — so the stock OP withdrawal
 // flow (viem.sh/op-stack/guides/withdrawals) runs against this chain without
 // knowing the execution layer is not an EVM.

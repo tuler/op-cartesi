@@ -4,7 +4,7 @@ The L1 side of this chain: what makes a Cartesi output executable against an OP
 proposal, and what lets a Cartesi-style deposit reach the guest through
 `OptimismPortal`. Ether withdrawals no longer need a contract here at all —
 they finalize through stock `OptimismPortal.proveWithdrawalTransaction`
-against the withdrawal trie the header commits (DESIGN §7f); what remains is
+against the withdrawal trie the header commits (DESIGN §5); what remains is
 the voucher path for everything the portal cannot execute.
 
 `src/vendor/optimism/` carries the OP Stack's `SecureMerkleTrie` and its
@@ -61,7 +61,7 @@ because on this chain the L2 state root *is* the machine root.
 
 Nothing here forks or modifies an OP contract, and nothing here bridges:
 ether and ERC-20 go through the stock `OptimismPortal` and
-`L1StandardBridge` (DESIGN §7f–§7g). The Cartesi-style portals this
+`L1StandardBridge` (DESIGN §5–§6). The Cartesi-style portals this
 directory used to carry were removed once the standard paths worked — the
 guest still speaks their deposit protocol for anyone who deploys their own.
 

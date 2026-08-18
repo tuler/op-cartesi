@@ -5,7 +5,7 @@
 //   bun scripts/withdraw-erc20.ts <recipient> <amount> [l1-token]
 //
 // This targets the routed guest of `app/` with the standard messenger
-// registered (DESIGN §7g): the withdrawal is a call to the L2StandardBridge
+// registered (DESIGN §6): the withdrawal is a call to the L2StandardBridge
 // predeploy's bridgeERC20To, naming the token by its derived L2 façade —
 // so the sender (SENDER_KEY) must hold the tokens on L2; deposit through
 // L1StandardBridge first. The guest debits the ledger and sends

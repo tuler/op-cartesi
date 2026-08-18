@@ -86,7 +86,7 @@ export class JournaledStore implements Store {
     }
 }
 
-/** The L1 half of the standard messaging pair (DESIGN §7g). The messenger
+/** The L1 half of the standard messaging pair (DESIGN §6). The messenger
  * is stored both plain (the withdrawal target) and aliased (the deposit
  * sender it authenticates); the bridge is the xDomainMessageSender the L2
  * bridge accepts. */
@@ -330,7 +330,7 @@ export class Ledger {
         this.fee = fee;
     }
 
-    // ------------------------------------------------- cross-domain (§7g)
+    // -------------------------------------------------- cross-domain (§6)
 
     /** The registered L1 side of the standard messaging pair, or undefined
      * while the chain runs portal-style. RAM state like `portals`, journaled
@@ -348,7 +348,7 @@ export class Ledger {
     }
 
     /** True when any ERC-20 portal is registered — the escrow the standard
-     * bridge must never coexist with (DESIGN §7g). */
+     * bridge must never coexist with (DESIGN §6). */
     hasErc20Portal(): boolean {
         for (const kind of this.portals.values()) if (kind === PORTAL_ERC20) return true;
         return false;

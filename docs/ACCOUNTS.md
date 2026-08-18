@@ -15,7 +15,7 @@ read is then one `machine.read_memory` call instead of a machine fork and
 a guest execution, and every record is provable against the block's state
 root through the machine's own Merkle tree, because the drive *is* machine
 state. Cartesi has already shipped this pattern once — the Rollups v3
-emergency-withdrawal accounts drive (ewtools) — and this proposal is
+emergency-withdrawal accounts drive (ewtools) — and this design is
 deliberately shaped so that machinery keeps working here.
 
 ## 1. The problem, precisely
@@ -31,7 +31,7 @@ Three consumers want per-account state, and today none of them can have it:
   transaction can be resubmitted and executed again. The durable check must
   live in the guest — it is part of the state transition function, and
   anything a referee might one day dispute has to be inside the proven
-  state (the same argument DESIGN §7e makes for the outputs root).
+  state (the same argument DESIGN §8 makes for the outputs root).
 - **A fee market.** "Inputs are free" is the README's first known gap. The
   moment an input costs something, the payer needs an identity, a balance
   to charge, and a nonce to order their transactions. An account model is
@@ -52,7 +52,7 @@ live**, so the host can read them without running anything.
 
 ## 2. Three mechanisms that already exist
 
-The proposal builds on three things that need no new emulator features.
+The design builds on three things that need no new emulator features.
 
 **Reading machine memory is a memcpy.** The remote protocol op-cartesi
 already speaks (`cartesi-jsonrpc-machine`, emulator 0.21) has
@@ -128,7 +128,7 @@ What does not: the ewtools record has **no nonce**, one `int64` balance in
 a single implicit asset, and a layout shaped for exits, not queries —
 lookup is a linear scan, which is fine for an offline prover walking a
 4 MiB drive and wrong for a host answering RPC per transaction. The gap
-this proposal fills is exactly the delta: nonce, `uint256` balances, O(1)
+this design fills is exactly the delta: nonce, `uint256` balances, O(1)
 point lookup, and room to grow — while keeping the proof shape v3 already
 verifies.
 
@@ -212,7 +212,7 @@ requirement (it is not one today: RPC needs point lookups; exits and dumps
 can scan the table linearly offline). It buys sorted iteration for 3–4
 scattered reads per lookup and an order of magnitude more code.
 
-## 5. The proposed standard, v1
+## 5. The standard, v1
 
 The format itself lives in
 **[ACCOUNTS-DRIVE-SPEC.md](ACCOUNTS-DRIVE-SPEC.md)** — a standalone,
@@ -275,7 +275,7 @@ leaf. The decisions behind the bytes:
   deletion is allowed at all is policy, and §5.7 constrains it sharply.
 - **Fullness is consensus.** An insert past the load limit (recommended
   ⅞ of capacity) must deterministically **reject the input**. This has
-  the failure mode DESIGN §7d already names — a portal deposit's L1
+  the failure mode DESIGN §6 already names — a portal deposit's L1
   escrow happens whether or not the guest credits it — so the answer is
   capacity planning plus monitoring, not cleverness at the brink: the
   host watches the live counter and alarms long before the cliff.
@@ -438,7 +438,7 @@ the sparse table.
 
 ### 5.6 Other extensions, named but not specified
 
-- **Per-app namespacing.** DESIGN §8's multi-app dimension folds in by
+- **Per-app namespacing.** DESIGN §9's multi-app dimension folds in by
   keying tables per app id, or one table per app in the directory.
 - **A change journal.** A ring buffer of `(table, slot)` touched per
   input would let an indexer maintain a historical mirror without
@@ -511,7 +511,7 @@ fatal reason and two structural ones:
   then thrown away. Rollback discards a process; it cannot unwrite the
   file. The file ends up corresponding to *no* machine state, and nothing
   errors. This is the same family of silent sharing trap as
-  `machine.store`'s sharing mode (DESIGN §7b), which this repo already
+  `machine.store`'s sharing mode (DESIGN §7), which this repo already
   pins a test against.
 - **No serialization.** `read_memory` is safe by construction: the server
   handles requests sequentially, so a read cannot interleave with
@@ -559,7 +559,7 @@ makes even a local HTTP round trip per lookup matter.
 - **`cartesi_getAccount` / `cartesi_getAccountProof`.** The record plus
   the machine proof of its covering page(s) against the block's
   `stateRoot`. This is the chain's `eth_getProof` analogue — the real
-  `eth_getProof` is unimplementable here for the same reason DESIGN §7
+  `eth_getProof` is unimplementable here for the same reason DESIGN §4
   gives for the portal: there is no MPT and never will be. What replaces
   it is strictly stronger for this chain: a proof against the state root
   the proposals actually commit to.
@@ -593,7 +593,7 @@ this is worth what the game is worth; the point is that when settlement
 lands (roadmap step 4/5), the exit path is already shaped, and users can
 leave a dead chain without anyone's cooperation.
 
-**Alignment with Dave.** DESIGN §7e's second requirement is that a value a
+**Alignment with Dave.** DESIGN §8's second requirement is that a value a
 referee adjudicates must live inside the machine's proven state. The
 accounts drive satisfies it by construction — and under a Dave-style
 settlement, whose claim *is* the machine root, these proofs verify
