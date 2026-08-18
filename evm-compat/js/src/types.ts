@@ -80,12 +80,22 @@ export type Emission =
 
 /** What handlers emit through. `log` is sugar for an EvmLog notice
  * (EVM-COMPAT §8): provable, and decoded into a real receipt log by the
- * shim. */
+ * shim. `withdrawal` is sugar for a Withdrawal notice (withdrawal.ts): an
+ * OP Stack L2→L1 message, finalized on L1 by OptimismPortal against the
+ * block's withdrawal trie. The sink assigns its nonce from the input index,
+ * so the caller names only the message. */
 export interface OutputsSink {
     notice(payload: Hex): void;
     voucher(v: { destination: Address; value?: bigint; payload?: Hex }): void;
     report(payload: Hex): void;
     log(emitter: Address, topics: Hex[], data: Hex): void;
+    withdrawal(w: {
+        sender: Address;
+        target: Address;
+        value?: bigint;
+        gasLimit?: bigint;
+        data?: Hex;
+    }): void;
 }
 
 /** Report framing (prototype convention, one byte before every report the
