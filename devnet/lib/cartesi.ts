@@ -29,11 +29,20 @@ export interface TransactionEmissions {
     reports: Hex[];
 }
 
-/** What cartesi_getOutputProof returns: the raw output and its sibling
- * hashes against the outputs root of the chosen block. */
+/** What cartesi_getOutputProof returns: the raw output, its sibling hashes
+ * against the outputs root of the chosen block, and the storage proof that
+ * anchors that outputs root to the block's withdrawalsRoot — which is what
+ * an L1 proposal actually commits to. */
 export interface OutputProof {
     output: Hex;
     outputHashesSiblings: Hex[];
+    /** The Cartesi outputs root the sibling hashes reproduce. */
+    outputsMerkleRoot: Hex;
+    /** The block's withdrawal trie root — the header's withdrawalsRoot. */
+    withdrawalsRoot: Hex;
+    /** RLP trie nodes proving the outputs root slot against withdrawalsRoot;
+     * what OPOutputsMerkleRootValidator.accept takes. */
+    outputsRootProof: Hex[];
 }
 
 /** One routed address, as cartesi_getContracts reports it: the recorded

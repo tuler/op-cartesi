@@ -16,7 +16,7 @@ const factoryAbi = parseAbi([
 const gameAbi = parseAbi(["function l2BlockNumber() view returns (uint256)"]);
 
 const validatorAbi = parseAbi([
-    "function accept(uint256 gameIndex, (bytes32,bytes32,bytes32,bytes32) claim)",
+    "function accept(uint256 gameIndex, (bytes32,bytes32,bytes32,bytes32) claim, bytes[] outputsRootProof)",
 ]);
 
 const executorAbi = parseAbi(["function executeOutput(bytes output, (uint64,bytes32[]) proof)"]);
@@ -80,8 +80,14 @@ export async function executeVoucher(txHash: Hex): Promise<bigint> {
     }
     console.error(`  game ${gameIndex} proposes L2 block ${proposedBlock}`);
 
-    // 3. Open that proposal's root claim on L1. The four words are the
-    //    preimage op-node hashed; the third is the Cartesi outputs root.
+    // 3. The proof against that block — which also carries the storage
+    //    proof from the block's withdrawalsRoot (the withdrawal trie) down
+    //    to the Cartesi outputs root at its reserved slot.
+    const proof = await l2.getOutputProof({ index, blockNumber: proposedBlock });
+
+    // 4. Open that proposal's root claim on L1. The four words are the
+    //    preimage op-node hashed; the third is the withdrawal trie root, and
+    //    the storage proof opens the outputs root out of it.
     const block = await l2.getBlock({ blockNumber: proposedBlock });
     if (!block.withdrawalsRoot) throw new Error(`L2 block ${proposedBlock} has no withdrawalsRoot`);
     const zero: Hex = "0x0000000000000000000000000000000000000000000000000000000000000000";
@@ -91,15 +97,19 @@ export async function executeVoucher(txHash: Hex): Promise<bigint> {
             address: validator,
             abi: validatorAbi,
             functionName: "accept",
-            args: [gameIndex, [zero, block.stateRoot, block.withdrawalsRoot, block.hash]],
+            args: [
+                gameIndex,
+                [zero, block.stateRoot, block.withdrawalsRoot, block.hash],
+                proof.outputsRootProof,
+            ],
         }),
     );
-    console.error(`  accepted outputs root ${block.withdrawalsRoot} from game ${gameIndex}`);
+    console.error(`  accepted outputs root ${proof.outputsMerkleRoot} from game ${gameIndex}`);
 
-    // 4. Prove the voucher against that block and execute it. The proof is
-    //    against the proposed block's tree, not the emitting block's — a
-    //    withdrawal has to stay provable as the tree grows past it.
-    const proof = await l2.getOutputProof({ index, blockNumber: proposedBlock });
+    // 5. Prove the voucher against the outputs root and execute it. The
+    //    proof is against the proposed block's tree, not the emitting
+    //    block's — a withdrawal has to stay provable as the tree grows past
+    //    it.
     await waitL1(
         l1,
         caller.writeContract({
