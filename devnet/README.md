@@ -51,6 +51,19 @@ stay down: `l1-contracts` (op-deployer), `genesis` (the rollup config), and
 `outputs`, which does not start on its own at all — see
 [below](#how-the-bring-up-is-organized).
 
+### Or the same stack under docker compose
+
+There is a second bring-up in the repository, being tried out against this one:
+[`compose.yaml`](../compose.yaml) at the repo root, described in
+[compose/README.md](compose/README.md). Same stack, same deploy scripts, same
+ports — the ordering is `depends_on` and the readiness is a healthcheck instead
+of the port waits and marker files below, and the whole toolchain is in two
+images, so the host needs only docker and a snapshot.
+
+```sh
+docker compose up
+```
+
 ### Where op-node and op-batcher come from
 
 The OP monorepo publishes **no binaries** — its releases carry source archives

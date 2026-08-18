@@ -7,7 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync/atomic"
 
@@ -587,11 +589,43 @@ func (r *Remote) Fork(ctx context.Context) (Machine, error) {
 	if err := r.call(ctx, "fork", nil, &res); err != nil {
 		return nil, err
 	}
-	addr := res.Address
-	if !strings.Contains(addr, "://") {
-		addr = "http://" + addr
-	}
+	addr := forkEndpoint(r.endpoint, res.Address)
 	return &Remote{endpoint: addr, client: r.client, owned: true}, nil
+}
+
+// forkEndpoint turns the address a fork reports into one this client can dial.
+//
+// The server answers with the address its child bound, which is the parent's
+// own bind address on a fresh port: a server started with
+// --server-address=0.0.0.0:6300 reports its forks as "0.0.0.0:42693". Dialing
+// that verbatim means dialing our own machine, which is right only when the
+// server happens to be on it. So a wildcard host is replaced by the host we
+// reached the parent on — the fork runs where its parent does — and anything
+// else is taken as given, since a server that names a host means it.
+func forkEndpoint(parent, address string) string {
+	if !strings.Contains(address, "://") {
+		address = "http://" + address
+	}
+	forked, err := url.Parse(address)
+	if err != nil || !isWildcard(forked.Hostname()) {
+		return address
+	}
+	base, err := url.Parse(parent)
+	if err != nil || base.Hostname() == "" {
+		return address
+	}
+	forked.Host = net.JoinHostPort(base.Hostname(), forked.Port())
+	return forked.String()
+}
+
+// isWildcard reports whether a host is the "any address" a listener binds
+// rather than an address a client can dial.
+func isWildcard(host string) bool {
+	if host == "" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsUnspecified()
 }
 
 // Close shuts down a forked server. The server the operator started is left
