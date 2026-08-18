@@ -15,6 +15,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseAbi } from "viem";
 import { addresses, chainParams, config, paths, stack } from "./lib/env.ts";
+import { MULTICALL3_ADDRESS, MULTICALL3_CODE } from "./lib/multicall3.ts";
 import { die, must, run, say } from "./lib/proc.ts";
 import { l1Public } from "./lib/wallet.ts";
 
@@ -104,6 +105,17 @@ export async function deployL1(): Promise<void> {
     } catch {
         die(`no L1 at ${config.l1Rpc} — start one first`);
     }
+
+    // Multicall3 at its canonical address: anvil does not predeploy it, and
+    // viem's op-stack actions (waitToProve → getGames) multicall the dispute
+    // games through it. Placed by cheatcode because the canonical address
+    // only comes from a presigned deployment this devnet has no reason to
+    // replay; l1Chain (lib/wallet.ts) declares the address to viem.
+    say(`placing Multicall3 at ${MULTICALL3_ADDRESS}`);
+    await l1.request({
+        method: "anvil_setCode" as never,
+        params: [MULTICALL3_ADDRESS, MULTICALL3_CODE] as never,
+    });
 
     const d = deployer();
     rmSync(paths.deployWorkdir, { recursive: true, force: true });

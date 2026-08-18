@@ -6,9 +6,12 @@
 // the chain definitions — so a proc that wants a port no longer imports a
 // wallet.
 //
-// The clients come pre-extended: OP-stack L1 actions on the L1 pair (viem's
-// deposit/withdrawal/game surface), and the cartesi_ namespace on the L2
-// public client (lib/cartesi.ts).
+// The clients come pre-extended with viem's op-stack surface on both sides —
+// L1 actions on the L1 pair (deposits, waitToProve, proveWithdrawal,
+// finalizeWithdrawal), L2 actions on the L2 pair (initiateWithdrawal,
+// buildProveWithdrawal) — plus the cartesi_ namespace on the L2 public
+// client (lib/cartesi.ts). The stock withdrawal guide
+// (viem.sh/op-stack/guides/withdrawals) runs against these clients as-is.
 
 import {
     type Chain,
@@ -20,9 +23,10 @@ import {
     rpcSchema,
 } from "viem";
 import { privateKeyToAccount } from "viem/accounts";
-import { publicActionsL1, walletActionsL1 } from "viem/op-stack";
+import { publicActionsL1, publicActionsL2, walletActionsL1, walletActionsL2 } from "viem/op-stack";
 import { type CartesiRpcSchema, cartesiActions } from "./cartesi.ts";
 import { config } from "./env.ts";
+import { MULTICALL3_ADDRESS } from "./multicall3.ts";
 
 /** The guard earns viem's template-literal type by inspection, the same
  * doctrine as the router's tx.ts: no casts, checked at runtime. */
@@ -41,6 +45,11 @@ export const l1Chain: Chain = defineChain({
     name: "devnet-l1",
     nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
     rpcUrls: { default: { http: [config.l1Rpc] } },
+    contracts: {
+        // Placed by deploy-l1.ts (anvil_setCode); viem's multicall — which
+        // getGames runs under waitToProve — resolves it from here.
+        multicall3: { address: MULTICALL3_ADDRESS },
+    },
 });
 
 // The L2 chain carries the OP-stack shape viem's op-stack actions resolve
@@ -56,9 +65,14 @@ export const l2Chain = defineChain({
     sourceId: config.l1ChainId,
     contracts: {
         portal: { [config.l1ChainId]: { address: config.depositContract } },
-        ...(config.disputeGameFactory
-            ? { disputeGameFactory: { [config.l1ChainId]: { address: config.disputeGameFactory } } }
-            : {}),
+        // Unconditional because viem's targetChain type requires the pair;
+        // before the contracts are deployed there is no factory to name, and
+        // every script that would reach for it refuses first.
+        disputeGameFactory: {
+            [config.l1ChainId]: {
+                address: config.disputeGameFactory ?? "0x0000000000000000000000000000000000000000",
+            },
+        },
     },
 });
 
@@ -82,7 +96,9 @@ export function l2Public(rpc?: string) {
         chain: l2Chain,
         transport: http(rpc ?? config.l2Rpc),
         rpcSchema: rpcSchema<CartesiRpcSchema>(),
-    }).extend(cartesiActions());
+    })
+        .extend(cartesiActions())
+        .extend(publicActionsL2());
 }
 
 export function l2Wallet(key: string) {
@@ -90,5 +106,5 @@ export function l2Wallet(key: string) {
         chain: l2Chain,
         transport: http(),
         account: privateKeyToAccount(asKey(key)),
-    });
+    }).extend(walletActionsL2());
 }

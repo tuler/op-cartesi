@@ -23,6 +23,8 @@ import {
     l1BlockAbi,
     l2CrossDomainMessengerAbi,
     l2StandardBridgeAbi,
+    MESSAGE_PASSER_ADDRESS,
+    messagePasserAbi,
     REGISTRY_ADDRESS,
     registryAbi,
     sameAddress,
@@ -52,6 +54,7 @@ const BUILTINS: ReadonlyArray<{ address: Address; abi: Abi }> = [
     { address: L1BLOCK_ADDRESS, abi: l1BlockAbi },
     { address: L2_MESSENGER_ADDRESS, abi: l2CrossDomainMessengerAbi },
     { address: L2_BRIDGE_ADDRESS, abi: l2StandardBridgeAbi },
+    { address: MESSAGE_PASSER_ADDRESS, abi: messagePasserAbi },
 ];
 
 /** The adopted OP predeploys applications may not claim (the 0xC751
@@ -60,6 +63,7 @@ const RESERVED_PREDEPLOYS: readonly Address[] = [
     L1BLOCK_ADDRESS,
     L2_MESSENGER_ADDRESS,
     L2_BRIDGE_ADDRESS,
+    MESSAGE_PASSER_ADDRESS,
 ];
 
 function inSystemNamespace(address: Address): boolean {

@@ -242,11 +242,13 @@ address the deployment authorised, and are never disputed — there is no fault
 proof VM that can execute a Cartesi Machine. That is how OP chains launch;
 real disputes are the settlement track.
 
-Deploying `OptimismPortal` does not make OP's own withdrawal path usable:
-`proveWithdrawalTransaction` verifies an MPT storage proof of the
-L2ToL1MessagePasser account against the L2 state root, and ours is a Cartesi
-hash tree. Withdrawals go through Cartesi vouchers instead — see below and
-[DESIGN.md §4 and §7c](../docs/DESIGN.md).
+Deploying `OptimismPortal` also makes OP's own withdrawal path work:
+`proveWithdrawalTransaction` wants a storage proof of the
+L2ToL1MessagePasser's `sentMessages` trie, and the shim maintains exactly
+that trie as the header's `withdrawalsRoot`
+([DESIGN.md §7f](../docs/DESIGN.md)). Ether and ERC-20 withdrawals ride it —
+see below. Cartesi vouchers remain for application outputs the portal has
+no notion of.
 
 ### Two packages: bringing it up, and using it
 
@@ -309,7 +311,8 @@ so a process that started before a deploy still sees what it wrote. `.env` is
 gitignored; keys live there, not in command lines.
 
 The scripts ([`scripts/`](../scripts/README.md)) and the guest speak the same standard: `withdraw.ts`
-calls the bridge built-in, `withdraw-erc20.ts` the `L2StandardBridge`
+calls the message-passer predeploy through viem's `initiateWithdrawal`,
+`withdraw-erc20.ts` the `L2StandardBridge`
 predeploy, `balance.ts` reads the drive
 and the ERC-20 façades, `contracts.ts` asks `cartesi_getContracts` what the
 guest routes — every recorded contract with its ABI, every token façade with
@@ -354,31 +357,40 @@ funded — retired once `WITH_CONTRACTS=1` became the default.)
 
 ### Withdrawals
 
-`deploy-outputs.ts` puts the L1 half in place: the validator that opens an OP
-proposal's root claim, the executor that runs a proven output, and the two
-portals. It also funds the executor and registers the portals with the guest.
-
-It is the `outputs` pane — the one step of the flow that waits for you rather
-than for another process, since not every run wants to move assets. Select it
-and press `s`, or run it yourself:
+Ether withdrawals are the stock OP flow, driven with viem's op-stack actions
+exactly as [the withdrawal guide](https://viem.sh/op-stack/guides/withdrawals)
+writes it:
 
 ```sh
-./devnet/deploy-outputs.ts
 bun scripts/withdraw.ts 0x00000000000000000000000000000000000a11ce 500000000000000000
 ```
 
-`withdraw.ts` asks the guest for a withdrawal — a `withdrawEther` call on the
-routed guest's bridge predeploy, carrying the wei as `msg.value` — and
-`scripts/lib/voucher.ts` does the rest: wait for a proposal covering the voucher's
-block, open that proposal's root claim on L1, and prove the voucher against
-the outputs root inside it with Cartesi's own libraries. Nothing about op-node, op-batcher or op-proposer is
-modified or aware of any of this — the root claim they already publish is the
-commitment the proof runs against.
+`initiateWithdrawal` sends the L2 transaction to the message-passer
+predeploy, which the routed guest serves: it burns the value and emits the
+OP `Withdrawal` message whose hash enters the block's withdrawal trie. Then
+`waitToProve` finds the dispute game covering the block,
+`buildProveWithdrawal` fetches the storage proof with `eth_getProof`, and
+`proveWithdrawal` / `finalizeWithdrawal` drive `OptimismPortal` — with one
+devnet substitution: the guide's `waitToFinalize` measures the proof's age
+against the caller's wall clock, and the devnet advances *anvil's* clock
+past the week of delays instead, resolving the permissioned game by hand
+along the way (`scripts/lib/portal.ts`). Nothing about op-node, op-batcher
+or op-proposer is modified or aware of any of this — the root claim
+op-proposer already publishes is what the proof runs against.
 
-The proof is built against the *proposed* block, not the block that emitted the
-voucher. The outputs tree is cumulative over the chain, so a withdrawal has to
-stay provable as the tree grows past it; `cartesi_getOutputProof` takes both the
-output index and the block to prove it as of.
+The voucher path remains for application outputs the portal has no notion
+of. `deploy-outputs.ts` puts its L1 half in place — the validator that opens
+an OP proposal's root claim, the executor that runs a proven output — and
+registers the standard messenger pair with the guest (which the ERC-20
+bridging below needs). It is the `outputs` pane, the one step of the flow
+that waits for you rather than for another process; select it and press
+`s`, or run `./devnet/deploy-outputs.ts` yourself. `execute-voucher.ts` and
+`scripts/lib/voucher.ts` then prove a voucher against the outputs root,
+which lives one storage slot inside the same withdrawal trie. The proof is
+built against the *proposed* block, not the block that emitted the voucher:
+the outputs tree is cumulative over the chain, so a withdrawal has to stay
+provable as the tree grows past it, and `cartesi_getOutputProof` takes both
+the output index and the block to prove it as of.
 
 ### Tokens
 

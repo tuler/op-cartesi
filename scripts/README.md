@@ -15,7 +15,7 @@ bun install                    # once, at the repo root (bun workspace)
 | | |
 |---|---|
 | `deposit.ts <recipient> [wei]` | An L1 deposit through `OptimismPortal`, followed to the L2 transaction op-node derives from it |
-| `withdraw.ts <recipient> <wei>` | Asks the guest to withdraw, then proves and executes the voucher on L1 |
+| `withdraw.ts <recipient> <wei>` | An ether withdrawal exactly as [viem's withdrawal guide](https://viem.sh/op-stack/guides/withdrawals) writes it: `initiateWithdrawal` on the message-passer predeploy, then prove and finalize through `OptimismPortal` |
 | `deposit-erc20.ts [amount] [token]` | The same for ERC-20, through `L1StandardBridge` and the messengers. Deploys a test token on first use |
 | `withdraw-erc20.ts <recipient> <amount> [l1-token]` | The ERC-20 return trip: `bridgeERC20To` on the L2 bridge predeploy, then prove and finalize through `OptimismPortal` |
 | `execute-voucher.ts <L2 tx hash>` | Proves and executes the voucher a transaction emitted, on its own |
@@ -23,7 +23,8 @@ bun install                    # once, at the repo root (bun workspace)
 | `contracts.ts` | `cartesi_getContracts`: every address the guest routes, with its ABI |
 | `send-l2-tx.ts <to> [calldata] [value-wei]` | One signed L2 transaction, for payloads nothing else covers |
 | `build-snapshot.ts` | `cartesi build` of [`demo/`](../demo/README.md) — the stored machine that is the chain's genesis state |
-| `lib/voucher.ts` | The second half of every withdrawal: wait for a proposal, open its root claim, prove the output against it |
+| `lib/portal.ts` | The L1 half of every OP-path withdrawal, on viem's op-stack actions: `waitToProve`, `buildProveWithdrawal`, `proveWithdrawal`, `finalizeWithdrawal` — plus the devnet-only time skipping and game resolving that stands in for `waitToFinalize` |
+| `lib/voucher.ts` | The second half of a voucher withdrawal: wait for a proposal, open its root claim, prove the output against it |
 | `lib/l2.ts` | Sending an L2 transaction the way a wallet would — viem fills the nonce and the fees, and signs EIP-1559 |
 
 Every file is directly executable (`./scripts/deposit.ts …`) and works from
@@ -55,7 +56,7 @@ instead of the sequencer.
 
 The devnet README carries the explanations these scripts are the front end of:
 [deposits](../devnet/README.md#deposits), [withdrawals](../devnet/README.md#withdrawals),
-[tokens](../devnet/README.md#tokens), and why the ERC-20 path avoids
+[tokens](../devnet/README.md#tokens), and how the ERC-20 path rides
 `L1StandardBridge`. The wire vocabulary the guest and these scripts share is
 [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md); the ledger they read is
 [docs/ACCOUNTS.md](../docs/ACCOUNTS.md).

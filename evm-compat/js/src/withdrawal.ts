@@ -25,9 +25,10 @@ import {
 } from "viem";
 
 /** OP's L2ToL1MessagePasser predeploy address: the account whose storage
- * trie the withdrawal commitment stands in for, and the emitter of the
- * synthesized MessagePassed logs. There is no contract at this address on
- * this chain — the bridge built-in plays initiateWithdrawal's role. */
+ * trie the withdrawal commitment stands in for, the emitter of the
+ * synthesized MessagePassed logs, and — through the guest's passer handler —
+ * a live initiateWithdrawal target, so viem's stock withdrawal flow works
+ * unchanged. */
 export const MESSAGE_PASSER_ADDRESS: Address = "0x4200000000000000000000000000000000000016";
 
 export const WITHDRAWAL_SIGNATURE = "Withdrawal(uint256,address,address,uint256,uint256,bytes)";
