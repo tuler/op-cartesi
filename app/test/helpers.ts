@@ -3,6 +3,7 @@
 // owner defaults to anvil #3).
 
 import { MemStore } from "@op-cartesi/accounts";
+import { decodeWithdrawal, type WithdrawalMessage } from "@op-cartesi/evm";
 import {
     type Address,
     type Hex,
@@ -129,6 +130,14 @@ export function vouchers(emissions: Emission[]): Extract<Emission, { kind: "vouc
 
 export function reports(emissions: Emission[]): Extract<Emission, { kind: "report" }>[] {
     return emissions.filter((e) => e.kind === "report");
+}
+
+/** Withdrawals ride as notices; filter and decode them. */
+export function withdrawals(emissions: Emission[]): WithdrawalMessage[] {
+    return emissions
+        .filter((e) => e.kind === "notice")
+        .map((e) => decodeWithdrawal(e.payload))
+        .filter((w): w is WithdrawalMessage => w !== undefined);
 }
 
 /** The drive image, for byte-identity assertions. */

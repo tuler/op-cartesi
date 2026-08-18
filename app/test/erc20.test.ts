@@ -1,6 +1,7 @@
 // The token path end to end: portal registration, ERC-20 deposit with
 // first-seen registration, the façade over EvmCall, transfers with Transfer
-// events, the byte-identical revert journal, and withdrawals as vouchers.
+// events, the byte-identical revert journal, and the two withdrawal paths:
+// ether as an OP Withdrawal message, tokens as a Cartesi voucher.
 
 import {
     applyL1ToL2Alias,
@@ -40,6 +41,7 @@ import {
     signedTx,
     user,
     vouchers,
+    withdrawals,
 } from "./helpers.ts";
 
 const L1_TOKEN: Address = "0x59b670e9fa9d0a427751af201d676719a970857b";
@@ -247,7 +249,7 @@ describe("the token path", () => {
         expect(ledger.totalSupply(id)).toBe(600n);
     });
 
-    it("withdrawEther burns the value and pays the voucher", async () => {
+    it("withdrawEther burns the value and emits an OP withdrawal", async () => {
         const { router, ledger } = await setup();
         // Fund through an ether-portal deposit so the credit is voucher-backed.
         const ETHER_PORTAL: Address = "0x0165878a594ca255338adfa4d48449f69242eb8f";
@@ -284,9 +286,14 @@ describe("the token path", () => {
             }),
         );
         expect(res.accept).toBe(true);
-        const [voucher] = vouchers(res.emissions);
-        expect(voucher!.destination.toLowerCase()).toBe(RECIPIENT.toLowerCase());
-        expect(voucher!.value).toBe(200n);
+        // Ether leaves as an OP Withdrawal message, not a voucher: it
+        // finalizes through OptimismPortal against the withdrawal trie.
+        const [w] = withdrawals(res.emissions);
+        expect(w!.target.toLowerCase()).toBe(RECIPIENT.toLowerCase());
+        expect(w!.value).toBe(200n);
+        expect(w!.sender.toLowerCase()).toBe(user.address.toLowerCase());
+        expect(w!.nonce >> 240n).toBe(1n); // OP message version 1
+        expect(vouchers(res.emissions)).toHaveLength(0); // no second executor
         expect((await ledger.account(user.address)).balance).toBe(300n);
         expect((await ledger.account(BRIDGE_ADDRESS)).balance).toBe(0n); // burned, not held
     });
@@ -320,5 +327,59 @@ describe("the token path", () => {
         expect(res.accept).toBe(true);
         expect(res.outcome).toBe("revert"); // mint (zero here) survives; credit does not
         expect(ledger.tokenByL1Address(L1_TOKEN)).toBeNull();
+    });
+});
+
+describe("withdrawal nonces", () => {
+    it("are unique across inputs without any stored counter", async () => {
+        const { router } = await setup();
+        await router.advance(
+            block(),
+            depositTx({ from: user.address, to: user.address, mint: 1000n, value: 1000n }),
+        );
+        const withdraw = (nonce: number) =>
+            signedTx(user, {
+                to: BRIDGE_ADDRESS,
+                nonce,
+                value: 100n,
+                data: encodeFunctionData({
+                    abi: bridgeAbi,
+                    functionName: "withdrawEther",
+                    args: [RECIPIENT],
+                }),
+            });
+        const first = await router.advance(block({ inputIndex: 7n }), await withdraw(0));
+        const second = await router.advance(block({ inputIndex: 8n }), await withdraw(1));
+        const [w1] = withdrawals(first.emissions);
+        const [w2] = withdrawals(second.emissions);
+        // Same message either time — recipient, value, sender — so only the
+        // nonce separates the two withdrawal hashes on L1.
+        expect(w1!.nonce).not.toBe(w2!.nonce);
+        expect(w1!.nonce).toBe((1n << 240n) | (7n << 32n));
+        expect(w2!.nonce).toBe((1n << 240n) | (8n << 32n));
+    });
+
+    it("a reverted withdrawal never reaches the outputs", async () => {
+        const { router } = await setup();
+        await router.advance(
+            block(),
+            depositTx({ from: user.address, to: user.address, mint: 50n, value: 50n }),
+        );
+        // withdrawEther with no value reverts before emitting.
+        const res = await router.advance(
+            block(),
+            await signedTx(user, {
+                to: BRIDGE_ADDRESS,
+                nonce: 0,
+                value: 0n,
+                data: encodeFunctionData({
+                    abi: bridgeAbi,
+                    functionName: "withdrawEther",
+                    args: [RECIPIENT],
+                }),
+            }),
+        );
+        expect(res.outcome).toBe("revert");
+        expect(withdrawals(res.emissions)).toHaveLength(0);
     });
 });

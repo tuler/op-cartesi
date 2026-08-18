@@ -21,12 +21,15 @@ import {
     CONFIG_ADDRESS,
     decodeEvmCall,
     encodeEvmLog,
+    encodeWithdrawal,
     errorRevert,
     L1BLOCK_ADDRESS,
     parseInput,
     REGISTRY_ADDRESS,
     recoverSender,
     sameAddress,
+    versionedWithdrawalNonce,
+    WITHDRAWAL_DEFAULT_GAS_LIMIT,
 } from "@op-cartesi/evm";
 import { type Address, concat, type Hex, toHex } from "viem";
 import { Bridge } from "./handlers/bridge.ts";
@@ -71,6 +74,12 @@ export interface InspectResult {
 
 class BufferSink implements OutputsSink {
     emissions: Emission[] = [];
+    private withdrawals = 0n;
+
+    /** The chain-wide input index seeds withdrawal nonces; a sink is built
+     * per input, so the per-input ordinal lives here and rolls back with the
+     * buffered emissions when the outcome drops them. */
+    constructor(private readonly inputIndex: bigint) {}
 
     notice(payload: Hex): void {
         this.emissions.push({ kind: "notice", payload });
@@ -94,6 +103,25 @@ class BufferSink implements OutputsSink {
 
     log(emitter: Address, topics: Hex[], data: Hex): void {
         this.notice(encodeEvmLog(emitter, topics, data));
+    }
+
+    withdrawal(w: {
+        sender: Address;
+        target: Address;
+        value?: bigint;
+        gasLimit?: bigint;
+        data?: Hex;
+    }): void {
+        this.notice(
+            encodeWithdrawal({
+                nonce: versionedWithdrawalNonce(this.inputIndex, this.withdrawals++),
+                sender: w.sender,
+                target: w.target,
+                value: w.value ?? 0n,
+                gasLimit: w.gasLimit ?? WITHDRAWAL_DEFAULT_GAS_LIMIT,
+                data: w.data ?? "0x",
+            }),
+        );
     }
 
     /** Reports only — what survives a revert. */
@@ -282,7 +310,7 @@ export class Router {
         mark: number,
         chargeable: { address: Address; fee: bigint } | null,
     ): Promise<AdvanceResult> {
-        const sink = new BufferSink();
+        const sink = new BufferSink(ctx.block.inputIndex);
         let outcome: AdvanceOutcome;
         try {
             await this.ledger.debitEther(ctx.sender, ctx.value);
@@ -424,7 +452,7 @@ export class Router {
             isDeposit: false,
             mint: 0n,
         };
-        const sink = new BufferSink();
+        const sink = new BufferSink(ctx.block.inputIndex);
         let outcome: AdvanceOutcome;
         try {
             await this.ledger.debitEther(ctx.sender, ctx.value);

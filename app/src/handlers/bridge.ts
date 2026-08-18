@@ -1,12 +1,15 @@
-// The bridge (EVM-COMPAT §9): withdrawals as vouchers, debiting the
-// authenticated sender.
+// The bridge (EVM-COMPAT §9): withdrawals out, debiting the authenticated
+// sender — by two different L1 mechanisms.
 //
 // withdrawEther is payable: the router has already moved msg.value to the
 // bridge's own balance, so the handler burns its own funds — the
-// contract-holds-funds capability rule — and emits the voucher paying `to`.
+// contract-holds-funds capability rule — and emits an OP Stack Withdrawal
+// message paying `to`. It finalizes through OptimismPortal against the
+// block's withdrawal trie, drawing on the lockbox the deposits funded.
 // withdrawERC20 debits the caller's holding of the token named by its L2
-// façade address, and the voucher tells the L1 token to move itself from the
-// application contract that has escrowed it since the deposit.
+// façade address, and stays a Cartesi voucher: the tokens are escrowed in
+// the application contract, which only a voucher executing from that
+// contract's context can move.
 
 import { bridgeAbi, errorRevert, transferLog, tryDecodeCalldata } from "@op-cartesi/evm";
 import { type Address, encodeFunctionData, parseAbi } from "viem";
@@ -29,10 +32,14 @@ export class Bridge implements Handler {
                 if (ctx.value === 0n) {
                     return { kind: "revert", data: errorRevert("withdrawEther: no value") };
                 }
-                // Burn what the router credited us: the wei leaves L2 here and
-                // reappears on L1 through the voucher.
+                // Burn what the router credited us: the wei leaves L2 here
+                // and reappears on L1 through OptimismPortal, which pays it
+                // from the same lockbox deposits fund — so both directions
+                // agree about who holds the money. The withdrawal's sender
+                // is the user, exactly as if they had called
+                // initiateWithdrawal on the message passer themselves.
                 await ledger.debitEther(ctx.to, ctx.value);
-                out.voucher({ destination: to, value: ctx.value });
+                out.withdrawal({ sender: ctx.sender, target: to, value: ctx.value });
                 return { kind: "accept" };
             }
             case "withdrawERC20": {

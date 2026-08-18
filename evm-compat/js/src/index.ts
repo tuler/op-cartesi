@@ -9,3 +9,4 @@ export * from "./events.ts";
 export * from "./evmcall.ts";
 export * from "./tx.ts";
 export * from "./types.ts";
+export * from "./withdrawal.ts";
