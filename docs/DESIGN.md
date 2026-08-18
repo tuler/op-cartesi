@@ -260,7 +260,7 @@ What it costs:
 
 ## 6. Bridging: ether, ERC-20, and Cartesi outputs
 
-![Deposit and withdrawal value paths across the bridge](diagrams/devnet-value-paths.svg)
+![Three value paths: an ether or ERC-20 deposit into the guest, a withdrawal out as an OP message, and an application's own voucher](diagrams/devnet-value-paths.svg)
 
 *Deposits ride OP's own derivation pipeline into the guest; withdrawals leave
 as OP messages the portal can prove, or as Cartesi outputs an application
