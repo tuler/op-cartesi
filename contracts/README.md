@@ -2,7 +2,17 @@
 
 The L1 side of this chain: what makes a Cartesi output executable against an OP
 proposal, and what lets a Cartesi-style deposit reach the guest through
-`OptimismPortal`.
+`OptimismPortal`. Ether withdrawals no longer need a contract here at all —
+they finalize through stock `OptimismPortal.proveWithdrawalTransaction`
+against the withdrawal trie the header commits (DESIGN §7f); what remains is
+the voucher path for everything the portal cannot execute.
+
+`src/vendor/optimism/` carries the OP Stack's `SecureMerkleTrie` and its
+supporting libraries, copied verbatim (MIT) with only import paths rewritten:
+`OPOutputsMerkleRootValidator` opens the Cartesi outputs root out of the
+withdrawal trie with the *same* verifier the portal runs, and
+`test/PasserTrieVectors.t.sol` pins the node's Go trie to it with fixed
+vectors — mirrored on the Go side by `TestPasserTrieMatchesSolidityVectors`.
 
 A [Foundry](https://getfoundry.sh) project. Dependencies come from
 [soldeer](https://soldeer.xyz) — the Cartesi Rollups contracts and OpenZeppelin
