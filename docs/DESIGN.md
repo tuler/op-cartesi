@@ -182,7 +182,7 @@ An earlier draft of this section claimed Isthmus lets us keep the stock portal w
 - **What it does buy, unambiguously:** op-node can compute an output root at all. Without it, `optimism_outputAtBlock` fails on the `eth_getProof` call and `op-proposer` cannot function — there is no chain to propose. It also makes the Cartesi outputs root a committed part of `OutputRootV0`, so anything that verifies against that root is verifying against the machine's real outputs. `op-node`, `op-batcher` and `op-proposer` all stay stock.
 
   **Confirmed against a released op-node** (v1.19.3), rather than argued from the source: `optimism_outputAtBlock` returns an output root for our chain, and the `withdrawalStorageRoot` it reports is byte-for-byte the value `cartesi_getOutputsRoot` gives for the same block. So the output root op-proposer would submit already commits to the Cartesi outputs tree, and nothing on that path calls `eth_getProof`.
-- **What it does not buy:** L1-side withdrawal verification. `OptimismPortal.proveWithdrawalTransaction` verifies a withdrawal with an **MPT storage proof against `messagePasserStorageRoot`**. Feeding it a Cartesi outputs root does not make its `SecureMerkleTrie` verification succeed — the proof formats are unrelated.
+- **What it does not buy:** L1-side withdrawal verification. `OptimismPortal.proveWithdrawalTransaction` verifies a withdrawal with an **MPT storage proof against `messagePasserStorageRoot`**. Feeding it a Cartesi outputs root does not make its `SecureMerkleTrie` verification succeed — the proof formats are unrelated. *(This half has since been closed from the other side: `withdrawalsRoot` is now a genuine storage trie the portal's verification succeeds against — see §7f.)*
 
 So the L1 side still needs Cartesi-aware proof checking, and §4's two options remain live for that half of the problem:
 
@@ -205,7 +205,7 @@ The consequence is a deliberate ordering: serve receipts *before* committing the
 ### Staged plan
 
 1. **Thread outputs through the chain.** *(done)* Per-transaction emissions are split into provable outputs and diagnostic reports, attributed by transaction index and hash, and recorded on the block. Outputs of a rejected input are dropped, because a rejection rolls the machine back; its reports are kept, since they are usually the only explanation of the failure. Builder and verifier are tested to record identical outputs — the agreement everything downstream depends on.
-2. **Commit the outputs Merkle root** in the header's `withdrawalsRoot`, making `optimism_outputAtBlock` meaningful. *(done)* The chain is Isthmus from genesis and the fork schedule is not configurable — a pre-Isthmus chain could never be proposed, so supporting one would only add untested paths. The tree matches Cartesi's on-chain tree exactly — height 63 (`CanonicalMachine.LOG2_MAX_OUTPUTS`), leaves `keccak256(output)`, parents `keccak256(left‖right)`, unfilled positions padded with the zero-subtree chain — so existing voucher proofs and tooling verify against it unchanged. The accumulator is cumulative over the chain, not per block, which both models require: Cartesi indexes outputs globally, and a withdrawal must stay provable against the output root of any later block. Verifiers re-derive the root from re-execution and reject a payload that claims outputs the machine did not produce.
+2. **Commit the outputs Merkle root** in the header's `withdrawalsRoot`, making `optimism_outputAtBlock` meaningful. *(done)* The chain is Isthmus from genesis and the fork schedule is not configurable — a pre-Isthmus chain could never be proposed, so supporting one would only add untested paths. The tree matches Cartesi's on-chain tree exactly — height 63 (`CanonicalMachine.LOG2_MAX_OUTPUTS`), leaves `keccak256(output)`, parents `keccak256(left‖right)`, unfilled positions padded with the zero-subtree chain — so existing voucher proofs and tooling verify against it unchanged. The accumulator is cumulative over the chain, not per block, which both models require: Cartesi indexes outputs globally, and a withdrawal must stay provable against the output root of any later block. Verifiers re-derive the root from re-execution and reject a payload that claims outputs the machine did not produce. *(Since §7f the header field carries the withdrawal trie root, with this outputs root at the trie's reserved slot — same commitment chain, one storage-proof hop longer.)*
 3. **Synthesize receipts** from the recorded outputs. *(done)* Provable outputs become logs, acceptance becomes `status`, and consumed mcycles become `gasUsed`; `eth_getTransactionReceipt` and `eth_getBlockReceipts` serve the standard shape. Each log carries the output's **chain-wide index** as a topic alongside the raw bytes, which is precisely what a Cartesi output validity proof takes — so a receipt is enough to construct the L1 proof later. `receiptsRoot` and the header bloom stay empty, so none of this encoding is frozen into consensus while it is still moving.
 
    Reports deliberately do *not* become logs. Dressing a non-provable emission up as a log would imply it can be proven on L1. They are served instead through a `cartesi_` namespace — `cartesi_getTransactionEmissions` returns outputs with their indices plus the reports, and `cartesi_getOutputsRoot` returns the commitment and output count at a block.
@@ -309,16 +309,19 @@ already commits to the answer, because op-node builds its root claim as
 
     keccak256(version ‖ stateRoot ‖ messagePasserStorageRoot ‖ blockHash)
 
-and on this chain `messagePasserStorageRoot` is the header's `withdrawalsRoot`,
-which is the Cartesi outputs Merkle root. So `OPOutputsMerkleRootValidator`
-opens a game's root claim — four words and one keccak — and records the outputs
-root it commits to. That is the entire adaptation between the two settlement
-models.
+and on this chain `messagePasserStorageRoot` is the header's `withdrawalsRoot`
+— since §7f, the withdrawal trie, which holds the Cartesi outputs Merkle root
+at a reserved slot. So `OPOutputsMerkleRootValidator` opens a game's root
+claim — four words, one keccak, and one storage proof verified by the same
+`SecureMerkleTrie` the portal runs — and records the outputs root it commits
+to. That is the entire adaptation between the two settlement models.
 
-Nothing forks `OptimismPortal`. Its withdrawal path proves an MPT storage slot
-against the L2 state root, which cannot work when that root is a Cartesi hash
-tree; this sidesteps that path rather than replacing it, which is option 2
-above. The portal keeps its deposit path, which is what the chain already uses.
+Nothing forks `OptimismPortal` — and since §7f nothing needs to sidestep it
+either: its withdrawal path verifies a storage slot against
+`messagePasserStorageRoot`, and that root is now a real storage trie this
+chain maintains, so ether withdrawals go through the portal itself. The
+voucher path this section describes remains for what the portal cannot
+execute — ERC-20 withdrawals and any other Cartesi output.
 
 Two pieces on this side of the boundary:
 
@@ -347,12 +350,13 @@ same contract then waits for a resolved game past the dispute window. That
 proof system is step 3, and it is now the only thing between this and a
 trust-minimised withdrawal.
 
-**And what is unbridged.** The executor pays vouchers from its own balance, the
-way a Cartesi `Application` holds the assets it can be told to move. ETH
-deposited through `OptimismPortal` sits in the portal's lockbox instead, so the
-two ends of the bridge do not yet share custody. Routing deposits to the
-application, or teaching the portal to release against an accepted outputs root,
-is a real design choice and is not made here.
+**And what is unbridged.** The executor pays vouchers from its own balance,
+the way a Cartesi `Application` holds the assets it can be told to move. For
+ether this asymmetry is resolved by §7f: `withdrawEther` now emits an OP
+`Withdrawal` message and the portal pays it from the same lockbox the
+deposits funded, so the two ends of the ether bridge share custody. For
+ERC-20 the vouchers and the application-contract escrow remain, and remain
+consistent with each other.
 
 ## 7d. ERC-20, and where the standard bridge stops working
 
@@ -385,8 +389,12 @@ in `L1StandardBridge`, and only `L1CrossDomainMessenger` can make it call
 `finalizeBridgeERC20` — after `OptimismPortal.proveWithdrawalTransaction`, which
 is exactly the MPT-proof path this chain cannot satisfy (§7c). A Cartesi voucher
 executes from the application's own context, so it cannot release that escrow.
-There is no arrangement of guest code that fixes this: the custody is on the
-wrong side of a proof the chain cannot produce.
+At the time this section was written there was no arrangement of guest code
+that fixed this: the custody was on the wrong side of a proof the chain could
+not produce. §7f changes the premise — the proof is now producible — so the
+messenger-shaped path (option 2 below) has become real future work rather
+than a dead end; what stands unchanged is that the escrow stays stuck until
+a guest speaks `relayMessage` byte-exactly.
 
 So the honest options are two, and they are the same choice §4 posed, now
 sharpened by ERC-20:
@@ -597,6 +605,133 @@ nothing.
 `prt/client-rs/core/src/`, `cartesi-rollups/contracts/src/DaveConsensus.sol`,
 `cartesi-rollups/node/`. Note that Dave pins `cartesi-rollups-contracts` 2.2.0
 while this repo is on 3.0.0-alpha.6; an integration has to reconcile them.*
+
+## 7f. The withdrawal trie: OP-native withdrawals without forking the portal
+
+§7 established that Isthmus settles the *producer* side of the output root and
+left the *consumer* side — `OptimismPortal.proveWithdrawalTransaction`'s MPT
+storage proof — as the thing this chain could not satisfy, and §7c/§7d built
+the Cartesi-voucher bridge around that hole. This section closes the hole, and
+the observation that closes it is worth stating precisely, because an earlier
+draft of §7 over-claimed the impossibility:
+
+**The portal never proves the account. It proves one storage slot of one
+contract, against a root the header already carries.** `eth_getProof`'s
+account proof — the MPT path from the state root to the `L2ToL1MessagePasser`
+account — is consumed only by op-node's *pre-Isthmus* output-root path, which
+this chain does not run. From Isthmus, `messagePasserStorageRoot` is the
+header's `withdrawalsRoot`, taken on faith by op-node and committed by the
+proposal; the portal then verifies withdrawals *against that storage root
+alone*, with `SecureMerkleTrie.verifyInclusionProof(abi.encode(slot), 0x01,
+proof, messagePasserStorageRoot)` where `slot =
+keccak256(abi.encode(withdrawalHash, 0))`. viem's `buildProveWithdrawal` reads
+only `proof.storageHash` and `proof.storageProof[0].proof` — the account proof
+is never touched. So what "there is no Ethereum MPT" actually rules out is the
+*account trie*; a single insert-only *storage trie*, maintained outside any
+EVM, is not ruled out by anything. It is, in fact, the easiest possible MPT
+workload: keys uniformly distributed by keccak, one constant value (`0x01`),
+no deletions, no updates.
+
+So the chain now maintains exactly that trie, and `withdrawalsRoot` is its
+root:
+
+- **The guest emits withdrawals.** `withdrawEther` no longer emits a voucher;
+  it emits a `Withdrawal(uint256 nonce, address sender, address target,
+  uint256 value, uint256 gasLimit, bytes data)` message — the OP
+  `WithdrawalTransaction` fields, riding as a Notice because the rollup
+  device has no raw output. A notice deliberately: a voucher is executable by
+  the Cartesi output executor, and a message the portal can finalize must not
+  have a second executor to be paid by. The nonce is
+  `encodeVersionedNonce`-shaped (version 1 in the top 16 bits) and derived
+  from the chain-wide input index plus a per-input ordinal, which makes it
+  unique with no stored counter — nothing on L1 requires the counter to be
+  dense, only the withdrawal hash to be unique.
+- **The host maintains the trie** (`chain/passertrie.go`): a genuine
+  Ethereum storage trie over geth's own `trie` package, secure-keyed the way
+  geth keys account storage, holding the `sentMessages` slot of every
+  withdrawal hash. It is cumulative like the outputs tree, carried per block
+  across forks with copy-on-write, rebuilt from persisted block outputs on
+  restart, and re-derived by verifiers — a payload claiming a withdrawal the
+  machine did not emit fails `engine_newPayloadV4` with a withdrawals-root
+  mismatch.
+- **The Cartesi outputs root moves into the trie** rather than out of the
+  header: the reserved slot `keccak256("op-cartesi.outputsMerkleRoot")` holds
+  the outputs tree root as of each block. One storage proof against
+  `withdrawalsRoot` opens it, so vouchers and notices lose nothing — their
+  commitment is still under the root claim, one keccak-verified hop further
+  down. The slot cannot collide with a `sentMessages` slot short of a keccak
+  collision: those hash a 64-byte mapping preimage, this hashes a short
+  string.
+- **`eth_getProof` exists now**, for exactly one address:
+  `0x4200…0016`. It serves the storage proof viem asks for, with
+  `storageHash = withdrawalsRoot` and an empty account proof — there is
+  still no account trie, and nothing on the Isthmus path wants one. Every
+  other address is refused with a pointer to `cartesi_getAccountProof`.
+- **`OPOutputsMerkleRootValidator` gains one step**: after opening the root
+  claim's preimage it verifies the outputs-root slot with the *vendored*
+  `SecureMerkleTrie` — the same code the portal runs, against the same root,
+  so the two consumers of the trie cannot drift apart.
+
+What this buys, concretely:
+
+1. **Ether withdrawals through the stock portal.** `proveWithdrawalTransaction`
+   and `finalizeWithdrawalTransaction` work unmodified, and viem's standard
+   withdrawal actions drive them. The custody split §7c ended on — deposits
+   in OP's lockbox, voucher payments from the executor's own balance —
+   dissolves for ether: the lockbox that takes the deposit pays the
+   withdrawal.
+2. **A path to the standard bridge.** §7d's "there is no arrangement of guest
+   code that fixes this" was true only while the proof was unproducible. With
+   the trie in place, a guest that emits withdrawals with `sender =
+   L2CrossDomainMessenger` and `data = relayMessage(...)` (nonce and
+   `baseGas` computed as the messenger does) would make
+   `L1CrossDomainMessenger` — and therefore `L1StandardBridge`, both
+   directions — work against this chain. That is future guest work, not a
+   protocol change, and it is byte-exactness work: the messenger's encoding
+   becomes consensus the guest must reproduce.
+3. **A cleaner dispute posture.** The bespoke validator stops being the only
+   bridge; the portal's ordinary respected-game-type machinery governs
+   withdrawals, so when a Cartesi dispute game lands as an `IDisputeGame`,
+   withdrawals inherit it with no bridge changes.
+
+What it costs, honestly:
+
+- **OP predeploy semantics enter consensus.** `hashWithdrawal` and the
+  storage layout of `sentMessages` are now things the host and guest must
+  reproduce byte-exactly, forever. Today that surface is small — one struct
+  hash, one mapping slot — and it is pinned by cross-tests in three
+  directions: Go against the guest's TypeScript encoding
+  (`chain/withdrawal_test.go`), Go against geth's verifier
+  (`chain/passertrie_test.go`), and Go against the vendored Solidity
+  verifier (`contracts/test/PasserTrieVectors.t.sol`, mirrored by
+  `TestPasserTrieMatchesSolidityVectors`). Rung 2 above would grow it to the
+  messenger's encoding; that is the price of admission and should be paid
+  deliberately.
+- **ERC-20 withdrawals stay on the voucher path.** The tokens are escrowed
+  in the application contract, which only a voucher executing from that
+  contract's context can move; a portal-finalized call comes *from the
+  portal*. Moving tokens to the standard-bridge escrow is rung 2's decision,
+  not this one's.
+- **The account proof stays impossible.** Anything that verifies the
+  `0x4200…0016` *account* against `stateRoot` — a third-party prover
+  service, a pre-Isthmus consumer — still breaks. viem and the portal do
+  not.
+- **The ether invariant becomes real.** The portal pays from the lockbox, so
+  the guest must never let more ether out than went in through
+  `depositTransaction`. On the devnet both paths exist (`OPEtherPortal`
+  escrows at the executor; the portal escrows in the lockbox); a real chain
+  should pick the portal path for ether and retire `OPEtherPortal` to
+  ERC-20-style uses or nothing.
+
+**Verification status.** The trie, the guest emission, the chain wiring,
+`eth_getProof`, and the validator's storage-proof step are covered by the Go,
+TypeScript and Foundry suites, including proofs produced by the Go trie and
+verified by the portal's own `SecureMerkleTrie` with the portal's exact value
+check. The end-to-end devnet run — `scripts/withdraw.ts`, now written against
+the portal (prove → mature → resolve the permissioned game → finalize) — has
+not yet been exercised against a live devnet, and the finalization leg
+depends on the deployed portal's game-validity checks; that is the first
+thing to run.
 
 ## 8. The app-chain dimension: one machine, many applications
 
