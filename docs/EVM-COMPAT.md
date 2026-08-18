@@ -282,8 +282,10 @@ transaction executes as a call from `from` to `to` carrying `value`. For a
 simple ether deposit the observable result is what the current guest
 produces (recipient credited), but the rule is uniform, and it preserves
 OP's guarantee that a deposit's mint survives even when its call fails
-(§ below). The lockbox caveat of DESIGN §7c/§7d is untouched: crediting
-OP-path ether does not make it voucher-reachable.
+(§ below). The lockbox caveat of DESIGN §7c/§7d has since been resolved
+for ether by DESIGN §7f: `withdrawEther` now emits an OP `Withdrawal`
+message finalized by `OptimismPortal` from the lockbox itself, so OP-path
+ether no longer needs to be voucher-reachable.
 
 ### Outcomes: applications never roll the machine back
 
@@ -381,11 +383,15 @@ stores the decoded values, and the standard view methods (`number()`,
 `timestamp()`, `hash()`, `basefee()`, `sequenceNumber()`, …) serve them.
 Tooling that reads L1 context on OP chains starts working, and — more
 useful — *guest applications gain L1 context* they currently have no
-access to. `L2ToL1MessagePasser` (`0x4200…0016`) is the deliberate
-non-adoption: implementing its ABI would invite OP tooling into a
-withdrawal flow that dead-ends at `proveWithdrawalTransaction`'s MPT proof
-(DESIGN §7). A predeploy that half-works is worse than one that is absent;
-withdrawals get their own contract with no OP costume. The same reasoning
+access to. `L2ToL1MessagePasser` (`0x4200…0016`) is adopted at the *storage*
+level but not the ABI level: the chain maintains its `sentMessages`
+storage trie as the header's `withdrawalsRoot` (DESIGN §7f), so
+`eth_getProof` for the address and `proveWithdrawalTransaction` work —
+but there is no contract to call at that address; withdrawals enter
+through the bridge built-in, which plays `initiateWithdrawal`'s role.
+Calling conventions without the storage would have been the worse half
+to adopt; the storage without the ABI is the half OP tooling actually
+verifies against. The same reasoning
 defers the messenger/standard-bridge pair (`0x4200…0007`/`…0010`): their
 deposit halves are implementable, their withdrawal halves are not, and
 DESIGN §7d already chose Cartesi portals. Revisit only if standard-bridge
@@ -598,9 +604,13 @@ indexers expect), withdrawal burns emit `Transfer(sender → 0x0)`.
 
 **The bridge.** `withdrawEther(address to)` payable: the router has
 already moved `msg.value` to the bridge's own balance; the handler debits
-itself (destroying the ether on L2) and emits the voucher paying `to` —
-the same voucher shape, tree, and L1 execution path as today (DESIGN
-§7c). `withdrawERC20(address token, address to, uint256 amount)`: debits
+itself (destroying the ether on L2) and emits an OP `Withdrawal` message
+— a notice carrying the WithdrawalTransaction fields, whose hash's
+sentMessages slot the shim commits into the block's withdrawal trie, and
+which `OptimismPortal.proveWithdrawalTransaction` then finalizes from the
+lockbox (DESIGN §7f). Its nonce is derived from the chain-wide input
+index plus a per-input ordinal — unique with no stored guest counter.
+`withdrawERC20(address token, address to, uint256 amount)`: debits
 `msg.sender`'s holding of the token (named by its L2 façade address,
 resolved through the registry to the L1 address the voucher must call)
 and emits the `transfer(to, amount)` voucher. This quietly fixes a v1
