@@ -405,7 +405,8 @@ sharpened by ERC-20:
    contract, which is what already works for ETH in §7c. This composes with
    everything built and forks nothing — but it means not using
    `L1StandardBridge`, and tokens bridged through the standard bridge stay
-   stuck. Recommended.
+   stuck. Recommended at the time; §7g has since made option 2 real and the
+   devnet default.
 
 2. **A messenger-shaped shim on L1** that relays `finalizeBridgeERC20` on proof
    of an accepted outputs root, so the standard bridge's escrow becomes
@@ -684,11 +685,9 @@ What this buys, concretely:
    code that fixes this" was true only while the proof was unproducible. With
    the trie in place, a guest that emits withdrawals with `sender =
    L2CrossDomainMessenger` and `data = relayMessage(...)` (nonce and
-   `baseGas` computed as the messenger does) would make
+   `baseGas` computed as the messenger does) makes
    `L1CrossDomainMessenger` — and therefore `L1StandardBridge`, both
-   directions — work against this chain. That is future guest work, not a
-   protocol change, and it is byte-exactness work: the messenger's encoding
-   becomes consensus the guest must reproduce.
+   directions — work against this chain. *(Since taken: §7g.)*
 3. **A cleaner dispute posture.** The bespoke validator stops being the only
    bridge; the portal's ordinary respected-game-type machinery governs
    withdrawals, so when a Cartesi dispute game lands as an `IDisputeGame`,
@@ -707,11 +706,9 @@ What it costs, honestly:
   `TestPasserTrieMatchesSolidityVectors`). Rung 2 above would grow it to the
   messenger's encoding; that is the price of admission and should be paid
   deliberately.
-- **ERC-20 withdrawals stay on the voucher path.** The tokens are escrowed
-  in the application contract, which only a voucher executing from that
-  contract's context can move; a portal-finalized call comes *from the
-  portal*. Moving tokens to the standard-bridge escrow is rung 2's decision,
-  not this one's.
+- **ERC-20 withdrawals stay on the voucher path** — as of §7f. §7g has since
+  moved them to the standard bridge, with the escrow-exclusivity rule that
+  decision demanded.
 - **The account proof stays impossible.** Anything that verifies the
   `0x4200…0016` *account* against `stateRoot` — a third-party prover
   service, a pre-Isthmus consumer — still breaks. viem and the portal do
@@ -732,6 +729,108 @@ the portal (prove → mature → resolve the permissioned game → finalize) —
 not yet been exercised against a live devnet, and the finalization leg
 depends on the deployed portal's game-validity checks; that is the first
 thing to run.
+
+## 7g. The standard bridge speaks: pure OP ERC-20 bridging
+
+§7f closed with a prediction: "a guest that emits withdrawals with `sender =
+L2CrossDomainMessenger` and `data = relayMessage(...)` would make
+`L1CrossDomainMessenger` — and therefore `L1StandardBridge`, both directions
+— work against this chain. That is future guest work, not a protocol
+change." This section is that work, done. The chain, the trie, the engine
+API and the L1 contracts are untouched; everything below is guest code plus
+one receipt-synthesis improvement the tooling wanted anyway.
+
+**The guest adopts the two predeploys it declined in EVM-COMPAT §6.**
+`L2CrossDomainMessenger` (0x4200…0007) and `L2StandardBridge` (0x4200…0010)
+were deferred because "their deposit halves are implementable, their
+withdrawal halves are not." The withdrawal trie made the withdrawal halves
+implementable, and a predeploy that fully works is worth adopting:
+
+- **Inbound**, the messenger authenticates `relayMessage` deposits from the
+  *aliased* `L1CrossDomainMessenger` — an address the owner registers, the
+  same mechanism and the same genesis-circularity argument as the portals —
+  and dispatches to the target. The bridge accepts `finalizeBridgeERC20`
+  and `finalizeBridgeETH` only through that dispatch, checking the
+  message's cross-domain sender is the registered `L1StandardBridge`:
+  OP's `onlyOtherBridge`, enforced at the same place in the call chain.
+  Relay failures follow OP's semantics — recorded in `failedMessages`
+  (journaled ledger state), value left on the messenger's balance,
+  replayable by anyone with an ordinary L2 transaction — rather than
+  rejecting the deposit.
+- **Outbound**, `bridgeERC20`/`bridgeERC20To` debit the sender's ledger
+  holding and send `finalizeBridgeERC20` to `L1StandardBridge` through the
+  messenger: a `Withdrawal` output whose `sender` is 0x4200…0007 — which is
+  what `L1CrossDomainMessenger._isOtherMessenger` requires of the portal's
+  `l2Sender()` — whose `data` is the `relayMessage` encoding under a dense,
+  journaled messenger nonce, and whose gas limit is `baseGas`. The L1
+  bridge then releases its own escrow. No voucher, no executor, no
+  op-cartesi contract anywhere on the path.
+
+**The token pair is the deterministic façade pair, enforced on both
+directions.** There is no `OptimismMintableERC20` here — L2 tokens are
+ledger façades at `l2TokenAddress(l1Token)` — and `L1StandardBridge`'s
+escrow accounting is per `(localToken, remoteToken)` pair: a deposit
+recorded under one pair can only ever be released under the same pair. So
+the guest credits an inbound deposit only when its `l2Token` is exactly the
+derived façade of its `l1Token`, and refuses (records failed) anything
+else — a deposit under a fanciful pair would otherwise be credited on L2
+and unreleasable on L1 forever.
+
+**Escrows are exclusive, and the guest enforces it.** The Cartesi
+`OPERC20Portal` escrows in the application contract; the standard bridge
+escrows in `L1StandardBridge`. One fungible ledger balance backed by two
+escrows is a cross-drain: deposit into the portal's escrow, withdraw
+against the bridge's, and other users' tokens leave the bridge.
+`registerMessenger` therefore refuses to coexist with a registered ERC-20
+portal and vice versa — the owner picks a configuration, and the choice is
+consensus state like the registration itself. The devnet picks the
+standard bridge; `OPERC20Portal` remains in the repo as the non-OP
+configuration. The 0xC751 bridge's `withdrawERC20` (the voucher path)
+likewise refuses under messenger mode, pointing at the standard bridge —
+a voucher minted against the bridge's escrow could never execute. The
+ether portal is unaffected: ether custody is the lockbox on every path, so
+`OPEtherPortal` deposits and portal-path withdrawals share one escrow.
+
+**Receipts became legible to OP tooling.** The shim now decodes the guest's
+`EvmLog` notices into real receipt logs — the guest's own emitter, topics
+and data — instead of the raw `CartesiOutput` form (the fallback for
+non-event outputs). The sink also emits a faithful `MessagePassed` event
+from 0x4200…0016 for every withdrawal, and the messenger emits
+`SentMessage`/`RelayedMessage`/`FailedRelayedMessage` and the bridge the
+`*BridgeInitiated`/`*BridgeFinalized` family — so viem's `getWithdrawals`
+reads a withdrawal off the receipt exactly as on any OP chain, and
+event-matching indexers see ordinary `Transfer`s. None of this is
+consensus: the receipts root stays uncommitted (§7's argument stands), and
+the committed bytes are still the raw outputs.
+
+**What became consensus, and how it is pinned.** The `relayMessage` ABI,
+`encodeVersionedNonce`, and `hashCrossDomainMessageV1` joined
+`hashWithdrawal` as encodings the guest must reproduce byte-exactly —
+`L1CrossDomainMessenger` recomputes the v1 hash for replay protection, and
+the withdrawal hash is what the portal proves. They are pinned in
+`CrossDomainVectors.t.sol` against OP's own `Encoding` and `Hashing`
+libraries, vendored verbatim next to the trie verifier: fixed vectors
+produced by the guest's TypeScript encoders, recomputed by the exact
+Solidity that will judge them on L1. `baseGas` is transcribed with OP's
+constants but is deliberately not consensus-critical: L1 never recomputes
+it, it only rides inside the withdrawal hash as the minimum gas the
+finalizer must supply.
+
+**What this retires, eventually.** With ether and ERC-20 both on stock OP
+paths, nothing load-bearing remains on `OPOutputsMerkleRootValidator` and
+`OutputExecutor` for *bridging* — they remain the execution path for
+app-specific Cartesi outputs (vouchers and notices an application emits
+for its own reasons), which is what they were for in Cartesi's own model.
+A chain that emits none could deploy neither.
+
+**Verification status.** Both directions, the failure and replay semantics,
+the exclusivity rules, and the nonce discipline are covered by the guest
+suite; the encodings by the Foundry pins; the receipt decoding by the Go
+suite. The devnet flow — `deposit-erc20.ts` through
+`L1StandardBridge.depositERC20`, `withdraw-erc20.ts` through
+`bridgeERC20To` and the shared portal prove/finalize — is written but, like
+§7f's ether path, awaits a live devnet run; the two will be exercised
+together.
 
 ## 8. The app-chain dimension: one machine, many applications
 

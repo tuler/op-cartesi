@@ -391,11 +391,15 @@ but there is no contract to call at that address; withdrawals enter
 through the bridge built-in, which plays `initiateWithdrawal`'s role.
 Calling conventions without the storage would have been the worse half
 to adopt; the storage without the ABI is the half OP tooling actually
-verifies against. The same reasoning
-defers the messenger/standard-bridge pair (`0x4200…0007`/`…0010`): their
-deposit halves are implementable, their withdrawal halves are not, and
-DESIGN §7d already chose Cartesi portals. Revisit only if standard-bridge
-deposit traffic actually matters.
+verifies against. The messenger/standard-bridge pair
+(`0x4200…0007`/`…0010`) — deferred here while their withdrawal halves
+were unimplementable — is now adopted in full (DESIGN §7g): the
+messenger relays deposits from the registered L1 messenger and sends
+withdrawals as messenger-shaped `Withdrawal` outputs, and the bridge
+speaks `bridgeERC20`/`finalizeBridgeERC20` over the ledger's token
+façades. Both go live when the owner registers the L1 pair, and the
+guest keeps the standard-bridge escrow exclusive with the Cartesi ERC-20
+portal's.
 
 **The system namespace.** `0xC751` (leet CTSI) ‖ 16 zero bytes ‖ `uint16`
 index — 65,536 slots, mirroring OP's `0x4200…xxxx` shape:
