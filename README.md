@@ -89,6 +89,7 @@ Only these versions are served, for the reason in [Fork support](#fork-support).
 | `eth_getBlockByHash` | A block by hash, with transaction hashes or full transactions. Includes `requestsHash` and `withdrawalsRoot`, which clients that recompute the block hash need. |
 | `eth_getBlockByNumber` | The same by number or by the `latest` / `safe` / `finalized` / `earliest` / `pending` tags. |
 | `eth_sendRawTransaction` | Ingress for signed transactions. There is no public L2 mempool, so the sequencer's RPC is the only way in; the transaction lands in a bounded FIFO the next block drains. |
+| `eth_getTransactionByHash` | A transaction from the canonical chain with its block coordinates, from the pool with null ones, or null. Standard client flows depend on it before they ask for a receipt — viem's `waitForTransactionReceipt` fetches the transaction first for its replacement detection, and treats a missing method as fatal. |
 | `eth_getTransactionReceipt` | The receipt synthesized from what the machine emitted for that transaction — see [Outputs and receipts](#outputs-and-receipts). |
 | `eth_getBlockReceipts` | Every receipt in a block. |
 | `eth_call` | A read-only query: the call travels to the guest as the `EvmCall` envelope and runs as a machine inspect against a fork that is then discarded. A rejected inspect surfaces as the standard revert error (code 3) with the revert bytes, so `require`-style messages reach viem, ethers and `cast` verbatim. |
