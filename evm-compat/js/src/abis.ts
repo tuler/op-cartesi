@@ -14,6 +14,7 @@ export const bridgeAbi = parseAbi([
 export const configAbi = parseAbi([
     "function setFee(uint256 fee)",
     "function registerPortal(uint8 kind, address portal)",
+    "function registerMessenger(address l1Messenger, address l1Bridge)",
     "function registerToken(address l1Token, uint8 width, string name, string symbol, uint8 decimals)",
     "function setTokenMetadata(address l1Token, string name, string symbol, uint8 decimals)",
     "function fee() view returns (uint256)",

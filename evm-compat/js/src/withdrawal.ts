@@ -24,6 +24,12 @@ import {
     toFunctionSelector,
 } from "viem";
 
+/** OP's L2ToL1MessagePasser predeploy address: the account whose storage
+ * trie the withdrawal commitment stands in for, and the emitter of the
+ * synthesized MessagePassed logs. There is no contract at this address on
+ * this chain — the bridge built-in plays initiateWithdrawal's role. */
+export const MESSAGE_PASSER_ADDRESS: Address = "0x4200000000000000000000000000000000000016";
+
 export const WITHDRAWAL_SIGNATURE = "Withdrawal(uint256,address,address,uint256,uint256,bytes)";
 export const WITHDRAWAL_SELECTOR: Hex = toFunctionSelector(WITHDRAWAL_SIGNATURE);
 
