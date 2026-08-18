@@ -1,7 +1,8 @@
 #!/usr/bin/env bun
-// Deploys the contracts that make Cartesi outputs executable on L1 against OP
-// proposals, plus Cartesi-style portals that route deposits through
-// OptimismPortal instead of an InputBox.
+// Deploys the contracts that make app-specific Cartesi outputs executable on
+// L1 against OP proposals, and registers the standard messenger pair with
+// the guest. Bridging itself deploys nothing: ether and ERC-20 go through
+// the stock OP contracts (DESIGN §7f–§7g).
 //
 // See contracts/ for the Foundry project; this only supplies the addresses the
 // devnet already knows and records what came back.
@@ -23,17 +24,14 @@ const maturityDelay = process.env.OUTPUT_MATURITY_DELAY ?? "0";
 const requireResolved = process.env.OUTPUT_REQUIRE_RESOLVED ?? "false";
 const executorFunding = BigInt(process.env.EXECUTOR_FUNDING ?? "10000000000000000000");
 // OptimismPortal's floor is 21000 + 16 per byte, and the registration calldata
-// (registerPortal's selector plus two ABI words) is 68 bytes. The chain meters
-// in machine cycles and ignores this, but L1 still checks it.
+// (registerMessenger's selector plus two ABI words) is 68 bytes. The chain
+// meters in machine cycles and ignores this, but L1 still checks it.
 const registerGasLimit = BigInt(process.env.REGISTER_GAS_LIMIT ?? "100000");
 
 const portalAbi = parseAbi([
     "function depositTransaction(address to, uint256 value, uint64 gasLimit, bool isCreation, bytes data)",
 ]);
-const registerAbi = parseAbi([
-    "function registerPortal(uint8 kind, address portal)",
-    "function registerMessenger(address l1Messenger, address l1Bridge)",
-]);
+const registerAbi = parseAbi(["function registerMessenger(address l1Messenger, address l1Bridge)"]);
 
 export async function deployOutputs(): Promise<void> {
     // Read fresh rather than from the import-time snapshot: this runs after a
@@ -81,15 +79,11 @@ export async function deployOutputs(): Promise<void> {
     console.log(stdout);
 
     const found = [
-        ...stdout.matchAll(
-            /(OUTPUTS_VALIDATOR|OUTPUT_EXECUTOR|ERC20_PORTAL|ETHER_PORTAL)_ADDRESS=(0x[0-9a-fA-F]{40})/g,
-        ),
+        ...stdout.matchAll(/(OUTPUTS_VALIDATOR|OUTPUT_EXECUTOR)_ADDRESS=(0x[0-9a-fA-F]{40})/g),
     ];
     const deployed = new Map(found.map((m) => [m[1]!, m[2]! as Address]));
     const executor = deployed.get("OUTPUT_EXECUTOR");
-    const etherPortal = deployed.get("ETHER_PORTAL");
-    const erc20Portal = deployed.get("ERC20_PORTAL");
-    if (!executor || !etherPortal || !erc20Portal) {
+    if (!executor) {
         die("the deploy script did not report the addresses; see its output above");
     }
 
@@ -105,29 +99,28 @@ export async function deployOutputs(): Promise<void> {
     const wallet = l1Wallet(a.deployerKey);
     const l1 = l1Public();
 
-    // The executor pays vouchers from its own balance, the way a Cartesi
-    // Application holds the assets it can be told to move.
-    //
-    // Ether deposited through OptimismPortal does not land here — it stays in
-    // OP's lockbox, where no voucher can reach it — so an ether withdrawal is
-    // only payable because of this funding. OPEtherPortal is the path where
-    // the two directions agree; see DESIGN §7d.
+    // The executor pays app-specific vouchers from its own balance, the way
+    // a Cartesi Application holds the assets it can be told to move. Ether
+    // and ERC-20 bridging no longer touch it — the portal and the standard
+    // bridge pay from their own escrows — so this funding only backs
+    // demonstrations of executeOutput against hand-made vouchers.
     const funding = await wallet.sendTransaction({ to: executor, value: executorFunding });
     await l1.waitForTransactionReceipt({ hash: funding });
 
-    // Tell the guest which contracts it may credit deposits from: an owner
+    // Tell the guest which contracts to trust across the bridge: an owner
     // call to the routed guest's config contract (EVM-COMPAT §6),
-    // registerPortal(uint8 kind, address portal), carried as an L1 deposit
+    // registerMessenger(l1Messenger, l1Bridge), carried as an L1 deposit
     // addressed to the config address.
     //
-    // The guest cannot have the portals baked into its genesis state: they do
-    // not exist until L1 is deployed, and L1 cannot be deployed after a
-    // genesis that names them. So they arrive as an input like any other — one
-    // the config contract takes only from the owner address baked into the
-    // snapshot. An EOA calling the portal directly is not aliased, so the
-    // deposit reaches the guest with `from` set to the owner itself, which is
-    // what it checks. Once registered, the guest routes deposits from these
-    // senders to the portal receiver, whatever address they are sent to.
+    // The guest cannot have these addresses baked into its genesis state:
+    // they do not exist until L1 is deployed, and L1 cannot be deployed
+    // after a genesis that names them. So they arrive as an input like any
+    // other — one the config contract takes only from the owner address
+    // baked into the snapshot. An EOA calling the portal directly is not
+    // aliased, so the deposit reaches the guest with `from` set to the owner
+    // itself, which is what it checks. Once registered, the guest relays
+    // deposits from the aliased L1 messenger through its own
+    // L2CrossDomainMessenger and L2StandardBridge predeploys.
     const signer = privateKeyToAccount(asKey(a.deployerKey)).address;
     if (signer.toLowerCase() !== a.guestOwner.toLowerCase()) {
         die(
@@ -143,21 +136,6 @@ export async function deployOutputs(): Promise<void> {
         });
         await l1.waitForTransactionReceipt({ hash });
     };
-    // The ether portal stays: ether custody is the lockbox either way, so
-    // the Cartesi-style deposit path coexists with portal withdrawals.
-    await registerConfig(
-        encodeFunctionData({
-            abi: registerAbi,
-            functionName: "registerPortal",
-            args: [0, etherPortal],
-        }),
-    );
-    // ERC-20 goes through the standard bridge instead of OPERC20Portal
-    // (DESIGN §7g): the messenger registration is what turns the
-    // L2CrossDomainMessenger and L2StandardBridge predeploys live, and the
-    // guest's escrow-exclusivity rule would refuse an ERC-20 portal from
-    // here on. OPERC20Portal is still deployed above for the non-OP
-    // configuration, but this devnet does not register it.
     if (!a.l1CrossDomainMessenger || !a.l1StandardBridge) {
         die("deploy-l1.ts did not record the messenger/bridge addresses; rerun it");
     }
@@ -171,7 +149,7 @@ export async function deployOutputs(): Promise<void> {
 
     say(`wrote ${paths.outputsAddresses}`);
     for (const [name, address] of deployed) console.log(`  ${name}_ADDRESS=${address}`);
-    console.log("  registered the ether portal and the standard messenger with the guest");
+    console.log("  registered the standard messenger with the guest");
 }
 
 if (import.meta.main) await deployOutputs();

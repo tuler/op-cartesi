@@ -57,13 +57,13 @@ because on this chain the L2 state root *is* the machine root.
 |---|---|
 | `src/OPOutputsMerkleRootValidator.sol` | Opens an OP proposal's root claim and reports the Cartesi outputs root inside it. Implements Cartesi's `IOutputsMerkleRootValidator`, which is the one question an `Application` asks before executing an output. |
 | `src/OutputExecutor.sol` | A reduced stand-in for Cartesi's `Application`: proves an output against an accepted root with Cartesi's own `LibOutputValidityProof` and runs it. Also the contract that holds the bridged assets. |
-| `src/portals/OPERC20Portal.sol` | Cartesi's `ERC20Portal` with `inputBox.addInput` replaced by `OptimismPortal.depositTransaction`. |
-| `src/portals/OPEtherPortal.sol` | The same for ether, escrowing in the application rather than OP's lockbox. |
-| `src/interfaces/` | The two OP surfaces used: `IOptimismPortal` (the input transport) and `IDisputeGame`/`IDisputeGameFactory` (the proposals). Interfaces rather than a dependency on the monorepo, which is not consumable as a library. |
+| `src/interfaces/` | The one OP surface used: `IDisputeGame`/`IDisputeGameFactory` (the proposals). An interface rather than a dependency on the monorepo, which is not consumable as a library. |
 
-Nothing here forks or modifies an OP contract. The validator reads
-`DisputeGameFactory` through its public interface, and the portals call
-`OptimismPortal` the way any depositing contract would.
+Nothing here forks or modifies an OP contract, and nothing here bridges:
+ether and ERC-20 go through the stock `OptimismPortal` and
+`L1StandardBridge` (DESIGN §7f–§7g). The Cartesi-style portals this
+directory used to carry were removed once the standard paths worked — the
+guest still speaks their deposit protocol for anyone who deploys their own.
 
 ## Deploying
 

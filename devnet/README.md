@@ -397,14 +397,15 @@ ledger under the token's derived façade address. The withdrawal is
 the finalize message back through its `L2CrossDomainMessenger`, riding an OP
 `Withdrawal` the portal proves against the withdrawal trie — after which the
 L1 bridge releases its own escrow. No voucher, no executor, no custom
-contract on the path. The Cartesi-style `OPERC20Portal` is still deployed as
-the non-OP configuration, but this devnet does not register it: the guest
-keeps the two escrows exclusive, since one fungible balance backed by two
-escrows would let a deposit into one drain the other.
+contract on the path. The Cartesi-style portals are no longer in the repo;
+the guest still enforces escrow exclusivity — one fungible balance backed
+by two escrows would let a deposit into one drain the other — so a
+deployment that registers its own ERC-20 portal cannot also register the
+messenger.
 
 The guest credits a relayed deposit only if the deposit's `from` is the
-aliased `L1CrossDomainMessenger` it was told about (and, for the ether
-portal, a registered portal address). It learns those addresses from
+aliased `L1CrossDomainMessenger` it was told about. It learns that address
+from
 `GUEST_OWNER`, an address baked into the snapshot and therefore into the
 genesis state root, whose deposits it treats as configuration. That
 indirection exists because the L1 contracts do not exist when the snapshot

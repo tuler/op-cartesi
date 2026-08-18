@@ -420,7 +420,13 @@ choice is only about which L1 contract holds the assets.
 
 ### What is built: option 1
 
-`contracts/src/portals/` is Cartesi's portal, one line different. Cartesi's own
+*(Historical: this is what shipped and what the devnet verified end to end.
+After §7g moved ERC-20 to the standard bridge, the portal contracts were
+removed from the repo; the guest still speaks their deposit protocol — the
+receiver, the registration, the escrow-exclusivity rule — for a deployment
+that ships its own portals.)*
+
+`contracts/src/portals/` was Cartesi's portal, one line different. Cartesi's own
 `ERC20Portal` ends with `getInputBox().addInput(appContract, payload)`; ours
 ends with `OptimismPortal.depositTransaction(appContract, 0, gasLimit, false,
 payload)`. Everything else is unchanged — the escrow goes to the application
@@ -467,12 +473,12 @@ one table serves both assets, and a withdrawal is the same voucher either way �
 of the guest distinguishes them, because to the outputs tree a voucher is a
 voucher.
 
-One asymmetry survives, and it is worth stating plainly rather than hiding in
-the ledger: ether deposited through `OptimismPortal` and ether deposited through
-`OPEtherPortal` are credited the same, but only the second is held anywhere a
-voucher can reach. The first sits in OP's lockbox. The devnet papers over this
-by funding the application contract directly; a real chain would either use the
-Cartesi portal for both directions or accept that OP-path ether is one-way.
+One asymmetry survived at the time, worth stating plainly rather than hiding
+in the ledger: ether deposited through `OptimismPortal` and ether deposited
+through `OPEtherPortal` were credited the same, but only the second was held
+anywhere a voucher could reach. §7f dissolved it from the other side — ether
+withdrawals now pay from the lockbox the `OptimismPortal` deposits fund — and
+the ether portal was removed along with the ERC-20 one.
 
 ## 7e. Settlement: what reading Dave actually costs
 
@@ -715,10 +721,9 @@ What it costs, honestly:
   not.
 - **The ether invariant becomes real.** The portal pays from the lockbox, so
   the guest must never let more ether out than went in through
-  `depositTransaction`. On the devnet both paths exist (`OPEtherPortal`
-  escrows at the executor; the portal escrows in the lockbox); a real chain
-  should pick the portal path for ether and retire `OPEtherPortal` to
-  ERC-20-style uses or nothing.
+  `depositTransaction`. The devnet briefly ran both ether paths
+  (`OPEtherPortal` escrowed at the executor; the portal escrows in the
+  lockbox); the portal path won and `OPEtherPortal` was removed.
 
 **Verification status.** The trie, the guest emission, the chain wiring,
 `eth_getProof`, and the validator's storage-proof step are covered by the Go,
@@ -776,20 +781,22 @@ derived façade of its `l1Token`, and refuses (records failed) anything
 else — a deposit under a fanciful pair would otherwise be credited on L2
 and unreleasable on L1 forever.
 
-**Escrows are exclusive, and the guest enforces it.** The Cartesi
-`OPERC20Portal` escrows in the application contract; the standard bridge
+**Escrows are exclusive, and the guest enforces it.** A Cartesi-style
+ERC-20 portal escrows in the application contract; the standard bridge
 escrows in `L1StandardBridge`. One fungible ledger balance backed by two
 escrows is a cross-drain: deposit into the portal's escrow, withdraw
 against the bridge's, and other users' tokens leave the bridge.
 `registerMessenger` therefore refuses to coexist with a registered ERC-20
 portal and vice versa — the owner picks a configuration, and the choice is
-consensus state like the registration itself. The devnet picks the
-standard bridge; `OPERC20Portal` remains in the repo as the non-OP
-configuration. The 0xC751 bridge's `withdrawERC20` (the voucher path)
-likewise refuses under messenger mode, pointing at the standard bridge —
-a voucher minted against the bridge's escrow could never execute. The
-ether portal is unaffected: ether custody is the lockbox on every path, so
-`OPEtherPortal` deposits and portal-path withdrawals share one escrow.
+consensus state like the registration itself. The 0xC751 bridge's
+`withdrawERC20` (the voucher path) likewise refuses under messenger mode,
+pointing at the standard bridge — a voucher minted against the bridge's
+escrow could never execute. With the standard paths verified in the
+suites, the portal contracts themselves (`OPEtherPortal`, `OPERC20Portal`)
+were removed from the repo: the guest keeps the receiver, the portal
+registration and these exclusivity rules — the non-OP configuration
+remains a *guest* capability for a deployment that ships its own
+portals — but this repo no longer carries L1 contracts it does not use.
 
 **Receipts became legible to OP tooling.** The shim now decodes the guest's
 `EvmLog` notices into real receipt logs — the guest's own emitter, topics

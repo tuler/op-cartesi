@@ -12,7 +12,7 @@
 //   ether: sender(20) ‖ value(32) ‖ extra
 //   erc20: token(20) ‖ sender(20) ‖ value(32) ‖ extra
 //
-// Ether deposited through OPEtherPortal arrives as the deposit's mint/value
+// Ether deposited through a Cartesi-style ether portal arrives as the mint/value
 // addressed here, so by dispatch time the router has already credited this
 // handler's own balance; crediting the named beneficiary is the handler
 // moving its own funds — the capability rule, satisfied naturally.
