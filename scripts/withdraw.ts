@@ -19,7 +19,7 @@ import { BRIDGE_ADDRESS, bridgeAbi, decodeWithdrawalOutput } from "@op-cartesi/e
 import { usage } from "devnet/env";
 import { l1Public, l2Public } from "devnet/wallet";
 import { encodeFunctionData, getAddress } from "viem";
-import { sendL2Tx } from "./lib/l2.ts";
+import { l2Sender, sendL2Tx, waitL2Receipt } from "./lib/l2.ts";
 import { proveAndFinalizeWithdrawal } from "./lib/portal.ts";
 
 const [toArg, amountArg] = process.argv.slice(2);
@@ -30,7 +30,19 @@ const amount = BigInt(amountArg);
 const l1 = l1Public();
 const l2 = l2Public();
 
-console.error(`asking the guest to withdraw ${amount} wei to ${to}`);
+// A sender whose balance cannot cover the value would be *rejected* by the
+// guest — dropped without a receipt — so check up front and say so.
+const sender = l2Sender();
+const senderBalance = await l2.getBalance({ address: sender });
+if (senderBalance < amount) {
+    console.error(
+        `sender ${sender} holds ${senderBalance} wei on L2, less than the ${amount} to withdraw — ` +
+            `deposit first: bun scripts/deposit.ts ${sender} ${amount}`,
+    );
+    process.exit(1);
+}
+
+console.error(`asking the guest to withdraw ${amount} wei to ${to} (sender ${sender})`);
 const txHash = await sendL2Tx({
     to: BRIDGE_ADDRESS,
     data: encodeFunctionData({ abi: bridgeAbi, functionName: "withdrawEther", args: [to] }),
@@ -38,7 +50,7 @@ const txHash = await sendL2Tx({
 });
 console.error(`  L2 tx ${txHash}`);
 
-const receipt = await l2.waitForTransactionReceipt({ hash: txHash, pollingInterval: 2_000 });
+const receipt = await waitL2Receipt(txHash);
 const emissions = await l2.getTransactionEmissions({ hash: txHash });
 const message = emissions.outputs
     .map((o) => decodeWithdrawalOutput(o.data))
