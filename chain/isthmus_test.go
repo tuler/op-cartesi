@@ -29,15 +29,21 @@ func newIsthmusChain(t *testing.T, seed string) (*Chain, *mempool.Pool) {
 	return c, pool
 }
 
-// Under Isthmus the header carries the outputs Merkle root in withdrawalsRoot,
-// paired with an empty requests hash. This is what makes op-node able to
-// compute an output root at all for a chain with no Ethereum state trie.
+// Under Isthmus the header carries the withdrawal commitment in
+// withdrawalsRoot — the message passer trie root, with the Cartesi outputs
+// root in its reserved slot — paired with an empty requests hash. This is
+// what makes op-node able to compute an output root at all for a chain with
+// no Ethereum state trie.
 func TestIsthmusPublishesOutputsRootInHeader(t *testing.T) {
 	c, _ := newIsthmusChain(t, "seed")
 
 	genesis := c.HeadBlock()
-	if got, want := *genesis.Header.WithdrawalsHash, NewOutputTree().Root(); got != want {
-		t.Fatalf("genesis withdrawalsRoot %s, want the empty outputs tree root %s", got, want)
+	empty := NewPasserTrie()
+	if err := empty.SetOutputsRoot(NewOutputTree().Root()); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := *genesis.Header.WithdrawalsHash, empty.Root(); got != want {
+		t.Fatalf("genesis withdrawalsRoot %s, want the seeded empty trie root %s", got, want)
 	}
 	if genesis.Header.RequestsHash == nil || *genesis.Header.RequestsHash != types.EmptyRequestsHash {
 		t.Fatalf("genesis requestsHash %v, want the empty requests hash", genesis.Header.RequestsHash)
@@ -58,11 +64,17 @@ func TestIsthmusPublishesOutputsRootInHeader(t *testing.T) {
 	if tree.Count() != 1 {
 		t.Fatalf("accumulator holds %d outputs, want 1", tree.Count())
 	}
-	if *payload.WithdrawalsRoot != tree.Root() {
-		t.Fatalf("header commits to %s, accumulator root is %s", *payload.WithdrawalsRoot, tree.Root())
+	// The header commits to the outputs root through the trie: moving the
+	// slot to the block's tree root must reproduce the header's value.
+	trie := NewPasserTrie()
+	if err := trie.SetOutputsRoot(tree.Root()); err != nil {
+		t.Fatal(err)
 	}
-	if *payload.WithdrawalsRoot == NewOutputTree().Root() {
-		t.Fatal("header still commits to the empty tree after an output was produced")
+	if *payload.WithdrawalsRoot != trie.Root() {
+		t.Fatalf("header commits to %s, trie over the accumulator root is %s", *payload.WithdrawalsRoot, trie.Root())
+	}
+	if *payload.WithdrawalsRoot == *genesis.Header.WithdrawalsHash {
+		t.Fatal("header still commits to the genesis trie after an output was produced")
 	}
 }
 
@@ -120,7 +132,7 @@ func TestImportRejectsForgedOutputsRoot(t *testing.T) {
 	if st.Status != engine.INVALID {
 		t.Fatalf("forged outputs root accepted with status %s", st.Status)
 	}
-	if st.ValidationError == nil || !strings.Contains(*st.ValidationError, "outputs root mismatch") {
+	if st.ValidationError == nil || !strings.Contains(*st.ValidationError, "withdrawals root mismatch") {
 		t.Fatalf("unexpected validation error: %v", st.ValidationError)
 	}
 }
@@ -169,10 +181,16 @@ func TestReportsDoNotAffectOutputsRoot(t *testing.T) {
 	})
 	silent := build(func([]byte) []machine.Output { return nil })
 	if reportsOnly != silent {
-		t.Fatalf("reports changed the outputs root: %s vs %s", reportsOnly, silent)
+		t.Fatalf("reports changed the withdrawals root: %s vs %s", reportsOnly, silent)
 	}
-	if silent != NewOutputTree().Root() {
-		t.Fatalf("a block with no provable outputs committed %s, want the empty tree root", silent)
+	// With no outputs and no withdrawals, the trie holds only the outputs
+	// root slot — still the empty outputs tree — so it is genesis's root.
+	empty := NewPasserTrie()
+	if err := empty.SetOutputsRoot(NewOutputTree().Root()); err != nil {
+		t.Fatal(err)
+	}
+	if silent != empty.Root() {
+		t.Fatalf("a block with no provable outputs committed %s, want %s", silent, empty.Root())
 	}
 }
 
