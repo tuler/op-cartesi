@@ -91,28 +91,65 @@ func TestNonceGating(t *testing.T) {
 }
 
 // Two different transactions competing for the same (sender, nonce) must not
-// both queue — only one could ever execute, and the loser would burn a build
-// slot every block until evicted.
-func TestDuplicateSenderNonceRejected(t *testing.T) {
+// both queue — only one could ever execute. The newcomer replaces the queued
+// one in place, so a sender whose first attempt lingers in the pool (for any
+// reason) is never locked out of the slot they own.
+func TestSameNonceReplaces(t *testing.T) {
 	p := New(16)
 	p.SetNonceGate(testChainID, func(common.Address) (uint64, error) { return 0, nil })
 
 	first := signedTx(t, 1, 0, 1)
-	hash, err := p.Add(first)
+	oldHash, err := p.Add(first)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := p.Add(signedTx(t, 1, 0, 2)); !errors.Is(err, ErrKnownNonce) {
-		t.Fatalf("competing nonce: got %v, want ErrKnownNonce", err)
+	second := signedTx(t, 1, 0, 2)
+	newHash, err := p.Add(second)
+	if err != nil {
+		t.Fatalf("replacement rejected: %v", err)
 	}
-	// A different sender at the same nonce is not a duplicate.
+	if newHash == oldHash {
+		t.Fatal("replacement returned the old hash")
+	}
+	if p.Len() != 1 {
+		t.Fatalf("pool length %d after replacement, want 1", p.Len())
+	}
+	if _, ok := p.Get(oldHash); ok {
+		t.Fatal("the replaced transaction is still queued")
+	}
+	if raw, ok := p.Get(newHash); !ok {
+		t.Fatal("the replacement is not queued")
+	} else if string(raw) != string(second) {
+		t.Fatal("the replacement's raw bytes do not match")
+	}
+
+	// A different sender at the same nonce is its own slot.
 	if _, err := p.Add(signedTx(t, 2, 0, 1)); err != nil {
 		t.Fatalf("other sender, same nonce: %v", err)
 	}
-	// Forgetting the first (included or invalid) frees its slot.
-	p.Forget([]common.Hash{hash})
-	if _, err := p.Add(signedTx(t, 1, 0, 2)); err != nil {
+	if p.Len() != 2 {
+		t.Fatalf("pool length %d, want 2", p.Len())
+	}
+
+	// Forgetting the replacement (included or invalid) frees the slot for a
+	// fresh Add rather than another replacement.
+	p.Forget([]common.Hash{newHash})
+	if _, err := p.Add(signedTx(t, 1, 0, 3)); err != nil {
 		t.Fatalf("slot not freed after Forget: %v", err)
+	}
+}
+
+// The exact resend: the same raw transaction twice is still ErrKnownTx, not
+// a replacement — nothing would change, and the caller should know.
+func TestExactResendStillKnown(t *testing.T) {
+	p := New(16)
+	p.SetNonceGate(testChainID, func(common.Address) (uint64, error) { return 0, nil })
+	raw := signedTx(t, 1, 0, 1)
+	if _, err := p.Add(raw); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p.Add(raw); !errors.Is(err, ErrKnownTx) {
+		t.Fatalf("exact resend: got %v, want ErrKnownTx", err)
 	}
 }
 
