@@ -41,6 +41,7 @@ COPY evm-compat/js/package.json evm-compat/js/
 COPY app/package.json app/
 COPY demo/package.json demo/
 COPY devnet/package.json devnet/
+COPY scripts/package.json scripts/
 RUN bun install --frozen-lockfile
 
 COPY accounts-drive/ accounts-drive/
@@ -48,6 +49,7 @@ COPY abi-drive/ abi-drive/
 COPY evm-compat/ evm-compat/
 COPY app/ app/
 COPY demo/ demo/
+COPY scripts/ scripts/
 RUN cd demo && bun run build
 
 # Stage the runtime files: the JS bundle plus @cartesi/rollup's native addon,
