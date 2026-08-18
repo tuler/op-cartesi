@@ -208,6 +208,7 @@ These do not change the trust model, which is why they sit outside the numbered 
 | Document | What it covers |
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | The architecture: the shim, the commitments, bridging, persistence, and what settlement requires. |
+| [docs/RAAS.md](docs/RAAS.md) | What it would take to launch chains from a customer's machine snapshot on Sepolia or mainnet: the components, and the gaps a hosted service forces open. |
 | [docs/EVM-COMPAT.md](docs/EVM-COMPAT.md) | How the guest speaks EVM at the ABI boundary — `to`-address routing to native handlers, ERC-20 façades, events, `eth_call`. |
 | [docs/ACCOUNTS.md](docs/ACCOUNTS.md) · [ACCOUNTS-DRIVE-SPEC.md](docs/ACCOUNTS-DRIVE-SPEC.md) | The guest's account model, and the byte-level drive format the host reads balances and nonces out of. |
 | [docs/ABI-DRIVE-SPEC.md](docs/ABI-DRIVE-SPEC.md) | The drive recording which addresses the guest routes and what ABI each speaks. |
