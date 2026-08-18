@@ -355,6 +355,9 @@ th {
     white-space: nowrap;
 }
 td.addr { font-family: var(--font-mono); font-size: .78rem; white-space: nowrap; color: var(--teal); font-variant-numeric: tabular-nums; }
+/* The address map earns a denser measure: six rows and a caption. */
+.tbl-wrap.compact table { font-size: .82rem; }
+.tbl-wrap.compact th, .tbl-wrap.compact td { padding: .42rem .7rem; }
 
 /* Flow chips */
 .flow {
@@ -375,6 +378,16 @@ td.addr { font-family: var(--font-mono); font-size: .78rem; white-space: nowrap;
 .chip.t { border-color: var(--teal); color: var(--teal); background: var(--teal-soft); }
 .chip.o { border-color: var(--oxide); color: var(--oxide); background: var(--oxide-soft); }
 .arrow { font-family: var(--font-mono); color: var(--ink-3); font-size: .8rem; }
+/* A labelled flow, where two directions sit in one card and must not read
+   as one continuous chain. */
+.flow-row { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: .5rem; align-items: baseline; }
+.flow-row > .fl {
+    font-family: var(--font-mono);
+    font-size: .68rem;
+    letter-spacing: .1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
 
 .branch {
     display: grid;
@@ -546,7 +559,7 @@ a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-ra
                         <li><span class="k">state root</span><span>the machine's Merkle root hash</span></li>
                         <li><span class="k">execution</span><span>RISC-V Linux, deterministic, Merkleized memory</span></li>
                         <li><span class="k">gas used</span><span>machine mcycles</span></li>
-                        <li><span class="k">withdrawals root</span><span>the Cartesi outputs commitment</span></li>
+                        <li><span class="k">withdrawals root</span><span>a real Ethereum storage trie over <code>L2ToL1MessagePasser</code>, carrying the Cartesi outputs root at a reserved slot</span></li>
                         <li><span class="k">genesis</span><span>a snapshot parked at its first input yield</span></li>
                     </ul>
                 </div>
@@ -650,7 +663,7 @@ a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-ra
                 <li><span class="tick">DONE</span><span><strong>Sequences and batches.</strong> op-node sequences L2 blocks continuously; op-batcher posts them to L1 as calldata batches.</span></li>
                 <li><span class="tick">DONE</span><span><strong>Re-derived by an independent verifier.</strong> A second node &mdash; its own machine, engine and op-node, sequencing nothing &mdash; rebuilds the chain from L1 alone and reaches byte-identical blocks: same hash, same machine root, same outputs commitment.</span></li>
                 <li><span class="tick">DONE</span><span><strong>Proposes to L1.</strong> op-proposer submits <span class="mono">keccak(0&#179;&#178; &#8214; stateRoot &#8214; withdrawalsRoot &#8214; blockHash)</span> to a DisputeGameFactory &mdash; a root claim committing to both the machine root and the Cartesi outputs tree.</span></li>
-                <li><span class="tick">DONE</span><span><strong>Withdrawals move real assets.</strong> Ether and ERC-20, out through Cartesi vouchers proven against those proposals. A voucher is single-use.</span></li>
+                <li><span class="tick">DONE</span><span><strong>Both bridges are stock OP.</strong> Ether through <code>OptimismPortal</code>, ERC-20 both directions through <code>L1StandardBridge</code>. Covered end to end by the Go, TypeScript and Foundry suites, against Optimism's and geth's own verifiers &mdash; the live devnet re-run is the next thing on the list.</span></li>
                 <li><span class="tick">DONE</span><span><strong>Survives a restart.</strong> Blocks in pebble via go-ethereum's rawdb, the machine checkpointed with <code>cm_store</code>; a 39-block run came back in about a second, re-checking each replayed block against its stored roots.</span></li>
                 <li><span class="tick pending">NEXT</span><span><strong>Disputing a proposal.</strong> No fault-proof VM can execute a Cartesi Machine, so proposals use the permissioned game type. That is the remaining trust assumption &mdash; and it is a constructor argument on the validator, not a hidden one.</span></li>
             </ul>
@@ -662,7 +675,11 @@ a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-ra
                         using op-node's <em>own</em> types, and checks each block with
                         <span class="mono">ExecutionPayloadEnvelope.CheckBlockHash</span>, which
                         independently reconstructs the header. A deliberate one-field mutation to
-                        header construction is caught there.
+                        header construction is caught there. The withdrawal trie and the cross-domain
+                        encodings are pinned three ways: against the guest's TypeScript encoders,
+                        against geth's own trie verifier, and against vendored Solidity &mdash;
+                        Optimism's real <code>SecureMerkleTrie</code>, <code>Encoding</code> and
+                        <code>Hashing</code>.
                     </p>
                 </div>
                 <div class="card accent-teal">
@@ -708,7 +725,7 @@ a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-ra
                         <span class="sign minus">&minus;</span>
                         <div>
                             <strong>Deliberately not.</strong>
-                            <p class="small muted">Bytecode, gas-per-opcode, storage tries, dynamic deployment. The handler table is fixed when the snapshot is built &mdash; it is machine state, covered by the genesis root.</p>
+                            <p class="small muted">Bytecode, gas-per-opcode, a state trie, dynamic deployment. The handler table is fixed when the snapshot is built &mdash; machine state, covered by the genesis root. The one Ethereum trie on the chain is the withdrawal trie: a commitment the portal reads, not the state model.</p>
                         </div>
                     </div>
                 </div>
@@ -892,31 +909,34 @@ a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-ra
         <div class="cols wide-right">
             <div class="stack tight">
                 <ul class="rule-list dense">
-                    <li><span class="k">eth_call</span><span>Wrapped as <span class="mono">EvmCall(chainId, from, to, value, data)</span> and run as a Cartesi inspect against a <em>discarded machine fork</em>. RETURN becomes the return data; REVERT becomes a standard JSON-RPC revert error with data, so <code>require</code> messages surface verbatim.</span></li>
+                    <li><span class="k">eth_call</span><span>Wrapped as <span class="mono">EvmCall(chainId, from, to, value, data)</span>, run as an inspect on a <em>discarded machine fork</em>. REVERT becomes a code-3 error with data, so <code>require</code> messages reach tools verbatim.</span></li>
                     <li><span class="k">balances</span><span><code>eth_getBalance</code> and <code>eth_getTransactionCount</code> read the accounts-drive record straight out of machine memory. No fork, no execution.</span></li>
+                    <li><span class="k">eth_getProof</span><span>Storage proofs against the withdrawal trie &mdash; what <code>proveWithdrawalTransaction</code> verifies, so viem's stock withdrawal flow works.</span></li>
                     <li><span class="k">eth_getCode</span><span>Routed addresses answer <span class="mono">0xEFC751&lt;kind&gt;</span> markers read off the drives, so wallets see them as contracts.</span></li>
-                    <li><span class="k">discovery</span><span><span class="mono">cartesi_getContracts</span> serves the whole interface surface with ABIs &mdash; every recorded contract, every token fa&ccedil;ade with its L1 token &mdash; straight off the machine's drives.</span></li>
-                    <li><span class="k">gas</span><span>Base fee, tips and <code>feeHistory</code> synthesized from headers; <code>eth_estimateGas</code> returns the per-input cycle budget as gas. A plain <code>cast send</code> needs no flags.</span></li>
-                    <li><span class="k">events</span><span>Notices that decode as logs; deposits emit <span class="mono">Transfer(0x0 &rarr; recipient)</span>, the mint convention indexers expect.</span></li>
+                    <li><span class="k">discovery</span><span><span class="mono">cartesi_getContracts</span> serves the whole interface surface with ABIs, straight off the machine's drives.</span></li>
+                    <li><span class="k">gas</span><span>Base fee, tips and <code>feeHistory</code> synthesized from headers, so a plain <code>cast send</code> needs no flags.</span></li>
+                    <li><span class="k">events</span><span>Guest emissions decode into real logs; deposits emit <span class="mono">Transfer(0x0 &rarr; recipient)</span>, the mint convention indexers expect.</span></li>
                 </ul>
             </div>
             <figure>
-                <div class="tbl-wrap">
+                <div class="tbl-wrap compact">
                     <table>
                         <thead><tr><th>Address</th><th>Contract</th><th>Role</th></tr></thead>
                         <tbody>
-                            <tr><td class="addr">0x4200…0015</td><td>L1Block</td><td>The one adopted OP predeploy &mdash; the attributes deposit already arrives here every block, and guests gain L1 context they otherwise cannot learn.</td></tr>
-                            <tr><td class="addr">0xC75100…0000</td><td>Registry</td><td><code>handlerAt</code>, <code>handlers</code>, <code>l2TokenOf</code> — discovery, and the source for <code>eth_getCode</code>.</td></tr>
-                            <tr><td class="addr">0xC75100…0001</td><td>Bridge</td><td><code>withdrawEther(address)</code> payable; <code>withdrawERC20(address,address,uint256)</code>.</td></tr>
-                            <tr><td class="addr">0xC75100…0002</td><td>Config</td><td>Owner-gated: <code>setFee</code>, <code>registerPortal</code>, <code>registerToken</code>.</td></tr>
+                            <tr><td class="addr">0x4200…0015</td><td>L1Block</td><td>The attributes deposit already arrives here every block; guests gain L1 context they otherwise cannot learn.</td></tr>
+                            <tr><td class="addr">0x4200…0007</td><td>L2CrossDomainMessenger</td><td>Authenticates <code>relayMessage</code> from the aliased L1 messenger; failures land in <code>failedMessages</code>, replayable, as on OP.</td></tr>
+                            <tr><td class="addr">0x4200…0010</td><td>L2StandardBridge</td><td><code>finalizeBridgeERC20</code> in, <code>bridgeERC20To</code> out &mdash; OP's <code>onlyOtherBridge</code>, enforced at the same point.</td></tr>
+                            <tr><td class="addr">0x4200…0016</td><td>L2ToL1MessagePasser</td><td>Its <code>sentMessages</code> slots are the withdrawal trie the portal proves against.</td></tr>
+                            <tr><td class="addr">0xC75100…0000&#8202;/&#8202;1&#8202;/&#8202;2</td><td>Registry, Bridge, Config</td><td>The system namespace: discovery, app-emitted withdrawals, owner-gated config.</td></tr>
                             <tr><td class="addr">keccak-derived</td><td>ERC-20 fa&ccedil;ade</td><td><span class="mono">last20(keccak256("ctsi.erc20.v1" &#8214; l1Token))</span> — computable from the L1 token address alone, before the first deposit.</td></tr>
                         </tbody>
                     </table>
                 </div>
                 <figcaption>
-                    The reservation is the full pattern, not the brand bytes: 0xC751 followed by a 16-byte zero run.
-                    Grinding an address into that shape is ~2&#185;&#8308;&#8308;. Prefix-matching alone is 2&#185;&#8310; &mdash; so
-                    nothing treats a bare 0xC751 as authority. Authority is exact membership in the manifest.
+                    The four OP predeploys are adopted for real &mdash; native guest handlers, not EVM bytecode.<br />
+                    In the system namespace the reservation is the full pattern, not the brand bytes: 0xC751 then a
+                    16-byte zero run. Grinding an address into that shape is ~2&#185;&#8308;&#8308;; prefix-matching alone
+                    is 2&#185;&#8310;, so nothing treats a bare 0xC751 as authority. Authority is exact membership in the manifest.
                 </figcaption>
             </figure>
         </div>
@@ -928,71 +948,73 @@ a:focus-visible { outline: 2px solid var(--teal); outline-offset: 2px; border-ra
 <section class="slide" id="s9">
     <div class="inner">
         <p class="eyebrow">Bridging</p>
-        <h2>In through OP's portal, out through Cartesi's vouchers</h2>
+        <h2>Both bridges are stock OP</h2>
         <div class="cols even">
             <div class="stack">
                 <div class="card accent-oxide">
-                    <h3>Deposit</h3>
-                    <div class="flow">
-                        <span class="chip o">OptimismPortal.depositTransaction</span><span class="arrow">&rarr;</span>
-                        <span class="chip o">op-node derivation</span><span class="arrow">&rarr;</span>
-                        <span class="chip t">EvmAdvance</span><span class="arrow">&rarr;</span>
-                        <span class="chip t">guest credits the accounts drive</span>
+                    <h3>Ether &nbsp;·&nbsp; the stock portal, both directions</h3>
+                    <div class="flow-row">
+                        <span class="fl">in</span>
+                        <div class="flow">
+                            <span class="chip o">depositTransaction</span><span class="arrow">&rarr;</span>
+                            <span class="chip o">op-node derivation</span><span class="arrow">&rarr;</span>
+                            <span class="chip t">credited on the accounts drive</span>
+                        </div>
                     </div>
-                    <p class="small muted">
-                        <span class="mono">OPERC20Portal</span> is Cartesi's <code>ERC20Portal</code>
-                        with one line changed: where Cartesi calls <code>inputBox.addInput</code>, it
-                        calls <code>OptimismPortal.depositTransaction</code>. The payload is still
-                        <code>InputEncoding</code>'s, so a guest written for Cartesi Rollups parses
-                        it byte for byte.
-                    </p>
+                    <div class="flow-row">
+                        <span class="fl">out</span>
+                        <div class="flow">
+                            <span class="chip t">guest emits an OP Withdrawal</span><span class="arrow">&rarr;</span>
+                            <span class="chip o">prove</span><span class="arrow">&rarr;</span>
+                            <span class="chip o">finalize, from the lockbox the deposits filled</span>
+                        </div>
+                    </div>
+                    <p class="small muted">No op-cartesi contract is on either leg.</p>
                 </div>
-                <div class="card accent-teal">
-                    <h3>Withdraw</h3>
-                    <div class="flow">
-                        <span class="chip t">guest emits a Voucher</span><span class="arrow">&rarr;</span>
-                        <span class="chip t">outputs tree</span><span class="arrow">&rarr;</span>
-                        <span class="chip t">withdrawalsRoot</span><span class="arrow">&rarr;</span>
-                        <span class="chip o">op-proposer root claim</span><span class="arrow">&rarr;</span>
-                        <span class="chip o">proof + execute on L1</span>
-                    </div>
-                    <p class="small muted">
-                        Height-63 tree, leaves <span class="mono">keccak256(output)</span>, cumulative
-                        over the chain &mdash; matching Cartesi's on-chain tree exactly, so existing
-                        voucher proofs verify unchanged.
+                <div class="card accent-oxide">
+                    <h3>ERC-20 &nbsp;·&nbsp; the standard bridge, both directions</h3>
+                    <p class="small">
+                        <code>L1StandardBridge</code> escrows and releases; the guest adopts
+                        <code>L2CrossDomainMessenger</code> and <code>L2StandardBridge</code> as real
+                        predeploys, written as native handlers. Inbound arrives as two ABI layers
+                        (<span class="mono">relayMessage(&hellip;finalizeBridgeERC20&hellip;)</span>);
+                        outbound is a <code>Withdrawal</code> whose sender is 0x4200&hellip;0007, which
+                        is what the L1 messenger requires of <code>l2Sender()</code>. No voucher, no
+                        executor, no op-cartesi contract on the path.
                     </p>
                 </div>
             </div>
             <div class="stack">
-                <div class="card">
-                    <h3>The bridge is one small contract</h3>
+                <div class="card accent-teal">
+                    <h3>One commitment, two proof systems</h3>
                     <p class="small">
-                        A Cartesi <code>Application</code> asks one question before executing an
-                        output &mdash; <span class="mono">isOutputsMerkleRootValid</span> &mdash; and an
-                        OP proposal already commits to the answer, because op-node's root claim is
-                        <span class="mono">keccak(version &#8214; stateRoot &#8214; withdrawalsRoot &#8214; blockHash)</span>
-                        and <code>withdrawalsRoot</code> <em>is</em> the Cartesi outputs root.
-                        <span class="mono">OPOutputsMerkleRootValidator</span> opens that preimage on
-                        chain; verification uses Cartesi's own <code>LibOutputValidityProof</code>,
-                        pulled in as a dependency rather than reimplemented.
+                        <code>withdrawalsRoot</code> is a genuine Ethereum storage trie over the
+                        <span class="mono">L2ToL1MessagePasser.sentMessages</span> slots &mdash; the
+                        commitment the OP Stack expects there &mdash; with the <strong>Cartesi outputs
+                        Merkle root</strong> stored at the reserved slot
+                        <span class="mono">keccak256("op-cartesi.outputsMerkleRoot")</span>. So one
+                        value serves both the portal's storage proofs and Cartesi's output proofs,
+                        and op-node turns it into the L2 output root with no changes.
                     </p>
                 </div>
-                <div class="card accent-oxide">
-                    <h3>Why not L1StandardBridge</h3>
+                <div class="card accent-teal">
+                    <h3>Cartesi outputs still have a home</h3>
                     <p class="small">
-                        It escrows in itself and releases only against the MPT proof this chain
-                        cannot produce &mdash; tokens sent through it would be stuck. Nothing forks
-                        <code>OptimismPortal</code> either; the withdrawal path sidesteps it rather
-                        than replacing it.
+                        Vouchers remain for what an application emits for its own reasons, proven
+                        against the same proposal through one small contract:
+                        <span class="mono">OPOutputsMerkleRootValidator</span> opens the outputs root
+                        out of the withdrawal trie, so Cartesi's own verifier can execute them.
+                        Height-63 tree, leaves <span class="mono">keccak256(output)</span>, cumulative
+                        &mdash; existing voucher proofs verify unchanged. Nothing forks
+                        <code>OptimismPortal</code>.
                     </p>
                 </div>
                 <p class="small muted">
-                    Portals are authenticated by address, but they do not exist when the snapshot
-                    that <em>is</em> L2 genesis is built. So the guest carries one owner address,
-                    chosen before anything is deployed and substituted in at snapshot time &mdash;
-                    and learns the portal addresses from that owner as an ordinary deposit.
-                    Trusting any sender instead would let any contract mint claims against tokens
-                    the application really holds.
+                    <strong>The risk worth naming:</strong> the L1 escrow happens whether or not the
+                    guest understands the message. A guest that ignores
+                    <code>finalizeBridgeERC20</code> leaves real tokens locked in
+                    <code>L1StandardBridge</code> with nothing on L2 to show for it. Deposits are
+                    unconditional; crediting them is not.
                 </p>
             </div>
         </div>
