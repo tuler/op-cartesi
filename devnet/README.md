@@ -308,8 +308,9 @@ deployment outputs, not preferences, and they are re-read rather than cached,
 so a process that started before a deploy still sees what it wrote. `.env` is
 gitignored; keys live there, not in command lines.
 
-The scripts ([`scripts/`](../scripts/README.md)) and the guest speak the same standard: `withdraw.ts` and
-`withdraw-erc20.ts` call the bridge predeploy, `balance.ts` reads the drive
+The scripts ([`scripts/`](../scripts/README.md)) and the guest speak the same standard: `withdraw.ts`
+calls the bridge built-in, `withdraw-erc20.ts` the `L2StandardBridge`
+predeploy, `balance.ts` reads the drive
 and the ERC-20 façades, `contracts.ts` asks `cartesi_getContracts` what the
 guest routes — every recorded contract with its ABI, every token façade with
 its L1 token, straight off the machine's drives — and the guest they address
@@ -381,7 +382,7 @@ output index and the block to prove it as of.
 
 ### Tokens
 
-ERC-20 goes through a Cartesi-style portal, not `L1StandardBridge`:
+ERC-20 goes through `L1StandardBridge`, the standard OP path (DESIGN §7g):
 
 ```sh
 bun scripts/deposit-erc20.ts 1000000000000000000      # deploys a test token first time
@@ -389,20 +390,26 @@ bun scripts/balance.ts 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 $TEST_TOKEN_AD
 bun scripts/withdraw-erc20.ts 0x70997970C51812dc3A010C7d01b50e0d17dc79C8 500000000000000000
 ```
 
-The portal escrows the tokens in the application contract and hands the guest
-Cartesi's own packed deposit payload as the data of an `OptimismPortal`
-deposit; the withdrawal is a voucher calling `transfer` on the token from that
-same contract. The standard bridge is avoided deliberately: it escrows in
-itself and releases only against the MPT proof this chain cannot produce, so
-tokens sent through it would be stuck. [DESIGN.md §7d](../docs/DESIGN.md).
+The bridge escrows the tokens in itself and sends `finalizeBridgeERC20`
+through the messengers; the guest's `L2StandardBridge` predeploy credits the
+ledger under the token's derived façade address. The withdrawal is
+`bridgeERC20To` on that same predeploy: the guest debits the ledger and sends
+the finalize message back through its `L2CrossDomainMessenger`, riding an OP
+`Withdrawal` the portal proves against the withdrawal trie — after which the
+L1 bridge releases its own escrow. No voucher, no executor, no custom
+contract on the path. The Cartesi-style `OPERC20Portal` is still deployed as
+the non-OP configuration, but this devnet does not register it: the guest
+keeps the two escrows exclusive, since one fungible balance backed by two
+escrows would let a deposit into one drain the other.
 
-The guest credits a portal deposit only if the deposit's `from` is a portal it
-was told about — `alias(portal)`, since `OptimismPortal` aliases contract
-callers. It learns those addresses from `GUEST_OWNER`, an address baked into
-the snapshot and therefore into the genesis state root, whose deposits it
-treats as configuration. That indirection exists because the portals do not
-exist when the snapshot is built, and trusting any sender would let any
-contract mint claims against tokens the application really holds.
+The guest credits a relayed deposit only if the deposit's `from` is the
+aliased `L1CrossDomainMessenger` it was told about (and, for the ether
+portal, a registered portal address). It learns those addresses from
+`GUEST_OWNER`, an address baked into the snapshot and therefore into the
+genesis state root, whose deposits it treats as configuration. That
+indirection exists because the L1 contracts do not exist when the snapshot
+is built, and trusting any sender would let any contract mint claims
+against tokens the bridge really holds.
 
 ### Testing the guest
 

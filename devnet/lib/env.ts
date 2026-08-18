@@ -162,6 +162,8 @@ export const config = {
     outputExecutor: optionalAddress("OUTPUT_EXECUTOR_ADDRESS"),
     erc20Portal: optionalAddress("ERC20_PORTAL_ADDRESS"),
     etherPortal: optionalAddress("ETHER_PORTAL_ADDRESS"),
+    l1StandardBridge: optionalAddress("L1_STANDARD_BRIDGE_ADDRESS"),
+    l1CrossDomainMessenger: optionalAddress("L1_CROSS_DOMAIN_MESSENGER_ADDRESS"),
     testToken: optionalAddress("TEST_TOKEN_ADDRESS"),
     tokenEnvFile: paths.tokenEnv,
 };
@@ -345,6 +347,7 @@ export function addresses() {
         etherPortal: opt("ETHER_PORTAL_ADDRESS"),
         erc20Portal: opt("ERC20_PORTAL_ADDRESS"),
         l1StandardBridge: opt("L1_STANDARD_BRIDGE_ADDRESS"),
+        l1CrossDomainMessenger: opt("L1_CROSS_DOMAIN_MESSENGER_ADDRESS"),
     };
 }
 

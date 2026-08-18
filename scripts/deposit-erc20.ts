@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Deposits ERC-20 tokens through OPERC20Portal.
+// Deposits ERC-20 tokens through the standard OP bridge (DESIGN §7g).
 //
 //   bun scripts/deposit-erc20.ts [amount] [token]
 //
@@ -7,32 +7,33 @@
 // devnet/token.env. A recorded token that no longer has code — anvil forgets
 // every deployment on restart — is replaced by a fresh deploy.
 //
-// The portal escrows the tokens in the application contract — the same
-// contract a voucher later runs from — and hands the guest Cartesi's own
-// packed deposit payload, carried as the data of an OptimismPortal deposit.
-// Nothing here touches L1StandardBridge: that bridge escrows in itself and
-// releases only against an OptimismPortal withdrawal proof, which this chain
-// cannot produce.
+// L1StandardBridge escrows the tokens in itself and sends
+// finalizeBridgeERC20 through the messengers; the guest's L2StandardBridge
+// predeploy credits the ledger, naming the L2 token by its derived façade
+// address — the pair the bridge's own accounting later releases a
+// withdrawal against. The OPERC20Portal path this script used to take is
+// the non-OP configuration; this devnet registers the messenger instead,
+// and the guest keeps the two escrows exclusive.
 
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { l2TokenAddress } from "@op-cartesi/evm";
 import { config, paths, usage } from "devnet/env";
 import { l1Public, l1Wallet } from "devnet/wallet";
 import { type Address, erc20Abi, getAddress, parseAbi } from "viem";
 
-const portalAbi = parseAbi([
-    "function depositERC20Tokens(address token, address appContract, uint256 value, bytes execLayerData)",
+const bridgeAbi = parseAbi([
+    "function depositERC20(address l1Token, address l2Token, uint256 amount, uint32 minGasLimit, bytes extraData)",
 ]);
 
 const [amountArg, tokenArg] = process.argv.slice(2);
 if (amountArg === "-h" || amountArg === "--help") usage("deposit-erc20.ts [amount] [token]");
 const amount = BigInt(amountArg ?? "1000000000000000000");
 
-const portal = config.erc20Portal;
-const executor = config.outputExecutor;
-if (!portal || !executor) {
-    console.error("run ./devnet/deploy-outputs.ts first");
+const bridge = config.l1StandardBridge;
+if (!bridge) {
+    console.error("run ./devnet/deploy-l1.ts first");
     process.exit(1);
 }
 
@@ -45,11 +46,11 @@ const depositor = wallet.account.address;
 // surface at the first read ("returned no data"). Check for code up front.
 const deployed = async (address: Address) => (await l1.getCode({ address })) !== undefined;
 
-// The same goes for the outputs suite itself: addresses recorded by an
-// earlier deploy-outputs.ts run outlive the anvil they were deployed to.
-if (!(await deployed(portal)) || !(await deployed(executor))) {
+// The same goes for the bridge itself: addresses recorded by an earlier
+// deploy-l1.ts run outlive the anvil they were deployed to.
+if (!(await deployed(bridge))) {
     console.error(
-        `the outputs suite (portal ${portal}, executor ${executor}) has no code on this L1 — rerun ./devnet/deploy-outputs.ts`,
+        `L1StandardBridge (${bridge}) has no code on this L1 — rerun ./devnet/deploy-l1.ts`,
     );
     process.exit(1);
 }
@@ -104,28 +105,31 @@ if (tokenArg) {
     console.error(`  token ${token}, supply held by ${depositor}`);
 }
 
-console.error(`depositing ${amount} of ${token} through the portal at ${portal}`);
+console.error(`depositing ${amount} of ${token} through L1StandardBridge at ${bridge}`);
 const approval = await wallet.writeContract({
     address: token,
     abi: erc20Abi,
     functionName: "approve",
-    args: [portal, amount],
+    args: [bridge, amount],
 });
 const approvalReceipt = await l1.waitForTransactionReceipt({ hash: approval });
 if (approvalReceipt.status !== "success") {
     console.error(`approve reverted in ${approval}`);
     process.exit(1);
 }
+// The l2Token is the guest's derived façade for this L1 token — the only
+// pair the guest credits, because it is the only pair the bridge's escrow
+// accounting can later release.
 const deposit = await wallet.writeContract({
-    address: portal,
-    abi: portalAbi,
-    functionName: "depositERC20Tokens",
-    args: [token, executor, amount, "0x"],
+    address: bridge,
+    abi: bridgeAbi,
+    functionName: "depositERC20",
+    args: [token, l2TokenAddress(token), amount, 400_000, "0x"],
 });
 const depositReceipt = await l1.waitForTransactionReceipt({ hash: deposit });
 if (depositReceipt.status !== "success") {
     console.error(
-        `depositERC20Tokens reverted in ${deposit} — does ${depositor} hold ${amount} of ${token}?`,
+        `depositERC20 reverted in ${deposit} — does ${depositor} hold ${amount} of ${token}?`,
     );
     process.exit(1);
 }
@@ -134,9 +138,9 @@ const escrowed = await l1.readContract({
     address: token,
     abi: erc20Abi,
     functionName: "balanceOf",
-    args: [executor],
+    args: [bridge],
 });
-console.error(`  escrowed in the application: ${escrowed}`);
+console.error(`  escrowed in L1StandardBridge: ${escrowed}`);
 console.error("");
 console.error(`the guest credits ${depositor} once the chain derives the deposit; check with:`);
 console.error(`  bun scripts/balance.ts ${depositor} ${token}`);

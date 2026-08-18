@@ -16,8 +16,8 @@ bun install                    # once, at the repo root (bun workspace)
 |---|---|
 | `deposit.ts <recipient> [wei]` | An L1 deposit through `OptimismPortal`, followed to the L2 transaction op-node derives from it |
 | `withdraw.ts <recipient> <wei>` | Asks the guest to withdraw, then proves and executes the voucher on L1 |
-| `deposit-erc20.ts [amount] [token]` | The same for ERC-20, through the Cartesi-style portal. Deploys a test token on first use |
-| `withdraw-erc20.ts <recipient> <amount> [l1-token]` | The ERC-20 return trip |
+| `deposit-erc20.ts [amount] [token]` | The same for ERC-20, through `L1StandardBridge` and the messengers. Deploys a test token on first use |
+| `withdraw-erc20.ts <recipient> <amount> [l1-token]` | The ERC-20 return trip: `bridgeERC20To` on the L2 bridge predeploy, then prove and finalize through `OptimismPortal` |
 | `execute-voucher.ts <L2 tx hash>` | Proves and executes the voucher a transaction emitted, on its own |
 | `balance.ts <address> [l1-token]` | What the guest's ledger says — the accounts drive, or an ERC-20 façade |
 | `contracts.ts` | `cartesi_getContracts`: every address the guest routes, with its ABI |
