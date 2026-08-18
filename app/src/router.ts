@@ -24,18 +24,25 @@ import {
     encodeWithdrawal,
     errorRevert,
     L1BLOCK_ADDRESS,
+    L2_BRIDGE_ADDRESS,
+    L2_MESSENGER_ADDRESS,
+    MESSAGE_PASSER_ADDRESS,
+    messagePassedLog,
     parseInput,
     REGISTRY_ADDRESS,
     recoverSender,
     sameAddress,
     versionedWithdrawalNonce,
     WITHDRAWAL_DEFAULT_GAS_LIMIT,
+    withdrawalHash,
 } from "@op-cartesi/evm";
 import { type Address, concat, type Hex, toHex } from "viem";
 import { Bridge } from "./handlers/bridge.ts";
 import { Config } from "./handlers/config.ts";
 import { Erc20Facade } from "./handlers/erc20.ts";
 import { L1Block } from "./handlers/l1block.ts";
+import { L2Bridge } from "./handlers/l2bridge.ts";
+import { Messenger } from "./handlers/messenger.ts";
 import { PortalReceiver } from "./handlers/portal.ts";
 import { Registry } from "./handlers/registry.ts";
 import { AccountsDriveError, InsufficientFunds, type Ledger } from "./ledger.ts";
@@ -112,16 +119,23 @@ class BufferSink implements OutputsSink {
         gasLimit?: bigint;
         data?: Hex;
     }): void {
-        this.notice(
-            encodeWithdrawal({
-                nonce: versionedWithdrawalNonce(this.inputIndex, this.withdrawals++),
-                sender: w.sender,
-                target: w.target,
-                value: w.value ?? 0n,
-                gasLimit: w.gasLimit ?? WITHDRAWAL_DEFAULT_GAS_LIMIT,
-                data: w.data ?? "0x",
-            }),
-        );
+        const message = {
+            nonce: versionedWithdrawalNonce(this.inputIndex, this.withdrawals++),
+            sender: w.sender,
+            target: w.target,
+            value: w.value ?? 0n,
+            gasLimit: w.gasLimit ?? WITHDRAWAL_DEFAULT_GAS_LIMIT,
+            data: w.data ?? "0x",
+        } as const;
+        this.notice(encodeWithdrawal(message));
+        // The MessagePassed event OP tooling reads off the receipt — viem's
+        // getWithdrawals in particular — attributed to the message passer
+        // address whose storage trie the withdrawal is entering.
+        const { topics, data } = messagePassedLog({
+            ...message,
+            withdrawalHash: withdrawalHash(message),
+        });
+        this.log(MESSAGE_PASSER_ADDRESS, topics, data);
     }
 
     /** Reports only — what survives a revert. */
@@ -149,6 +163,13 @@ export class Router {
         this.manifest.set(addrKey(BRIDGE_ADDRESS), new Bridge());
         this.manifest.set(addrKey(CONFIG_ADDRESS), new Config(cfg.owner, CONFIG_ADDRESS));
         this.manifest.set(addrKey(L1BLOCK_ADDRESS), this.l1Block);
+        // The standard messaging pair (DESIGN §7g): routed always, live only
+        // once the owner registers the L1 side — until then both revert.
+        const messenger = new Messenger();
+        const l2Bridge = new L2Bridge();
+        messenger.bridge = l2Bridge;
+        this.manifest.set(addrKey(L2_MESSENGER_ADDRESS), messenger);
+        this.manifest.set(addrKey(L2_BRIDGE_ADDRESS), l2Bridge);
         registry.lookup = (addr) => {
             const h = this.resolve(addr, null);
             return h ? { payable: h.payable ?? false } : undefined;

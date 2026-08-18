@@ -5,6 +5,7 @@
 export * from "./abi.ts";
 export * from "./abis.ts";
 export * from "./addresses.ts";
+export * from "./crossdomain.ts";
 export * from "./events.ts";
 export * from "./evmcall.ts";
 export * from "./tx.ts";
