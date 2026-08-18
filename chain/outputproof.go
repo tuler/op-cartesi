@@ -126,10 +126,17 @@ func (c *Chain) OutputProofAt(index uint64, blockHash common.Hash) (*OutputAt, *
 		return nil, nil, err
 	}
 	// A proof that does not reproduce the committed root is a bug here, not a
-	// caller's problem, so it is caught before it is served.
-	if got := RootAfterReplacement(proof.Siblings, index, leaves[index]); target.Header.WithdrawalsHash == nil || got != *target.Header.WithdrawalsHash {
-		return nil, nil, fmt.Errorf("built a proof that reproduces %s, but block %d commits to %v",
-			got, target.NumberU64(), target.Header.WithdrawalsHash)
+	// caller's problem, so it is caught before it is served. The commitment
+	// is the outputs tree root at the block — held by the withdrawal trie's
+	// outputs root slot, which is what anchors it to the block's
+	// withdrawalsRoot and hence to an L1 proposal.
+	tree, ok := c.trees[blockHash]
+	if !ok {
+		return nil, nil, fmt.Errorf("no outputs accumulator for block %s", blockHash)
+	}
+	if got := RootAfterReplacement(proof.Siblings, index, leaves[index]); got != tree.Root() {
+		return nil, nil, fmt.Errorf("built a proof that reproduces %s, but block %d commits to %s",
+			got, target.NumberU64(), tree.Root())
 	}
 	return found[index], proof, nil
 }

@@ -78,7 +78,14 @@ func Restore(
 	if err != nil {
 		return nil, false, fmt.Errorf("records for the checkpoint block: %w", err)
 	}
-	c := adopt(cfg, store, pool, base, m, outputs, tree, inputs)
+	// The withdrawal commitment is not stored — it is a pure function of the
+	// outputs already persisted per block, so it is rebuilt by walking the
+	// chain, and checked against the root the checkpoint block committed.
+	passer, err := rebuildPasser(store, base, tree)
+	if err != nil {
+		return nil, false, fmt.Errorf("rebuilding the withdrawal commitment: %w", err)
+	}
+	c := adopt(cfg, store, pool, base, m, outputs, tree, passer, inputs)
 
 	slog.Info("restoring chain from store",
 		"checkpoint", cp.Number, "head", headBlock.NumberU64(),
@@ -142,11 +149,16 @@ func (c *Chain) replayStored(ctx context.Context, b *Block) error {
 		return fmt.Errorf("re-execution reaches state root %s, stored block says %s", root, b.Header.Root)
 	}
 	tree := c.trees[b.Header.ParentHash].Append(outputLeaves(res.outputs)...)
-	if b.Header.WithdrawalsHash == nil || tree.Root() != *b.Header.WithdrawalsHash {
+	passer, err := c.extendPasser(b.Header.ParentHash, res.outputs, tree)
+	if err != nil {
 		res.machine.Close(ctx)
-		return fmt.Errorf("re-execution reaches outputs root %s, stored block says %v", tree.Root(), b.Header.WithdrawalsHash)
+		return err
 	}
-	c.commit(b, res.machine, res.outputs, tree, firstInput)
+	if b.Header.WithdrawalsHash == nil || passer.Root() != *b.Header.WithdrawalsHash {
+		res.machine.Close(ctx)
+		return fmt.Errorf("re-execution reaches withdrawals root %s, stored block says %v", passer.Root(), b.Header.WithdrawalsHash)
+	}
+	c.commit(b, res.machine, res.outputs, tree, passer, firstInput)
 	c.canonical[b.NumberU64()] = b.Hash()
 	c.head = b.Hash()
 	return nil
@@ -208,7 +220,7 @@ func (c *Chain) checkpoint(ctx context.Context, b *Block) {
 // genesis holds in a fresh chain, and everything before it lives only in the
 // store.
 func adopt(cfg Config, store *Store, pool *mempool.Pool, base *Block, m machine.Machine,
-	outputs []TxOutputs, tree OutputTree, inputs uint64) *Chain {
+	outputs []TxOutputs, tree OutputTree, passer *PasserTrie, inputs uint64) *Chain {
 	c := &Chain{
 		cfg:       cfg,
 		pool:      pool,
@@ -218,6 +230,7 @@ func adopt(cfg Config, store *Store, pool *mempool.Pool, base *Block, m machine.
 		machines:  map[common.Hash]machine.Machine{base.Hash(): m},
 		outputs:   map[common.Hash][]TxOutputs{base.Hash(): outputs},
 		trees:     map[common.Hash]OutputTree{base.Hash(): tree},
+		passers:   map[common.Hash]*PasserTrie{base.Hash(): passer},
 		inputs:    map[common.Hash]uint64{base.Hash(): inputs},
 		txBlocks:  map[common.Hash][]common.Hash{},
 		pending:   map[engine.PayloadID]*pendingPayload{},

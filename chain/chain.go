@@ -34,6 +34,7 @@ type pendingPayload struct {
 	machine    machine.Machine
 	outputs    []TxOutputs
 	tree       OutputTree
+	passer     *PasserTrie
 	firstInput uint64
 }
 
@@ -53,6 +54,10 @@ type Chain struct {
 	// trees carries the cumulative outputs accumulator per block, so a child
 	// block can extend its parent's tree across forks and reorgs.
 	trees map[common.Hash]OutputTree
+	// passers carries the withdrawal commitment per block — the message
+	// passer storage trie whose root is the block's withdrawalsRoot. Copies
+	// share structure, so this costs each block its own insertions.
+	passers map[common.Hash]*PasserTrie
 	// inputs is the chain-wide count of inputs consumed as of each block, which
 	// gives the next block's first input index. Indices are chain-wide because
 	// the guest sees one gapless input sequence for the whole chain.
@@ -103,8 +108,15 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 		return nil, fmt.Errorf("reading genesis root hash: %w", err)
 	}
 	genesisExtra := cfg.genesisExtraData()
-	// Genesis has produced no outputs, so it commits to the empty tree.
-	withdrawalsHash := NewOutputTree().Root()
+	// Genesis has produced no withdrawals, so its passer trie holds only the
+	// outputs root slot — seeded with the empty outputs tree's root, because
+	// every block's trie commits the outputs root as of that block.
+	tree := NewOutputTree()
+	passer := NewPasserTrie()
+	if err := passer.SetOutputsRoot(tree.Root()); err != nil {
+		return nil, err
+	}
+	withdrawalsHash := passer.Root()
 	requestsHash := types.EmptyRequestsHash
 	blobGasUsed := uint64(0)
 	excessBlobGas := uint64(0)
@@ -139,7 +151,8 @@ func New(ctx context.Context, cfg Config, m machine.Machine, pool *mempool.Pool)
 		canonical:   map[uint64]common.Hash{0: genesis.Hash()},
 		machines:    map[common.Hash]machine.Machine{genesis.Hash(): m},
 		outputs:     map[common.Hash][]TxOutputs{},
-		trees:       map[common.Hash]OutputTree{genesis.Hash(): NewOutputTree()},
+		trees:       map[common.Hash]OutputTree{genesis.Hash(): tree},
+		passers:     map[common.Hash]*PasserTrie{genesis.Hash(): passer},
 		inputs:      map[common.Hash]uint64{genesis.Hash(): 0},
 		txBlocks:    map[common.Hash][]common.Hash{},
 		pending:     map[engine.PayloadID]*pendingPayload{},
@@ -365,8 +378,13 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 		return engine.PayloadID{}, fmt.Errorf("no outputs accumulator for parent %s", parent.Hash())
 	}
 	tree = tree.Append(outputLeaves(exec.outputs)...)
+	passer, err := c.extendPasser(parent.Hash(), exec.outputs, tree)
+	if err != nil {
+		exec.machine.Close(ctx)
+		return engine.PayloadID{}, err
+	}
 
-	header := buildHeader(parent.Header, attrs, root, exec.included, min(exec.gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra, tree.Root())
+	header := buildHeader(parent.Header, attrs, root, exec.included, min(exec.gasUsed, gasLimit), gasLimit, c.cfg.BaseFee, extra, passer.Root())
 	beaconRoot := header.ParentBeaconRoot
 	c.pending[id] = &pendingPayload{
 		data:       executableData(header, exec.included),
@@ -374,9 +392,30 @@ func (c *Chain) buildPayload(ctx context.Context, parent *Block, attrs *engine.P
 		machine:    exec.machine,
 		outputs:    exec.outputs,
 		tree:       tree,
+		passer:     passer,
 		firstInput: firstInput,
 	}
 	return id, nil
+}
+
+// extendPasser derives a block's withdrawal commitment from its parent's: a
+// copy of the parent trie with the block's withdrawals inserted and the
+// outputs root slot moved to the block's outputs root. Callers hold c.mu.
+func (c *Chain) extendPasser(parent common.Hash, outputs []TxOutputs, tree OutputTree) (*PasserTrie, error) {
+	base, ok := c.passers[parent]
+	if !ok {
+		return nil, fmt.Errorf("no withdrawal commitment for parent %s", parent)
+	}
+	passer := base.Copy()
+	for _, h := range withdrawalHashes(outputs) {
+		if err := passer.InsertWithdrawal(h); err != nil {
+			return nil, err
+		}
+	}
+	if err := passer.SetOutputsRoot(tree.Root()); err != nil {
+		return nil, err
+	}
+	return passer, nil
 }
 
 // execResult is the outcome of running a block's inputs through the machine.
@@ -561,7 +600,7 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 	// Adopt the machine of a locally built payload instead of re-executing.
 	for id, p := range c.pending {
 		if p.data.BlockHash == hash {
-			c.commitAndPersist(ctx, newBlock(header, data.Transactions), p.machine, p.outputs, p.tree, p.firstInput)
+			c.commitAndPersist(ctx, newBlock(header, data.Transactions), p.machine, p.outputs, p.tree, p.passer, p.firstInput)
 			delete(c.pending, id)
 			return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 		}
@@ -599,10 +638,11 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 		exec.machine.Close(ctx)
 		return invalidStatus(&parentHash, fmt.Sprintf("gas used mismatch: computed %d, payload claims %d", capped, data.GasUsed)), nil
 	}
-	// Re-derive the outputs commitment from the outputs this node just
-	// observed. A payload claiming a withdrawal set the machine did not
-	// produce is rejected here, which is what keeps the output root — and so
-	// the withdrawals proven against it — honest.
+	// Re-derive the withdrawal commitment from the outputs this node just
+	// observed. The trie root covers both the withdrawal set and the Cartesi
+	// outputs root it embeds, so a payload claiming withdrawals or outputs
+	// the machine did not produce is rejected here — which is what keeps the
+	// output root, and everything proven against it, honest.
 	tree, ok := c.trees[data.ParentHash]
 	if !ok {
 		exec.machine.Close(ctx)
@@ -610,22 +650,29 @@ func (c *Chain) ImportPayload(ctx context.Context, data *engine.ExecutableData, 
 		return engine.PayloadStatusV1{Status: engine.SYNCING}, nil
 	}
 	tree = tree.Append(outputLeaves(exec.outputs)...)
-	if tree.Root() != *data.WithdrawalsRoot {
+	passer, err := c.extendPasser(data.ParentHash, exec.outputs, tree)
+	if err != nil {
 		exec.machine.Close(ctx)
-		return invalidStatus(&parentHash, fmt.Sprintf("outputs root mismatch: computed %s, payload claims %s", tree.Root(), *data.WithdrawalsRoot)), nil
+		slog.Warn("cannot validate payload: parent withdrawal commitment missing", "block", hash, "parent", data.ParentHash)
+		return engine.PayloadStatusV1{Status: engine.SYNCING}, nil
 	}
-	c.commitAndPersist(ctx, newBlock(header, data.Transactions), exec.machine, exec.outputs, tree, firstInput)
+	if passer.Root() != *data.WithdrawalsRoot {
+		exec.machine.Close(ctx)
+		return invalidStatus(&parentHash, fmt.Sprintf("withdrawals root mismatch: computed %s, payload claims %s", passer.Root(), *data.WithdrawalsRoot)), nil
+	}
+	c.commitAndPersist(ctx, newBlock(header, data.Transactions), exec.machine, exec.outputs, tree, passer, firstInput)
 	return engine.PayloadStatusV1{Status: engine.VALID, LatestValidHash: &hash}, nil
 }
 
 // commit stores a validated block, its post-state machine and the machine
 // emissions recorded while executing it. Canonicality is decided separately by
 // ForkchoiceUpdated. Callers hold c.mu.
-func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs, tree OutputTree, firstInputIndex uint64) {
+func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs, tree OutputTree, passer *PasserTrie, firstInputIndex uint64) {
 	c.blocks[b.Hash()] = b
 	c.machines[b.Hash()] = m
 	c.outputs[b.Hash()] = outputs
 	c.trees[b.Hash()] = tree
+	c.passers[b.Hash()] = passer
 	c.inputs[b.Hash()] = firstInputIndex + uint64(len(b.Txs))
 	for _, txo := range outputs {
 		if txo.TxHash != (common.Hash{}) {
@@ -646,8 +693,8 @@ func (c *Chain) commit(b *Block, m machine.Machine, outputs []TxOutputs, tree Ou
 // commitAndPersist is commit plus the write-through to the store. Replaying a
 // stored block uses commit alone: it is already in the store, and writing it
 // back would take a fresh checkpoint of a machine that just came from one.
-func (c *Chain) commitAndPersist(ctx context.Context, b *Block, m machine.Machine, outputs []TxOutputs, tree OutputTree, firstInputIndex uint64) {
-	c.commit(b, m, outputs, tree, firstInputIndex)
+func (c *Chain) commitAndPersist(ctx context.Context, b *Block, m machine.Machine, outputs []TxOutputs, tree OutputTree, passer *PasserTrie, firstInputIndex uint64) {
+	c.commit(b, m, outputs, tree, passer, firstInputIndex)
 	c.persist(ctx, b, outputs, tree, firstInputIndex)
 }
 
