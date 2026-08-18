@@ -76,7 +76,7 @@ async function setup() {
     return rig;
 }
 
-/** InputEncoding's packed ERC-20 deposit, as OPERC20Portal sends it. */
+/** InputEncoding's packed ERC-20 deposit, as a Cartesi-style portal sends it. */
 function erc20Deposit(amount: bigint): Uint8Array {
     return depositTx({
         from: applyL1ToL2Alias(ERC20_PORTAL),

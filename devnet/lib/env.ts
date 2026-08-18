@@ -160,8 +160,6 @@ export const config = {
     disputeGameFactory: optionalAddress("DISPUTE_GAME_FACTORY_ADDRESS"),
     outputsValidator: optionalAddress("OUTPUTS_VALIDATOR_ADDRESS"),
     outputExecutor: optionalAddress("OUTPUT_EXECUTOR_ADDRESS"),
-    erc20Portal: optionalAddress("ERC20_PORTAL_ADDRESS"),
-    etherPortal: optionalAddress("ETHER_PORTAL_ADDRESS"),
     l1StandardBridge: optionalAddress("L1_STANDARD_BRIDGE_ADDRESS"),
     l1CrossDomainMessenger: optionalAddress("L1_CROSS_DOMAIN_MESSENGER_ADDRESS"),
     testToken: optionalAddress("TEST_TOKEN_ADDRESS"),
@@ -344,8 +342,6 @@ export function addresses() {
         disputeGameType: value("DISPUTE_GAME_TYPE", "1"),
         outputsValidator: opt("OUTPUTS_VALIDATOR_ADDRESS"),
         outputExecutor: opt("OUTPUT_EXECUTOR_ADDRESS"),
-        etherPortal: opt("ETHER_PORTAL_ADDRESS"),
-        erc20Portal: opt("ERC20_PORTAL_ADDRESS"),
         l1StandardBridge: opt("L1_STANDARD_BRIDGE_ADDRESS"),
         l1CrossDomainMessenger: opt("L1_CROSS_DOMAIN_MESSENGER_ADDRESS"),
     };

@@ -11,9 +11,9 @@
 // finalizeBridgeERC20 through the messengers; the guest's L2StandardBridge
 // predeploy credits the ledger, naming the L2 token by its derived façade
 // address — the pair the bridge's own accounting later releases a
-// withdrawal against. The OPERC20Portal path this script used to take is
-// the non-OP configuration; this devnet registers the messenger instead,
-// and the guest keeps the two escrows exclusive.
+// withdrawal against. The Cartesi-portal path this script used to take is
+// gone from the repo; this devnet registers the messenger, and the guest
+// keeps the standard-bridge escrow exclusive with any portal escrow.
 
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";

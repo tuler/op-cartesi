@@ -63,11 +63,11 @@ func ethDeposit(t *testing.T, source string, to common.Address, amount *big.Int)
 
 // registerPortalDeposit is an owner configuration input: a deposit from the
 // guest owner's EOA to the config contract carrying
-// registerPortal(uint8 kind, address portal) — how the devnet's
-// deploy-outputs.ts tells the guest which L1 contracts to credit deposits
-// from. It is also the one input a fresh routed guest answers with a
-// provable output (the registration notice), which several real-machine
-// tests lean on.
+// registerPortal(uint8 kind, address portal) — the guest's Cartesi-style
+// portal registration (the devnet itself registers the standard messenger
+// instead these days). It is also the one input a fresh routed guest answers
+// with a provable output (the registration notice), which several
+// real-machine tests lean on.
 func registerPortalDeposit(t *testing.T, source string, kind uint8, portal common.Address) []byte {
 	t.Helper()
 	uint8Ty, err := abi.NewType("uint8", "", nil)
@@ -107,8 +107,8 @@ func aliasL1(addr common.Address) common.Address {
 	return common.BigToAddress(aliased) // BigToAddress truncates to 160 bits
 }
 
-// erc20PortalDeposit is what OPERC20Portal's escrow becomes on L2: a deposit
-// from the aliased portal whose data is InputEncoding's packed
+// erc20PortalDeposit is what a Cartesi-style ERC-20 portal's escrow becomes
+// on L2: a deposit from the aliased portal whose data is InputEncoding's packed
 // token ‖ beneficiary ‖ amount. The `to` is deliberately not anything the
 // guest knows — a registered portal routes by sender (EVM-COMPAT §6).
 func erc20PortalDeposit(t *testing.T, source string, portal, token, beneficiary common.Address, amount *big.Int) []byte {
