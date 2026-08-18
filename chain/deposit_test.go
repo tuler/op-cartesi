@@ -171,45 +171,6 @@ func erc20BalanceOf(t *testing.T, c *Chain, at common.Hash, l1Token, holder comm
 	return new(big.Int).SetBytes(res.Reports[0][1:])
 }
 
-// unwrapNotice strips Cartesi's Notice(bytes) envelope: a 4-byte selector,
-// then the ABI head (offset, length) and the padded payload.
-func unwrapNotice(t *testing.T, output []byte) []byte {
-	t.Helper()
-	if len(output) < 4+64 {
-		t.Fatalf("output is %d bytes, too short to be a notice", len(output))
-	}
-	body := output[4:]
-	offset := new(big.Int).SetBytes(body[:32]).Uint64()
-	length := new(big.Int).SetBytes(body[offset : offset+32]).Uint64()
-	start := offset + 32
-	if uint64(len(body)) < start+length {
-		t.Fatalf("notice claims %d payload bytes but only %d follow", length, uint64(len(body))-start)
-	}
-	return body[start : start+length]
-}
-
-// decodeEvmLog opens the EvmLog(address,bytes32[],bytes) encoding the routed
-// guest's events travel in (EVM-COMPAT §8).
-func decodeEvmLog(t *testing.T, payload []byte) (emitter common.Address, topics []common.Hash, data []byte) {
-	t.Helper()
-	selector := crypto.Keccak256([]byte("EvmLog(address,bytes32[],bytes)"))[:4]
-	if len(payload) < 4 || string(payload[:4]) != string(selector) {
-		t.Fatalf("notice payload %x does not carry the EvmLog selector", payload[:4])
-	}
-	addressTy, _ := abi.NewType("address", "", nil)
-	topicsTy, _ := abi.NewType("bytes32[]", "", nil)
-	bytesTy, _ := abi.NewType("bytes", "", nil)
-	vals, err := (abi.Arguments{{Type: addressTy}, {Type: topicsTy}, {Type: bytesTy}}).Unpack(payload[4:])
-	if err != nil {
-		t.Fatalf("decoding EvmLog: %v", err)
-	}
-	emitter = vals[0].(common.Address)
-	for _, raw := range vals[1].([][32]byte) {
-		topics = append(topics, common.Hash(raw))
-	}
-	return emitter, topics, vals[2].([]byte)
-}
-
 // TestDepositIsCreditedInGuest is milestone 1's first half: a deposit that
 // arrives from L1 is credited by the execution layer itself. The balance
 // lives on the guest's accounts drive, so it is committed to by the state
@@ -280,12 +241,13 @@ func TestPortalDepositIsCommittedTo(t *testing.T) {
 	if len(receipts[0].Logs) != 1 {
 		t.Fatalf("the deposit produced %d logs, want the one Transfer notice", len(receipts[0].Logs))
 	}
-	// A log carries the output exactly as the machine emitted it: Cartesi's
-	// Notice(bytes) envelope around the guest's EvmLog encoding. Unwrapping
-	// here rather than in the chain is deliberate — the chain commits to the
-	// bytes the guest produced, and interpreting them is the reader's
-	// business (the shim's EvmLog receipt decoding is its own step).
-	emitter, topics, data := decodeEvmLog(t, unwrapNotice(t, receipts[0].Logs[0].Data))
+	// Receipt synthesis decodes the guest's EvmLog notice into a real log —
+	// the guest's own emitter, topics and data — so what a wallet or indexer
+	// reads here is an ordinary Transfer event. The chain still commits to
+	// the raw bytes the guest produced (they are the outputs-tree leaf);
+	// only the receipt view is decoded, and nothing about it is consensus.
+	log := receipts[0].Logs[0]
+	emitter, topics, data := log.Address, log.Topics, log.Data
 	if want := l2TokenAddress(token); emitter != want {
 		t.Errorf("event emitter %s, want the derived façade %s", emitter, want)
 	}
