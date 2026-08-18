@@ -2,7 +2,7 @@
 
 An OP Stack L2 whose execution layer is a [Cartesi Machine](https://github.com/cartesi/machine-emulator) (deterministic RISC-V, Linux) instead of an EVM.
 
-The core of this project is an **Engine API shim**: a service that sits where op-geth normally sits — speaking the Engine API and a minimal `eth_*` subset to `op-node` on one side, and driving a Cartesi Machine through its CMIO input/output protocol on the other. The machine's Merkle root hash serves as the L2 state root. Everything else — sequencing, data availability, derivation, L1 bridging, and dispute tooling — is reused from the OP Stack.
+The core of this project is an **Engine API shim**: a service that sits where op-geth normally sits — speaking the [Engine API](https://specs.optimism.io/protocol/overview.html#engine-api) and a minimal `eth_*` subset to `op-node` on one side, and driving a Cartesi Machine through its CMIO input/output protocol on the other. The machine's Merkle root hash serves as the L2 state root. Everything else — sequencing, data availability, derivation, L1 bridging, and dispute tooling — is reused from the OP Stack.
 
 Start here, then read **[docs/DESIGN.md](docs/DESIGN.md)** for the architecture in full: what the Cartesi Machine provides as an execution layer, why the OP Stack is the right chassis, how Cartesi outputs and reports map onto withdrawals and logs, and what a fault proof for this chain would require.
 
@@ -14,7 +14,7 @@ What is **not** done is disputing a proposal. Proposals go into OP's permissione
 
 ## How it works
 
-**Blocks are Ethereum-shaped.** Transactions are ordinary signed Ethereum transactions, plus the OP deposit transactions op-node injects, which is what lets stock op-node and op-batcher handle these blocks unmodified. Each one reaches the machine wrapped in Cartesi's **`EvmAdvance` envelope**, with the raw transaction as the payload:
+**Blocks are Ethereum-shaped.** Transactions are ordinary signed Ethereum transactions, plus the [OP deposit transactions](https://specs.optimism.io/protocol/deposits.html#the-deposited-transaction-type) op-node injects, which is what lets stock op-node and op-batcher handle these blocks unmodified. Each one reaches the machine wrapped in Cartesi's **`EvmAdvance` envelope**, with the raw transaction as the payload:
 
 ```
 EvmAdvance(chainId, appContract, msgSender, blockNumber, blockTimestamp, prevRandao, index, payload)
@@ -22,9 +22,9 @@ EvmAdvance(chainId, appContract, msgSender, blockNumber, blockTimestamp, prevRan
 
 That is the encoding Cartesi's guest tools already decode, so a stock guest-tools rootfs and existing Cartesi applications run unmodified. It also carries the L2 block context the guest could not otherwise learn, since the machine has no clock and no view of the chain. `msgSender` is the transaction's own sender (for a deposit, the L1 originator it carries); `index` is chain-wide, so the guest sees one gapless input sequence as it would from an InputBox. Every field is derivable from the block header, so a verifier re-executing a block reconstructs the exact context the builder used.
 
-**The header carries two commitments.** `stateRoot` is the machine's Merkle root. `withdrawalsRoot` is a genuine Ethereum storage trie over the `L2ToL1MessagePasser.sentMessages` slots of every OP `Withdrawal` the guest has emitted — the commitment the OP Stack expects there — with the **Cartesi outputs Merkle root** at the reserved slot `keccak256("op-cartesi.outputsMerkleRoot")`. One commitment therefore serves both the portal's storage proofs and Cartesi's output proofs, and op-node turns it into the L2 output root with no changes. Verifiers re-derive both from re-execution, so a payload claiming outputs or withdrawals the machine did not produce is rejected. See [DESIGN §5](docs/DESIGN.md).
+**The header carries two commitments.** `stateRoot` is the machine's Merkle root. `withdrawalsRoot` is a genuine Ethereum storage trie over the `L2ToL1MessagePasser.sentMessages` slots of every OP `Withdrawal` the guest has emitted — [the commitment the OP Stack expects there](https://specs.optimism.io/protocol/isthmus/exec-engine.html#l2tol1messagepasser-storage-root-in-header) — with the **Cartesi outputs Merkle root** at the reserved slot `keccak256("op-cartesi.outputsMerkleRoot")`. One commitment therefore serves both the portal's storage proofs and Cartesi's output proofs, and op-node turns it into the [L2 output root](https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction) with no changes. Verifiers re-derive both from re-execution, so a payload claiming outputs or withdrawals the machine did not produce is rejected. See [DESIGN §5](docs/DESIGN.md).
 
-**Both bridges are stock OP.** `OptimismPortal.depositTransaction` funds accounts; ether leaves through `proveWithdrawalTransaction` / `finalizeWithdrawalTransaction`, paid from the lockbox the deposits filled. ERC-20 rides `L1StandardBridge` in both directions, against `L2CrossDomainMessenger` (0x4200…0007) and `L2StandardBridge` (0x4200…0010) adopted as real predeploys in the guest — no custom contract on the path. Cartesi vouchers remain for what an application emits for its own reasons, proven against the same proposal through one small contract, [`OPOutputsMerkleRootValidator`](contracts/src/OPOutputsMerkleRootValidator.sol). Nothing forks `OptimismPortal`. See [DESIGN §6](docs/DESIGN.md).
+**Both bridges are stock OP.** [`OptimismPortal.depositTransaction`](https://specs.optimism.io/protocol/deposits.html#deposit-contract) funds accounts; ether leaves through [`proveWithdrawalTransaction` / `finalizeWithdrawalTransaction`](https://specs.optimism.io/protocol/withdrawals.html#withdrawal-verification-and-finalization), paid from the lockbox the deposits filled. ERC-20 rides `L1StandardBridge` in both directions, against `L2CrossDomainMessenger` (0x4200…0007) and `L2StandardBridge` (0x4200…0010) adopted as real [predeploys](https://specs.optimism.io/protocol/predeploys.html) in the guest — no custom contract on the path. Cartesi vouchers remain for what an application emits for its own reasons, proven against the same proposal through one small contract, [`OPOutputsMerkleRootValidator`](contracts/src/OPOutputsMerkleRootValidator.sol). Nothing forks `OptimismPortal`. See [DESIGN §6](docs/DESIGN.md).
 
 **The chain survives a restart.** `-datadir` gives the node a store: blocks and the machine's per-transaction emissions go into a pebble database through go-ethereum's own `rawdb`, and the machine itself is checkpointed whole at intervals with Cartesi's `cm_store`. Restarting loads the newest checkpoint and re-executes the blocks after it — on a 39-block devnet run, back and serving in about a second. Replay is not a shortcut around verification: each replayed block is checked against the state root and outputs commitment it was stored with, so a drifted checkpoint fails the restart rather than serving a wrong chain. See [DESIGN §7](docs/DESIGN.md).
 
@@ -74,9 +74,9 @@ Only these versions are served, for the reason in [Fork support](#fork-support).
 
 | Method | Purpose |
 |---|---|
-| `engine_forkchoiceUpdatedV3` | Sets the unsafe/safe/finalized heads and, when op-node passes OP payload attributes, starts building the next block — returning the payload id. Reorgs are honoured by rewinding to a machine snapshot. |
-| `engine_getPayloadV4` | Returns the execution payload built for a payload id. The header's `stateRoot` is the machine's Merkle root and its `withdrawalsRoot` is the withdrawal trie root — the message passer storage trie holding the Cartesi outputs commitment at its reserved slot. |
-| `engine_newPayloadV4` | Imports a payload from a peer or from L1 derivation and re-executes it on the machine, rejecting it unless the resulting root and withdrawal commitment match what the payload claims. This is the verifier path. Blob hashes and execution requests must be empty; a missing `parentBeaconBlockRoot` is rejected rather than defaulted. |
+| [`engine_forkchoiceUpdatedV3`](https://specs.optimism.io/protocol/exec-engine.html#engine_forkchoiceupdatedv3) | Sets the unsafe/safe/finalized heads and, when op-node passes OP payload attributes, starts building the next block — returning the payload id. Reorgs are honoured by rewinding to a machine snapshot. |
+| [`engine_getPayloadV4`](https://specs.optimism.io/protocol/exec-engine.html#engine_getpayloadv4) | Returns the execution payload built for a payload id. The header's `stateRoot` is the machine's Merkle root and its `withdrawalsRoot` is the withdrawal trie root — the message passer storage trie holding the Cartesi outputs commitment at its reserved slot. |
+| [`engine_newPayloadV4`](https://specs.optimism.io/protocol/exec-engine.html#engine_newpayloadv4) | Imports a payload from a peer or from L1 derivation and re-executes it on the machine, rejecting it unless the resulting root and withdrawal commitment match what the payload claims. This is the verifier path. Blob hashes and execution requests must be empty; a missing `parentBeaconBlockRoot` is rejected rather than defaulted. |
 
 ### `eth_` — the subset op-node, op-batcher and wallets read
 
@@ -173,11 +173,11 @@ The chain flags passed to `genesis` and `run` must match: they determine the L2 
 
 ## Fork support
 
-The fork schedule is **fixed**, not configurable: every fork through **Isthmus** is active from genesis. A new chain has no pre-fork history to preserve, and Isthmus is not optional — pre-Isthmus, op-node computes the L2 output root by proving the L2ToL1MessagePasser account against the block's state root, which cannot work for a Cartesi execution layer with no Ethereum MPT. A pre-Isthmus chain could never be proposed, so the shim does not offer one. See [DESIGN §4](docs/DESIGN.md).
+The fork schedule is **fixed**, not configurable: every fork through **[Isthmus](https://specs.optimism.io/protocol/isthmus/exec-engine.html)** is active from genesis. A new chain has no pre-fork history to preserve, and Isthmus is not optional — pre-Isthmus, op-node computes the L2 output root by proving the L2ToL1MessagePasser account against the block's state root, which cannot work for a Cartesi execution layer with no Ethereum MPT. A pre-Isthmus chain could never be proposed, so the shim does not offer one. See [DESIGN §4](docs/DESIGN.md).
 
-That fixes the wire protocol too: `engine_forkchoiceUpdatedV3` plus the **V4** payload methods, which is exactly what op-node calls for an Isthmus chain. Holocene's EIP-1559 parameters are encoded into header `extraData` with op-geth's own encoder, so the bytes match what an op-geth engine would commit to.
+That fixes the wire protocol too: `engine_forkchoiceUpdatedV3` plus the **V4** payload methods, which is exactly what op-node calls for an Isthmus chain. [Holocene's EIP-1559 parameters](https://specs.optimism.io/protocol/holocene/exec-engine.html#eip-1559-parameters-in-block-header) are encoded into header `extraData` with op-geth's own encoder, so the bytes match what an op-geth engine would commit to.
 
-Jovian and later are not supported: Jovian adds a minimum-base-fee field the shim does not implement.
+Jovian and later are not supported: Jovian adds a [minimum-base-fee field](https://specs.optimism.io/protocol/jovian/exec-engine.html#minimum-base-fee-in-block-header) the shim does not implement.
 
 ## Roadmap
 
@@ -212,3 +212,4 @@ These do not change the trust model, which is why they sit outside the numbered 
 | [docs/ACCOUNTS.md](docs/ACCOUNTS.md) · [ACCOUNTS-DRIVE-SPEC.md](docs/ACCOUNTS-DRIVE-SPEC.md) | The guest's account model, and the byte-level drive format the host reads balances and nonces out of. |
 | [docs/ABI-DRIVE-SPEC.md](docs/ABI-DRIVE-SPEC.md) | The drive recording which addresses the guest routes and what ABI each speaks. |
 | [devnet/README.md](devnet/README.md) | Running the devnet, pane by pane. |
+| [OP Stack specs](https://specs.optimism.io/) | The protocol this chain plugs into: the [Engine API](https://specs.optimism.io/protocol/exec-engine.html#engine-api), [derivation](https://specs.optimism.io/protocol/derivation.html), [deposits](https://specs.optimism.io/protocol/deposits.html), [withdrawals](https://specs.optimism.io/protocol/withdrawals.html), [output proposals](https://specs.optimism.io/protocol/proposals.html#l2-output-commitment-construction) and [fault proofs](https://specs.optimism.io/fault-proof/index.html). |
