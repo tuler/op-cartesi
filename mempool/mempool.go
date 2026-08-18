@@ -27,9 +27,6 @@ var (
 	// ErrNonceTooLow means the transaction's nonce is already consumed on the
 	// sender's account record at the chain head.
 	ErrNonceTooLow = errors.New("transaction nonce below the sender's account nonce")
-	// ErrKnownNonce means a different transaction from the same sender with
-	// the same nonce is already queued; only one of them could ever execute.
-	ErrKnownNonce = errors.New("a transaction with this sender and nonce is already queued")
 )
 
 // senderNonce identifies the one slot a transaction competes for: an
@@ -53,8 +50,9 @@ type Pool struct {
 	mu    sync.Mutex
 	txs   []entry
 	known map[common.Hash]struct{}
-	// byNonce holds the (sender, nonce) pairs of gated entries, so two
-	// transactions competing for the same account slot cannot both queue.
+	// byNonce holds the (sender, nonce) pairs of gated entries, so a second
+	// transaction competing for the same account slot replaces the queued
+	// one instead of stacking behind it — only one could ever execute.
 	byNonce map[senderNonce]struct{}
 	max     int
 	// signer and nonce arm the nonce gate (SetNonceGate); both nil means no
@@ -78,7 +76,8 @@ func New(max int) *Pool {
 // sender under the chain's signer, must not carry a nonce the sender's
 // account has already consumed (read through the hook — the caller wires it
 // to the chain's account state at head, i.e. the guest's accounts drive),
-// and must not duplicate a (sender, nonce) already queued.
+// and take over the (sender, nonce) slot: a second transaction at a queued
+// slot replaces the first, it does not stack behind it.
 //
 // This is a courtesy filter and a DoS bound at the RPC ingress, NOT the
 // enforcement: the authoritative nonce check lives in the guest, where it is
@@ -137,6 +136,9 @@ func (p *Pool) Add(raw []byte) (common.Hash, error) {
 		sn = senderNonce{sender: from, nonce: tx.Nonce()}
 	}
 
+	cp := make([]byte, len(raw))
+	copy(cp, raw)
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if _, ok := p.known[hash]; ok {
@@ -144,14 +146,28 @@ func (p *Pool) Add(raw []byte) (common.Hash, error) {
 	}
 	if gated {
 		if _, ok := p.byNonce[sn]; ok {
-			return common.Hash{}, fmt.Errorf("%w: sender %s, nonce %d", ErrKnownNonce, sn.sender, sn.nonce)
+			// The slot is taken: the newcomer replaces the queued transaction
+			// in place — geth's replacement semantics without the price bump,
+			// which this chain's nominal fees could never clear. Only one of
+			// the two could ever execute, and the sender signing a second
+			// transaction at the nonce is the stronger claim to which one.
+			for i := range p.txs {
+				e := &p.txs[i]
+				if e.gated && e.sn == sn {
+					delete(p.known, e.hash)
+					e.raw, e.hash = cp, hash
+					p.known[hash] = struct{}{}
+					return hash, nil
+				}
+			}
+			// The index said occupied but no entry holds the slot; repair it
+			// and fall through to a plain append.
+			delete(p.byNonce, sn)
 		}
 	}
 	if len(p.txs) >= p.max {
 		return common.Hash{}, ErrPoolFull
 	}
-	cp := make([]byte, len(raw))
-	copy(cp, raw)
 	p.txs = append(p.txs, entry{raw: cp, hash: hash, sn: sn, gated: gated})
 	p.known[hash] = struct{}{}
 	if gated {
