@@ -44,6 +44,19 @@ export class Bridge implements Handler {
             }
             case "withdrawERC20": {
                 const [l2Token, to, amount] = decoded.args;
+                // Under the standard bridge, tokens are escrowed in
+                // L1StandardBridge, which no voucher can release — only a
+                // finalizeBridgeERC20 message can. The paths are exclusive
+                // (DESIGN §7g), so this refusal is what keeps a voucher from
+                // being minted against an escrow it cannot reach.
+                if (ledger.crossDomain()) {
+                    return {
+                        kind: "revert",
+                        data: errorRevert(
+                            "ERC-20 leaves through the standard bridge (0x4200…0010) on this chain",
+                        ),
+                    };
+                }
                 const token = ledger.tokenByL2Address(l2Token);
                 if (!token) return { kind: "revert", data: errorRevert("unknown token") };
                 try {

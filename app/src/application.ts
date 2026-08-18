@@ -18,7 +18,11 @@ import {
     CONFIG_ADDRESS,
     configAbi,
     L1BLOCK_ADDRESS,
+    L2_BRIDGE_ADDRESS,
+    L2_MESSENGER_ADDRESS,
     l1BlockAbi,
+    l2CrossDomainMessengerAbi,
+    l2StandardBridgeAbi,
     REGISTRY_ADDRESS,
     registryAbi,
     sameAddress,
@@ -46,6 +50,16 @@ const BUILTINS: ReadonlyArray<{ address: Address; abi: Abi }> = [
     { address: BRIDGE_ADDRESS, abi: bridgeAbi },
     { address: CONFIG_ADDRESS, abi: configAbi },
     { address: L1BLOCK_ADDRESS, abi: l1BlockAbi },
+    { address: L2_MESSENGER_ADDRESS, abi: l2CrossDomainMessengerAbi },
+    { address: L2_BRIDGE_ADDRESS, abi: l2StandardBridgeAbi },
+];
+
+/** The adopted OP predeploys applications may not claim (the 0xC751
+ * namespace is guarded separately by its full pattern). */
+const RESERVED_PREDEPLOYS: readonly Address[] = [
+    L1BLOCK_ADDRESS,
+    L2_MESSENGER_ADDRESS,
+    L2_BRIDGE_ADDRESS,
 ];
 
 function inSystemNamespace(address: Address): boolean {
@@ -93,7 +107,10 @@ export class Application {
      * discover it from the snapshot alone. */
     async contract<const abi extends Abi>(spec: ContractSpec<abi>): Promise<void> {
         const address = getAddress(spec.address);
-        if (inSystemNamespace(address) || sameAddress(address, L1BLOCK_ADDRESS)) {
+        if (
+            inSystemNamespace(address) ||
+            RESERVED_PREDEPLOYS.some((r) => sameAddress(address, r))
+        ) {
             throw new Error(`${address} is reserved by the standard`);
         }
         this.router.register(address, contractHandler(spec));
