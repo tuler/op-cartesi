@@ -6,6 +6,8 @@ import (
 
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
+
+	"github.com/tuler/op-cartesi/chain"
 )
 
 // TestIsthmusOutputRootThroughOpNode is the point of Isthmus support: op-node
@@ -15,9 +17,9 @@ import (
 // messagePasserStorageRoot by calling eth_getProof for the L2ToL1MessagePasser
 // account and verifying the result against the block's state root — which is
 // impossible here, because the state root is a Cartesi hash tree and there is
-// no Ethereum MPT to prove against. From Isthmus it reads the value straight
-// out of the header instead, so this chain can publish its outputs Merkle root
-// there and op-proposer works unmodified.
+// no Ethereum account trie to prove against. From Isthmus it reads the value
+// straight out of the header instead, so this chain can publish its withdrawal
+// trie root there and op-proposer works unmodified.
 //
 // This test reproduces that computation with op-node's own OutputV0 type and
 // hashing, over payloads the shim produced.
@@ -50,14 +52,19 @@ func TestIsthmusOutputRootThroughOpNode(t *testing.T) {
 		}
 		previous = eth.Bytes32(root)
 
-		// The commitment must be the chain's own accumulator root, and it must
-		// grow by one output per block for this machine.
+		// The commitment must be the chain's own withdrawal trie root — the
+		// message passer trie holding the outputs accumulator root at its
+		// reserved slot — and it must move as outputs accumulate.
 		tree, ok := h.chain.OutputTreeAt(payload.BlockHash)
 		if !ok {
 			t.Fatalf("block %d: no outputs accumulator", i)
 		}
-		if common.Hash(*payload.WithdrawalsRoot) != tree.Root() {
-			t.Fatalf("block %d: header commits %s, accumulator root is %s", i, *payload.WithdrawalsRoot, tree.Root())
+		trie := chain.NewPasserTrie()
+		if err := trie.SetOutputsRoot(tree.Root()); err != nil {
+			t.Fatal(err)
+		}
+		if common.Hash(*payload.WithdrawalsRoot) != trie.Root() {
+			t.Fatalf("block %d: header commits %s, trie over the accumulator root is %s", i, *payload.WithdrawalsRoot, trie.Root())
 		}
 		if want := uint64(i + 1); tree.Count() != want {
 			t.Fatalf("block %d: accumulator holds %d outputs, want %d", i, tree.Count(), want)
