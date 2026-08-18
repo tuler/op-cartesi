@@ -34,6 +34,20 @@ const portalAbi = parseAbi([
     "function proveWithdrawalTransaction((uint256 nonce, address sender, address target, uint256 value, uint256 gasLimit, bytes data) tx, uint256 disputeGameIndex, (bytes32 version, bytes32 stateRoot, bytes32 messagePasserStorageRoot, bytes32 latestBlockhash) outputRootProof, bytes[] withdrawalProof)",
     "function finalizeWithdrawalTransaction((uint256 nonce, address sender, address target, uint256 value, uint256 gasLimit, bytes data) tx)",
     "function proofMaturityDelaySeconds() view returns (uint256)",
+    "function disputeGameFinalityDelaySeconds() view returns (uint256)",
+    // The portal's custom errors, so a revert prints a name, not a selector.
+    "error OptimismPortal_InvalidRootClaim()",
+    "error OptimismPortal_ProofNotOldEnough()",
+    "error OptimismPortal_Unproven()",
+    "error OptimismPortal_InvalidProofTimestamp()",
+    "error OptimismPortal_ImproperDisputeGame()",
+    "error OptimismPortal_InvalidDisputeGame()",
+    "error OptimismPortal_AlreadyFinalized()",
+    "error OptimismPortal_InvalidMerkleProof()",
+    "error OptimismPortal_InvalidOutputRootProof()",
+    "error OptimismPortal_BadTarget()",
+    "error OptimismPortal_CallPaused()",
+    "error OptimismPortal_GasEstimation()",
 ]);
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -127,6 +141,14 @@ export async function proveAndFinalizeWithdrawal(
     console.error(`  proven against OptimismPortal at ${portal}`);
 
     // 4. Outlive the delays and resolve the game — devnet plumbing.
+    const skipTime = async (seconds: bigint, what: string) => {
+        console.error(`  advancing anvil time by ${seconds}s (${what})`);
+        await l1.request({
+            method: "evm_increaseTime" as never,
+            params: [Number(seconds)] as never,
+        });
+        await l1.request({ method: "evm_mine" as never, params: [] as never });
+    };
     const maturity = await l1.readContract({
         address: portal,
         abi: portalAbi,
@@ -137,12 +159,10 @@ export async function proveAndFinalizeWithdrawal(
         abi: gameAbi,
         functionName: "maxClockDuration",
     });
-    const skip = (maturity > clock ? maturity : clock) + 60n;
-    console.error(
-        `  advancing anvil time by ${skip}s (proof maturity ${maturity}s, game clock ${clock}s)`,
+    await skipTime(
+        (maturity > clock ? maturity : clock) + 60n,
+        `proof maturity ${maturity}s, game clock ${clock}s`,
     );
-    await l1.request({ method: "evm_increaseTime" as never, params: [Number(skip)] as never });
-    await l1.request({ method: "evm_mine" as never, params: [] as never });
 
     const status = await l1.readContract({ address: game!, abi: gameAbi, functionName: "status" });
     if (status === 0) {
@@ -161,6 +181,17 @@ export async function proveAndFinalizeWithdrawal(
             caller.writeContract({ address: game!, abi: gameAbi, functionName: "resolve" }),
         );
     }
+
+    // The anchor registry accepts a game's claim only once it has been
+    // *resolved* for the finality delay (the air gap) — the clock starts at
+    // resolution, not at creation, so this jump has to come after resolve
+    // or finalize reverts with OptimismPortal_InvalidRootClaim.
+    const finality = await l1.readContract({
+        address: portal,
+        abi: portalAbi,
+        functionName: "disputeGameFinalityDelaySeconds",
+    });
+    await skipTime(finality + 60n, `dispute game finality delay ${finality}s`);
 
     // 5. Finalize: the portal executes the withdrawal's call.
     await waitL1(
