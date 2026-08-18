@@ -160,6 +160,25 @@ func (p *Pool) Add(raw []byte) (common.Hash, error) {
 	return hash, nil
 }
 
+// Get returns the raw bytes of a queued transaction by hash, or false if the
+// pool does not hold it. Serves eth_getTransactionByHash for transactions
+// that have been accepted but not yet included in a block.
+func (p *Pool) Get(hash common.Hash) ([]byte, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if _, ok := p.known[hash]; !ok {
+		return nil, false
+	}
+	for _, e := range p.txs {
+		if e.hash == hash {
+			cp := make([]byte, len(e.raw))
+			copy(cp, e.raw)
+			return cp, true
+		}
+	}
+	return nil, false
+}
+
 // Pending returns the queued transactions in FIFO order.
 func (p *Pool) Pending() [][]byte {
 	p.mu.Lock()

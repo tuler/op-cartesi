@@ -60,6 +60,37 @@ func (e *EthAPI) SendRawTransaction(_ context.Context, raw hexutil.Bytes) (commo
 	return e.pool.Add(raw)
 }
 
+// GetTransactionByHash returns a transaction by hash: from the canonical
+// chain with its block coordinates, from the mempool with null ones, or null
+// when neither knows it — geth's exact shape for each case.
+//
+// It exists because standard client flows depend on it before they ever ask
+// for a receipt: viem's waitForTransactionReceipt fetches the transaction
+// first (its replacement detection wants the nonce and the sender), retries
+// a not-found answer, and treats a missing *method* as fatal. So a chain
+// that serves receipts but not this stalls every viem-driven script at the
+// first wait.
+func (e *EthAPI) GetTransactionByHash(_ context.Context, hash common.Hash) (map[string]any, error) {
+	if found, ok := e.chain.TxEmissions(hash); ok {
+		b := e.chain.BlockByHash(found.BlockHash)
+		if b == nil || found.Outputs.TxIndex >= len(b.Txs) {
+			return nil, nil
+		}
+		mined := minedAt{
+			blockHash: found.BlockHash,
+			number:    found.BlockNumber,
+			index:     uint64(found.Outputs.TxIndex),
+		}
+		return marshalTx(b.Txs[found.Outputs.TxIndex], &mined, e.chain.Config().ChainID)
+	}
+	if e.pool != nil {
+		if raw, ok := e.pool.Get(hash); ok {
+			return marshalTx(raw, nil, e.chain.Config().ChainID)
+		}
+	}
+	return nil, nil
+}
+
 // GetTransactionReceipt returns a receipt synthesized from what the machine
 // emitted while processing the transaction: provable outputs become logs,
 // acceptance becomes status, and consumed mcycles become gas.
@@ -524,6 +555,49 @@ func blockFromChainOptional(c *chain.Chain, id *rpc.BlockNumberOrHash) (*chain.B
 		return c.HeadBlock(), nil
 	}
 	return blockFromChain(c, *id)
+}
+
+// minedAt is a transaction's block coordinates, absent for a pooled one.
+type minedAt struct {
+	blockHash common.Hash
+	number    uint64
+	index     uint64
+}
+
+// marshalTx renders one transaction the way geth's RPC does: the type's own
+// JSON fields, the recovered sender, and either the block coordinates or
+// explicit nulls for a pending transaction. Deposit transactions carry their
+// From in the type's JSON already; signed ones get it recovered here, since
+// go-ethereum's plain MarshalJSON deliberately omits it.
+func marshalTx(raw []byte, mined *minedAt, chainID uint64) (map[string]any, error) {
+	tx := new(types.Transaction)
+	if err := tx.UnmarshalBinary(raw); err != nil {
+		return nil, fmt.Errorf("stored transaction does not decode: %w", err)
+	}
+	encoded, err := tx.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]any{}
+	if err := json.Unmarshal(encoded, &m); err != nil {
+		return nil, err
+	}
+	if tx.Type() != types.DepositTxType {
+		signer := types.LatestSignerForChainID(new(big.Int).SetUint64(chainID))
+		if from, err := types.Sender(signer, tx); err == nil {
+			m["from"] = from
+		}
+	}
+	if mined != nil {
+		m["blockHash"] = mined.blockHash
+		m["blockNumber"] = hexutil.Uint64(mined.number)
+		m["transactionIndex"] = hexutil.Uint64(mined.index)
+	} else {
+		m["blockHash"] = nil
+		m["blockNumber"] = nil
+		m["transactionIndex"] = nil
+	}
+	return m, nil
 }
 
 func marshalBlock(b *chain.Block, fullTx bool) (map[string]any, error) {
