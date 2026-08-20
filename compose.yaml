@@ -19,9 +19,9 @@
 # generated files land in devnet/ for the same reason: they are bind-mounted
 # back out, not kept in a volume.
 #
-# Prerequisites: docker, and a machine snapshot at demo/.cartesi/image
-# (./scripts/build-snapshot.ts, once). Nothing else — no bun, no go, no
-# foundry, no op-deployer on the host.
+# Prerequisites: docker, and a machine snapshot at .cartesi/image (`cartesi
+# build`, once, with @cartesi/cli). Nothing else — no bun, no go, no foundry,
+# no op-deployer on the host.
 #
 # See devnet/README.md.
 
@@ -100,7 +100,7 @@ services:
       # told about, and the short form would silently mount an empty directory
       # docker made up on the spot.
       - type: bind
-        source: ${SNAPSHOT_DIR:-./demo/.cartesi/image}
+        source: ${SNAPSHOT_DIR:-./.cartesi/image}
         target: /snapshot
         read_only: true
         bind:
@@ -141,7 +141,7 @@ services:
       # told about, and the short form would silently mount an empty directory
       # docker made up on the spot.
       - type: bind
-        source: ${SNAPSHOT_DIR:-./demo/.cartesi/image}
+        source: ${SNAPSHOT_DIR:-./.cartesi/image}
         target: /snapshot
         read_only: true
         bind:
@@ -295,7 +295,7 @@ services:
       # told about, and the short form would silently mount an empty directory
       # docker made up on the spot.
       - type: bind
-        source: ${SNAPSHOT_DIR:-./demo/.cartesi/image}
+        source: ${SNAPSHOT_DIR:-./.cartesi/image}
         target: /snapshot
         read_only: true
         bind:

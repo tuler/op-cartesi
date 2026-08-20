@@ -26,8 +26,8 @@ EOF
 
 # Here the image's platform does not necessarily have to be riscv64: the
 # native addon ships prebuilds and node-gyp-build picks the riscv64 one at
-# runtime. The build context is the REPO ROOT (cartesi.toml sets
-# context = ".."), because the app is a bun workspace member whose
+# runtime. The build context is the REPO ROOT (../cartesi.toml sets
+# context = "."), because the app is a bun workspace member whose
 # @op-cartesi/accounts dependency lives in accounts-drive/js.
 FROM --platform=$BUILDPLATFORM oven/bun:1.3 AS build-stage
 
@@ -90,7 +90,8 @@ ENV PATH="/opt/cartesi/bin:${PATH}"
 # Genesis parameters of the routed guest (docs/EVM-COMPAT.md): baked into the
 # image environment, which `cartesi build` passes to the machine
 # (use_docker_env defaults to true), so they are covered by the genesis state
-# root like every other consensus parameter. Defaults match devnet/env.sh.
+# root like every other consensus parameter. Defaults match devnet/lib/env.ts;
+# override them with build_args on [drives.root] in ../cartesi.toml.
 ARG CHAIN_ID=901
 ARG OWNER=0x90F79bf6EB2c4f870365E785982E1f101E93b906
 ENV CHAIN_ID=${CHAIN_ID}

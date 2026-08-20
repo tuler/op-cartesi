@@ -1,5 +1,7 @@
 /op-cartesi
 /bin/
+# `cartesi build` stores the machine snapshot here — the chain's genesis state.
+/.cartesi/
 *.test
 jwt.hex
 devnet/rollup.json

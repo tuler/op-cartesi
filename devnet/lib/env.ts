@@ -175,8 +175,9 @@ export const stack = {
     l1Port,
     engineAddr: env("ENGINE_ADDR", "127.0.0.1:8551"),
     httpAddr: env("HTTP_ADDR", httpAddrDefault),
-    /** The routed guest's snapshot, as `cartesi build` stores it. */
-    snapshotDir: process.env.SNAPSHOT_DIR ?? join(REPO_DIR, "demo", ".cartesi", "image"),
+    /** The routed guest's snapshot, where `cartesi build` at the repo root
+     * stores it. */
+    snapshotDir: process.env.SNAPSHOT_DIR ?? join(REPO_DIR, ".cartesi", "image"),
     /** Directory for the chain store. Empty keeps the chain in memory. */
     dataDir: process.env.DATA_DIR ?? "",
 } as const;

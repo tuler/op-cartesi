@@ -90,7 +90,7 @@ already discoverable elsewhere:
 
 256 KiB (2^18 — a power of two, so the drive is one aligned subtree of the
 machine's hash tree), 64 index slots, heap at 4096. Declared in
-`demo/cartesi.toml` as the third drive; the guest formats it at boot
+`cartesi.toml` as the third drive; the guest formats it at boot
 and reaches it at `$ABI_DRIVE` (`/dev/pmem2` on the devnet). Like the
 accounts drive, the geometry is consensus once the snapshot is stored.
 

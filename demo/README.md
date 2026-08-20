@@ -31,13 +31,18 @@ bun install        # once, at the repo root (bun workspace)
 bun run typecheck
 bun run build      # esbuild bundle (dist/index.js)
 
-cartesi build      # @cartesi/cli 2.0 alpha → snapshot under .cartesi/image
+cd .. && cartesi build   # @cartesi/cli 2.0 alpha → snapshot in .cartesi/image
 ```
+
+The machine build is driven from the repo root, not from here:
+[`cartesi.toml`](../cartesi.toml) lives there because the docker context has to
+be the whole workspace anyway, and `dockerfile = "demo/Dockerfile"` points it
+back at this directory.
 
 The runtime's tests live with the runtime (`app`, `abi-drive/js`):
 `bun run test` at the repo root runs them all.
 
-`cartesi.toml` declares three drives: root, the accounts drive (raw, 1 MiB)
+That `cartesi.toml` declares three drives: root, the accounts drive (raw, 1 MiB)
 and the abi drive (raw, 256 KiB) — both unmounted, formatted by the
 application at first boot before the first yield, and handed to the app user
 with `user = "dapp"` (cartesi-init runs the entrypoint unprivileged). It also

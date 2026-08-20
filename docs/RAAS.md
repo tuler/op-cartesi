@@ -92,9 +92,9 @@ free:
   probing a running server. A stored machine is not portable across emulator
   versions in the way a genesis file is portable across geth versions, so the
   version is part of the chain's identity, not part of its deployment.
-- **The parameters baked into the image.** `scripts/build-snapshot.ts` passes
-  `CHAIN_ID` and `OWNER` as Dockerfile build arguments, which `cartesi build`
-  bakes into the machine environment. They are covered by the genesis state root
+- **The parameters baked into the image.** `CHAIN_ID` and `OWNER` are
+  Dockerfile build arguments — defaulted in the Dockerfile, overridable from
+  `cartesi.toml` — which `cartesi build` bakes into the machine environment. They are covered by the genesis state root
   like every other consensus parameter, and they are invisible from outside the
   snapshot. A registry that stores the bytes but not the build inputs stores
   something that cannot be rebuilt.
