@@ -7,12 +7,11 @@
 #   docker compose run --rm outputs      the outputs suite, once there is a
 #                                        proposal to deploy it against
 #
-# This is the same stack devnet/start-devnet.ts brings up under mprocs, and the
-# alternative it is experimenting with is the bring-up, not the chain: no
-# marker files, no port polling, no pid records. The ordering is `depends_on`,
-# the readiness is a healthcheck, and the steps that finish rather than run —
-# the L1 deployment, the rollup config — are containers that exit 0 and are
-# waited for with `service_completed_successfully`.
+# This is the devnet: there is no other way to start it. Compose does the
+# sequencing with the three notions the bring-up used to carry code for — the
+# ordering is `depends_on`, the readiness is a healthcheck, and the steps that
+# finish rather than run (the L1 deployment, the rollup config) are containers
+# that exit 0 and are waited for with `service_completed_successfully`.
 #
 # The ports are the ones devnet/lib/env.ts defaults to, so everything that
 # talks to the running stack — scripts/deposit.ts, cast, the README's
@@ -24,7 +23,7 @@
 # (./scripts/build-snapshot.ts, once). Nothing else — no bun, no go, no
 # foundry, no op-deployer on the host.
 #
-# See devnet/compose/README.md.
+# See devnet/README.md.
 
 name: op-cartesi-devnet
 

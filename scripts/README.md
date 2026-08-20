@@ -9,7 +9,7 @@ guest they all address.
 ```sh
 bun install                    # once, at the repo root (bun workspace)
 ./scripts/build-snapshot.ts    # once — `cartesi build` of demo/
-./devnet/start-devnet.ts       # in another terminal
+docker compose up              # in another terminal — the devnet
 ```
 
 | | |

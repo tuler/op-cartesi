@@ -14,40 +14,25 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseAbi } from "viem";
-import { addresses, chainParams, config, paths, stack } from "./lib/env.ts";
+import { addresses, chainParams, config, paths } from "./lib/env.ts";
 import { MULTICALL3_ADDRESS, MULTICALL3_CODE } from "./lib/multicall3.ts";
 import { die, forget, must, run, say } from "./lib/proc.ts";
 import { l1Public } from "./lib/wallet.ts";
 
 const systemConfigAbi = parseAbi(["function scalar() view returns (uint256)"]);
 
-/** op-deployer ships as a docker image like the rest of the OP tools. The
- * workdir is a bind mount inside the container and an ordinary directory
- * outside it, and the L1 is reached over the host gateway rather than
- * loopback — so both paths differ by runtime, and nothing else does. */
-function deployer() {
-    const native = Bun.which("op-deployer") !== null;
-    return {
-        native,
-        workdir: native ? paths.deployWorkdir : "/w",
-        l1Rpc: native ? config.l1Rpc : `http://host.docker.internal:${stack.l1Port}`,
-        argv: (...args: string[]) =>
-            native
-                ? ["op-deployer", ...args]
-                : [
-                      "docker",
-                      "run",
-                      "--rm",
-                      "--add-host=host.docker.internal:host-gateway",
-                      "-v",
-                      `${paths.deployWorkdir}:/w`,
-                      "-w",
-                      "/w",
-                      stack.opDeployerImage,
-                      "op-deployer",
-                      ...args,
-                  ],
-    };
+/** op-deployer, which is on PATH because the image the deploy step runs in
+ * puts it there (devnet/compose/Dockerfile). The OP monorepo publishes no
+ * binaries — its releases carry source archives only — so an image is how you
+ * get one, and the compose bring-up means nobody has to arrange that per-host:
+ * the version is pinned by the tag that image is built from. */
+function deployer(): string[] {
+    if (Bun.which("op-deployer") === null) {
+        die(
+            "op-deployer is not on PATH — run this step with `docker compose run --rm l1-contracts`",
+        );
+    }
+    return ["op-deployer"];
 }
 
 /** The intent op-deployer generates is a template: every role is the zero
@@ -122,7 +107,8 @@ export async function deployL1(): Promise<void> {
         params: [MULTICALL3_ADDRESS, MULTICALL3_CODE] as never,
     });
 
-    const d = deployer();
+    const opDeployer = deployer();
+    const argv = (...args: string[]) => [...opDeployer, ...args];
     rmSync(paths.deployWorkdir, { recursive: true, force: true });
     mkdirSync(paths.deployWorkdir, { recursive: true });
 
@@ -133,7 +119,7 @@ export async function deployL1(): Promise<void> {
     // custom intent it is not needed, because apply does it.)
     say(`generating an op-deployer intent for L1 ${p.l1ChainId} / L2 ${p.l2ChainId}`);
     await must(
-        d.argv(
+        argv(
             "init",
             "--intent-type",
             "custom",
@@ -142,7 +128,7 @@ export async function deployL1(): Promise<void> {
             "--l2-chain-ids",
             String(p.l2ChainId),
             "--workdir",
-            d.workdir,
+            paths.deployWorkdir,
         ),
         { capture: true },
     );
@@ -152,12 +138,12 @@ export async function deployL1(): Promise<void> {
 
     say("deploying the L1 contract suite (this takes a minute)");
     const applied = await run(
-        d.argv(
+        argv(
             "apply",
             "--workdir",
-            d.workdir,
+            paths.deployWorkdir,
             "--l1-rpc-url",
-            d.l1Rpc,
+            config.l1Rpc,
             "--private-key",
             a.deployerKey,
         ),
@@ -166,7 +152,7 @@ export async function deployL1(): Promise<void> {
 
     const inspect = async (what: string) => {
         const { stdout } = await must(
-            d.argv("inspect", what, "--workdir", d.workdir, String(p.l2ChainId)),
+            argv("inspect", what, "--workdir", paths.deployWorkdir, String(p.l2ChainId)),
             { capture: true },
         );
         return JSON.parse(stdout);

@@ -6,30 +6,20 @@
 // set and an engine started with another is a chain op-node rejects for
 // serving the wrong genesis. Hence one function producing both.
 
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { existsSync, writeFileSync } from "node:fs";
 import { chainParams, paths, stack } from "./env.ts";
 import { exec, must, say } from "./proc.ts";
 
 /** The engine, as something to run.
  *
- * `go run` is what this used to be everywhere, and it needs no build step —
- * but it is a wrapper around the process that matters: a signal sent to it is
- * not necessarily a signal to the engine, and a supervisor that stops the
- * wrapper can leave the engine behind. start-devnet.ts compiles once, so each
- * pane holds the engine itself; anything run on its own falls back to `go
- * run`. */
+ * In a container it is a binary on PATH, named by OP_CARTESI_BIN. On a host it
+ * is whatever `go build -o bin/` left behind, and failing that `go run` — a
+ * wrapper around the process that matters, which is fine for the steps that
+ * use it here (they run it to completion) and not for serving a chain. */
 export function opCartesi(): string[] {
     if (process.env.OP_CARTESI_BIN) return [process.env.OP_CARTESI_BIN];
     if (existsSync(paths.opCartesiBin)) return [paths.opCartesiBin];
     return ["go", "run", "./cmd/op-cartesi"];
-}
-
-export async function buildOpCartesi(): Promise<void> {
-    say("building op-cartesi");
-    mkdirSync(dirname(paths.opCartesiBin), { recursive: true });
-    await must(["go", "build", "-o", paths.opCartesiBin, "./cmd/op-cartesi"], { cwd: paths.repo });
-    process.env.OP_CARTESI_BIN = paths.opCartesiBin;
 }
 
 export interface MachineOptions {
@@ -136,12 +126,4 @@ export function runEngine(options: EngineOptions): Promise<never> {
         ],
         { cwd: paths.repo },
     );
-}
-
-/** A cartesi-jsonrpc-machine server, for the steps that need a machine
- * briefly rather than for the run's duration. */
-export function startMachineServer(port: number): Bun.Subprocess {
-    return Bun.spawn(["cartesi-jsonrpc-machine", `--server-address=127.0.0.1:${port}`], {
-        stdio: ["inherit", "inherit", "inherit"],
-    });
 }

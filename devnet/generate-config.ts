@@ -7,8 +7,11 @@
 // the engine for serving a different genesis block — which is why both come
 // from chainFlags() in lib/opcartesi.ts rather than from two lists.
 //
-// procs/genesis.ts is what normally runs this, with a machine server of its
-// own; on its own it needs MACHINE_REMOTE pointed at one.
+// The devnet does this in the `genesis` service (compose/genesis.ts), which
+// also anchors the rollup to L1 and records the flags for the engines. This is
+// the generator alone, for op-cartesi driven by hand: it needs MACHINE_REMOTE
+// pointed at a machine server, and takes the L1 anchor from whatever
+// devnet/*.env and the environment say.
 
 import { stack } from "./lib/env.ts";
 import { generateRollupConfig } from "./lib/opcartesi.ts";

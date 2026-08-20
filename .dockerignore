@@ -6,7 +6,6 @@
 **/dist
 demo/.cartesi
 devnet/snapshot
-devnet/logs
 devnet/deployment
 contracts/out
 contracts/cache

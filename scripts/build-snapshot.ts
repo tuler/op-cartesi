@@ -39,7 +39,4 @@ if (
 await must(["cartesi", "build"], { cwd: join(paths.repo, "demo") });
 
 console.error(`stored machine snapshot in ${stack.snapshotDir}`);
-console.error("run it with: cartesi-jsonrpc-machine --server-address=127.0.0.1:6000");
-console.error(
-    `then: MACHINE_REMOTE=http://127.0.0.1:6000 MACHINE_SNAPSHOT=${stack.snapshotDir} bun devnet/start-shim.ts`,
-);
+console.error("this is the chain's genesis state; bring the devnet up with: docker compose up");

@@ -3,25 +3,22 @@
 // work and exits, which everything downstream waits for with
 // `depends_on: {condition: service_completed_successfully}`.
 //
-// Same outputs as the mprocs pane (procs/genesis.ts) — the JWT secret,
-// devnet/chain-genesis.env, devnet/rollup.json — minus the waiting, which
-// compose does, and plus one file the pane has no use for:
+// Four outputs: the JWT secret, devnet/chain-genesis.env (the L1 anchor),
+// devnet/rollup.json (what op-node derives the chain from), and
 //
 //   devnet/chain-flags   the chain flags rollup.json was generated with.
 //
 // Those flags determine the L2 genesis block hash, so the engine has to run
 // with exactly the ones the config was generated with or op-node rejects it
-// for serving a different genesis. Under mprocs both sides call chainFlags()
-// in one process and the question does not arise; here they are two
-// containers, and this file is how the engine (compose/engine.sh) is told what
-// this step committed to.
+// for serving a different genesis. Generating and running are two containers,
+// and this file is how the second is told what the first committed to
+// (compose/engine.sh).
 //
 // The machine server is a container of its own too (`genesis-machine`), since
 // a server holds exactly one machine and the sequencer's is already holding
 // the chain's.
 
 import { existsSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { paths, readEnvFile } from "../lib/env.ts";
 import { anchorRollup } from "../lib/genesis.ts";
 import { chainFlags, ensureJwt, generateRollupConfig } from "../lib/opcartesi.ts";
@@ -31,7 +28,7 @@ import { alreadyDone, anchorStillOnL1 } from "./live.ts";
 const remote = process.env.MACHINE_REMOTE;
 if (!remote) die("MACHINE_REMOTE is unset — this step needs a machine server of its own");
 const snapshot = process.env.MACHINE_SNAPSHOT ?? "/snapshot";
-const flagsFile = process.env.CHAIN_FLAGS_FILE ?? join(paths.devnet, "chain-flags");
+const flagsFile = paths.chainFlags;
 
 // Already anchored, to the deployment that is on L1 now? Then this chain is
 // the running one and re-anchoring would only move it out from under the
@@ -50,13 +47,12 @@ if (
     alreadyDone(`the rollup is already anchored at L1 block ${anchored.L1_GENESIS_NUMBER}`);
 }
 
-// Otherwise this is a new chain, and a run starts from nothing.
-// start-devnet.ts clears these before it starts anything, which is a moment
-// compose does not have: its containers are the run. So it happens here, at
-// the step where the chain is born — every file below describes the chain
-// being replaced, and left in place it would describe it to the scripts of the
-// one replacing it. The L1 addresses are not in the list: the deploy this step
-// waited for has just written them.
+// Otherwise this is a new chain, and a new chain starts from nothing. There is
+// no moment before the run to clear anything in — the containers are the run —
+// so it happens here, at the step where the chain is born: every file below
+// describes the chain being replaced, and left in place it would describe it
+// to the scripts of the one replacing it. The L1 addresses are not in the
+// list: the deploy this step waited for has just written them.
 for (const file of [paths.outputsAddresses, paths.tokenEnv, paths.rollupConfig]) {
     forget(file);
 }
@@ -76,9 +72,9 @@ writeFileSync(flagsFile, `${chainFlags({ remote: "", snapshot: "" }).join(" ")}\
 say(`wrote ${flagsFile} — the flags the engines must run with`);
 
 // The generator is done with the machine, and a booted one is not cheap to
-// leave sitting around: procs/genesis.ts kills the server it spawned, and this
-// is the same act one container over. The server exits, its container exits
-// with it, and nothing downstream depends on it.
+// leave sitting around. Shutting the server down is how a step cleans up the
+// thing it needed: the server exits, its container exits with it, and nothing
+// downstream depends on it.
 try {
     await fetch(remote, {
         method: "POST",
