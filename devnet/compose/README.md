@@ -97,8 +97,10 @@ tools   bun + the repo + op-deployer + forge
 `node` runs the machine servers and the engines — one image for both, because
 an engine is only meaningful next to a machine server and the emulator's image
 is where a matching emulator comes from. `tools` runs the repo's own TypeScript
-deploy steps unchanged: `deploy-l1.ts`, `compose/genesis.ts`,
-`deploy-outputs.ts`, `guest-log.ts` are the same files the mprocs panes run.
+deploy steps: `deploy-l1.ts`, `deploy-outputs.ts` and `guest-log.ts` are the
+same files the mprocs panes run, and `compose/l1-contracts.ts` and
+`compose/genesis.ts` are the two thin steps that call them without the waiting
+and ask the question of the last section.
 curl is in `node` because a healthcheck runs inside the container it checks, so
 the container has to carry the client — which is also why op-node and
 op-batcher have no healthcheck: their published images carry no shell at all.
@@ -147,11 +149,22 @@ docker compose restart op-node        # one piece, like `r` on a pane
 docker compose down -v                # stop everything and forget it
 ```
 
-A run starts from nothing, and here that is your `down -v` rather than
-something the bring-up does for you: `docker compose up` a second time over a
-running anvil redeploys the L1 suite and re-anchors the rollup under an engine
-that is already serving the old one. `down -v` between runs; the `-v` is the
-chain stores.
+`docker compose up` a second time is a no-op, which is what compose leads you
+to expect and what makes adding a service to a running stack safe. The two
+steps that produce the chain ask L1 whether their own output is still true —
+is the recorded OptimismPortal still code, is the anchored block still that
+hash — and stand aside when it is. When the answer is no, which is what a
+restarted anvil looks like, they redeploy and re-anchor, and the anchor step
+first clears what described the chain being replaced: `rollup.json`,
+`outputs-addresses.env`, `token.env`. That clearing is `start-devnet.ts`'s
+"a run starts from nothing", moved to the only moment compose has for it.
+
+Left over from a chain that no longer exists, those files do not merely go
+stale — `chain-genesis.env` sits *above* `l1-addresses.env` in `lib/env.ts`'s
+layering, so an old one shadows the anchor a fresh deploy just recorded, and
+the step reports a reorg against a deployment it never saw. That was this
+bring-up's first real bug, and it is why the anchor step no longer reads its
+own last output.
 
 Persistence works the way it does under mprocs, with one wrinkle: the engine
 keeps the blocks and the machine server writes the checkpoints, so a node's

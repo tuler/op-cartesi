@@ -49,7 +49,13 @@ export const paths = {
     state: process.env.STATE_DIR ?? join(DEVNET_DIR, ".state"),
 } as const;
 
-function parseEnvFile(path: string): Record<string, string> {
+/** One `KEY=value` file, as a map. Missing is empty, which is what a file a
+ * deploy has not written yet has to look like.
+ *
+ * Exported because the layering below is the right way to *read* a value and
+ * the wrong way to ask which file it came from: a bring-up deciding whether a
+ * step has already run needs to compare two files, not their merge. */
+export function readEnvFile(path: string): Record<string, string> {
     if (!existsSync(path)) return {};
     const vars: Record<string, string> = {};
     for (const line of readFileSync(path, "utf8").split("\n")) {
@@ -63,7 +69,7 @@ function parseEnvFile(path: string): Record<string, string> {
 // these scripts are invoked from panes with their own cwd. Loading the repo
 // root's explicitly makes overrides work wherever a script is run from —
 // below real environment variables, which is the precedence bun itself uses.
-for (const [key, value] of Object.entries(parseEnvFile(join(REPO_DIR, ".env")))) {
+for (const [key, value] of Object.entries(readEnvFile(join(REPO_DIR, ".env")))) {
     if (process.env[key] === undefined) process.env[key] = value;
 }
 
@@ -71,10 +77,10 @@ for (const [key, value] of Object.entries(parseEnvFile(join(REPO_DIR, ".env"))))
  * the order the deploys happen in. */
 function deploymentVars(): Record<string, string> {
     return {
-        ...parseEnvFile(paths.l1Addresses),
-        ...parseEnvFile(paths.chainGenesis),
-        ...parseEnvFile(paths.outputsAddresses),
-        ...parseEnvFile(paths.tokenEnv),
+        ...readEnvFile(paths.l1Addresses),
+        ...readEnvFile(paths.chainGenesis),
+        ...readEnvFile(paths.outputsAddresses),
+        ...readEnvFile(paths.tokenEnv),
     };
 }
 

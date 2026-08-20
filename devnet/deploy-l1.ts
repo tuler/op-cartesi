@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { parseAbi } from "viem";
 import { addresses, chainParams, config, paths, stack } from "./lib/env.ts";
 import { MULTICALL3_ADDRESS, MULTICALL3_CODE } from "./lib/multicall3.ts";
-import { die, must, run, say } from "./lib/proc.ts";
+import { die, forget, must, run, say } from "./lib/proc.ts";
 import { l1Public } from "./lib/wallet.ts";
 
 const systemConfigAbi = parseAbi(["function scalar() view returns (uint256)"]);
@@ -97,6 +97,11 @@ function decodeScalar(scalar: bigint): { base: bigint; blob: bigint } {
 }
 
 export async function deployL1(): Promise<void> {
+    // Whatever a previous deployment recorded is stale from here on, and it is
+    // read back through lib/env.ts by everything downstream — including, one
+    // step later, the anchor. Forgetting it first is the deploy's own business
+    // rather than its caller's, since either bring-up can start it.
+    forget(paths.l1Addresses);
     const p = chainParams();
     const a = addresses();
     const l1 = l1Public();
