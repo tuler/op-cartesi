@@ -76,13 +76,16 @@ func (c Config) encodeExtraData(timestamp, denominator, elasticity uint64) []byt
 // buildHeader assembles the header for a new block. Field choices follow the
 // OP Stack Isthmus shape: no uncles, empty withdrawals list, zero blob gas,
 // parentBeaconRoot from the payload attributes, and the withdrawals root set
-// directly to this chain's outputs Merkle root rather than derived from a
-// withdrawals list. They must match op-node's
+// directly to the withdrawal trie's root (passertrie.go — the message passer
+// storage trie, which carries the Cartesi outputs root at its reserved slot)
+// rather than derived from a withdrawals list. They must match op-node's
 // ExecutionPayloadEnvelope.CheckBlockHash exactly, since op-node recomputes
 // the block hash from the payload it receives — including the empty requests
 // hash it pairs with a directly-set withdrawals root.
-func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoot common.Hash, txs [][]byte, gasUsed, gasLimit uint64, baseFee *big.Int, extra []byte, outputsRoot common.Hash) *types.Header {
-	withdrawalsHash := outputsRoot
+//
+// The field-by-field rules are docs/BLOCKS-SPEC.md §12.
+func buildHeader(parent *types.Header, attrs *engine.PayloadAttributes, stateRoot common.Hash, txs [][]byte, gasUsed, gasLimit uint64, baseFee *big.Int, extra []byte, passerRoot common.Hash) *types.Header {
+	withdrawalsHash := passerRoot
 	requestsHash := types.EmptyRequestsHash
 	blobGasUsed := uint64(0)
 	excessBlobGas := uint64(0)

@@ -141,8 +141,8 @@ Only these versions are served, for the reason in [Fork support](#fork-support).
 |---|---|
 | `cmd/op-cartesi` | CLI: wires the machine, chain, and the two RPC listeners together. |
 | `machine` | `Machine` interface (advance-input / inspect / root-hash / fork / close), a deterministic in-memory mock for development and tests, and a client for the emulator's `cartesi-jsonrpc-machine` remote protocol. The node never boots a machine: a snapshot arrives already parked at its first input yield, so genesis is the snapshot's own root hash. |
-| `chain` | Block store and its durable half (`rawdb` over pebble, plus machine checkpoints), genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning, and the per-transaction record of machine emissions. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
-| `engineapi` | `engine_*`, `eth_*` and `cartesi_*` JSON-RPC services, Engine API JWT authentication, HTTP handler assembly. |
+| `chain` | ([BLOCKS-SPEC.md](docs/BLOCKS-SPEC.md)) Block store and its durable half (`rawdb` over pebble, plus machine checkpoints), genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning, and the per-transaction record of machine emissions. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
+| `engineapi` | ([ENGINE-RPC-SPEC.md](docs/ENGINE-RPC-SPEC.md)) `engine_*`, `eth_*` and `cartesi_*` JSON-RPC services, Engine API JWT authentication, HTTP handler assembly. |
 | `mempool` | Bounded FIFO transaction ingress (the OP Stack has no public L2 mempool; the sequencer's RPC is the only entry point). |
 | `rollup` | Generates the `rollup.json` document op-node reads. |
 | `integration` | Separate Go module: compatibility tests driving the shim with op-node's wire types. Kept out of the main module so the shim itself depends only on op-geth. |
@@ -225,6 +225,7 @@ These do not change the trust model, which is why they sit outside the numbered 
 | Document | What it covers |
 |---|---|
 | [docs/DESIGN.md](docs/DESIGN.md) | The architecture: the shim, the commitments, bridging, persistence, and what settlement requires. |
+| [docs/BLOCKS-SPEC.md](docs/BLOCKS-SPEC.md) · [ENGINE-RPC-SPEC.md](docs/ENGINE-RPC-SPEC.md) | The normative pair: what a node computes — parameters, the input envelope, the state transition, the header and its two commitments — and what it serves over JSON-RPC. Written for a second implementation, and for a settlement scheme that has to dispute a definition rather than a codebase. |
 | [docs/RAAS.md](docs/RAAS.md) | What it would take to launch chains from a customer's machine snapshot on Sepolia or mainnet: the components, and the gaps a hosted service forces open. |
 | [docs/EVM-COMPAT.md](docs/EVM-COMPAT.md) | How the guest speaks EVM at the ABI boundary — `to`-address routing to native handlers, ERC-20 façades, events, `eth_call`. |
 | [docs/ACCOUNTS.md](docs/ACCOUNTS.md) · [ACCOUNTS-DRIVE-SPEC.md](docs/ACCOUNTS-DRIVE-SPEC.md) | The guest's account model, and the byte-level drive format the host reads balances and nonces out of. |
