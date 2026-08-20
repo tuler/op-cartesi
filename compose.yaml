@@ -79,10 +79,11 @@ services:
 
   # The OP Stack L1 suite, with op-deployer. Runs once and exits; everything
   # downstream waits for it, because the rollup has to be anchored at a block
-  # where the SystemConfig already exists.
+  # where the SystemConfig already exists. Running `up` again does not redeploy
+  # it: the step asks L1 whether the deployment it recorded is still there.
   l1-contracts:
     <<: *tools
-    command: ["bun", "devnet/deploy-l1.ts"]
+    command: ["bun", "devnet/compose/l1-contracts.ts"]
     depends_on:
       l1:
         condition: service_healthy

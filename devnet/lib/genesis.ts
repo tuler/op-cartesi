@@ -13,12 +13,22 @@
 
 import { writeFileSync } from "node:fs";
 import { chainParams, paths, stack } from "./env.ts";
-import { die, say } from "./proc.ts";
+import { die, forget, say } from "./proc.ts";
 import { l1Public } from "./wallet.ts";
 
 /** Reads the L1 anchor block and writes devnet/chain-genesis.env. */
 export async function anchorRollup(): Promise<void> {
     const l1 = l1Public();
+    // The file this step writes is one lib/env.ts reads back, and it sits
+    // *above* l1-addresses.env in that layering — so a copy left by a previous
+    // run shadows the anchor the deploy just recorded, and the block it names
+    // belongs to an L1 that no longer exists. What that looks like is this
+    // step reporting a reorg against a deployment it never saw. The step is
+    // the file's only writer, so the fix is not to read its own last output:
+    // start-devnet.ts already clears it before a run, and now the anchor does
+    // too, which is what the compose bring-up needs since compose has no
+    // moment before the run to clear anything in.
+    forget(paths.chainGenesis);
     // With contracts, the anchor is the block they landed in, which the deploy
     // recorded; without them there is nothing to anchor to but L1 genesis.
     const recorded = stack.withContracts ? chainParams() : undefined;

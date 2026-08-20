@@ -8,16 +8,15 @@
 // downstream waits for genesis.
 
 import { deployL1 } from "../deploy-l1.ts";
-import { paths, stack } from "../lib/env.ts";
-import { clearReady, forget, markReady, procInit, say, waitForPort } from "../lib/proc.ts";
+import { stack } from "../lib/env.ts";
+import { clearReady, markReady, procInit, say, waitForPort } from "../lib/proc.ts";
 
 procInit("l1-contracts");
 clearReady("l1-contracts");
 await waitForPort(stack.l1Port, "anvil");
 
 // A fresh anvil forgets every deployment, so anything recorded by a previous
-// run is stale the moment it boots.
-forget(paths.l1Addresses);
+// run is stale the moment it boots — which deployL1 clears for itself.
 await deployL1();
 markReady("l1-contracts");
 
