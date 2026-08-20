@@ -36,8 +36,9 @@ cd .. && cartesi build   # @cartesi/cli 2.0 alpha → snapshot in .cartesi/image
 
 The machine build is driven from the repo root, not from here:
 [`cartesi.toml`](../cartesi.toml) lives there because the docker context has to
-be the whole workspace anyway, and `dockerfile = "demo/Dockerfile"` points it
-back at this directory.
+be the whole workspace anyway — which the CLI already defaults to, so the root
+drive says only `dockerfile = "demo/Dockerfile"`, pointing back at this
+directory.
 
 The runtime's tests live with the runtime (`app`, `abi-drive/js`):
 `bun run test` at the repo root runs them all.
@@ -45,12 +46,25 @@ The runtime's tests live with the runtime (`app`, `abi-drive/js`):
 That `cartesi.toml` declares three drives: root, the accounts drive (raw, 1 MiB)
 and the abi drive (raw, 256 KiB) — both unmounted, formatted by the
 application at first boot before the first yield, and handed to the app user
-with `user = "dapp"` (cartesi-init runs the entrypoint unprivileged). It also
-pins `machine.ram_image` to a machine-emulator-0.21.0-compatible kernel
+with `user = "dapp"` (cartesi-init runs the entrypoint unprivileged). Their
+sizes are powers of two so each is one aligned subtree of the machine's hash
+tree, and because the guest formats them before that first yield, their headers
+are inside the stored snapshot and the genesis state root covers them. The CLI
+places them itself, where the spec recommends 2^55; the shim finds the drive by
+its label through the machine config
+([ACCOUNTS.md §5.1](../docs/ACCOUNTS.md)), so auto-placement is fine.
+
+It also pins `machine.ram_image` to a machine-emulator-0.21.0-compatible kernel
 installed on the host (the macOS homebrew path; adjust for your OS) until
-the CLI's sdk ships one. Genesis parameters (`CHAIN_ID`, `OWNER`) are
-Dockerfile `ENV`, which `cartesi build` passes into the machine; defaults
-match `devnet/lib/env.ts`.
+the CLI's sdk ships one.
+
+Genesis parameters (`CHAIN_ID`, `OWNER`) are Dockerfile `ARG`s baked into the
+image environment, which `cartesi build` passes into the machine — so they too
+are covered by the genesis state root, and invisible from outside the snapshot.
+The defaults match `devnet/lib/env.ts` (chain 901, anvil account 3). To
+deviate, set `build_args` on `[drives.root]` *and* the matching variables for
+the devnet, or the snapshot will disagree with the chain flags the engine runs
+with.
 
 `@cartesi/rollup` is not a dependency of this app: it belongs to
 [`@op-cartesi/app`](../app), which is what actually drives the CMIO loop.

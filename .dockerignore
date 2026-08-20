@@ -1,7 +1,7 @@
-# The repo root is the docker build context of the guest's snapshot build
-# (cartesi.toml, at the root, sets context = "." so the bun workspace resolves
-# inside the build) and of the devnet's own images. Keep the context down to
-# what those builds read.
+# The repo root is the docker build context of the guest's snapshot build (the
+# CLI's default, and the reason cartesi.toml is at the root: the bun workspace
+# has to resolve inside the build) and of the devnet's own images. Keep the
+# context down to what those builds read.
 .git
 **/node_modules
 **/dist
