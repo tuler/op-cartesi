@@ -1,36 +1,5 @@
-# Machine configuration for `cartesi build` (@cartesi/cli 2.0 alpha).
-#
-#   cartesi build
-#
-# It lives at the repo root rather than next to the guest because the docker
-# context has to be the repo root anyway: the guest is a bun workspace member
-# and its @op-cartesi/accounts dependency lives in accounts-drive/js, outside
-# demo/ and inside the context. With the file here, the context is simply "."
-# and the command is simply `cartesi build` — and the snapshot lands in
-# .cartesi/image, which is the chain's genesis state (devnet/README.md).
-#
-# The accounts drive (docs/ACCOUNTS-DRIVE-SPEC.md) and the abi drive
-# (docs/ABI-DRIVE-SPEC.md) are raw, zero-filled, never mounted — the guest
-# formats both at boot, before the first yield, so their headers land inside
-# the stored snapshot and the genesis state root covers them. Sizes are
-# powers of two, so each drive is a single aligned subtree of the machine's
-# hash tree.
-#
-# Note the CLI auto-places drives (no `start:` control), where the spec
-# recommends 2^55. The shim discovers the drive by its label via the machine
-# config (ACCOUNTS.md §5.1), so auto-placement works; pinning the start in the
-# CLI is a wanted upstream knob.
-#
-# CHAIN_ID and OWNER are consensus parameters: they are Dockerfile ARGs whose
-# defaults (chain 901, anvil account 3) match devnet/lib/env.ts, they are baked
-# into the image environment, and `cartesi build` passes that environment into
-# the machine — so they are covered by the genesis state root. To deviate, set
-# build_args on [drives.root] here *and* the matching variables for the devnet,
-# or the snapshot will disagree with the chain flags.
-#
-# `user` hands the raw device node to the entrypoint's user: cartesi-init
-# runs the app unprivileged (dapp), and an unmounted pmem device is
-# otherwise root-only — the app's direct open would die with EACCES.
+# The machine this chain runs on: `cartesi build`, here at the repo root.
+# What the drives are and why, in demo/README.md.
 
 [drives.accounts]
 builder = "empty"
@@ -46,16 +15,12 @@ size = 262144
 mount = false
 user = "dapp"
 
+# Defaults otherwise: the docker builder, with the repo root as its context.
 [drives.root]
-builder = "docker"
-context = "."
-# Resolved against the working directory, not against the context, which is
-# how the guest keeps its Dockerfile next to its source.
 dockerfile = "demo/Dockerfile"
 
-# machine-emulator 0.21.0 needs a matching kernel, and the CLI's bundled sdk
-# does not carry one yet, so point ram_image at a locally installed
-# compatible linux.bin. This is the macOS homebrew location; on linux the
-# emulator's images usually live at /usr/share/cartesi-machine/images/.
+# machine-emulator 0.21.0 needs a matching kernel and the CLI's sdk carries
+# none yet. This is the macOS homebrew location; on linux the emulator's own
+# images usually live in /usr/share/cartesi-machine/images/.
 [machine]
 ram_image = "/opt/homebrew/etc/cartesi/images/linux.bin"
