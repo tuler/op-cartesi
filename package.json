@@ -20,7 +20,6 @@
         "check:fix": "biome check --write",
         "format": "biome format --write",
         "lint": "biome lint",
-        "snapshot": "bun scripts/build-snapshot.ts",
         "test": "bun run --filter '*' test",
         "typecheck": "bun run --filter '*' typecheck"
     },

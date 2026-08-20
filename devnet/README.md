@@ -15,9 +15,14 @@ compose file is the bring-up.
 ## Quick start: the whole stack on anvil
 
 ```sh
-./scripts/build-snapshot.ts    # once — `cartesi build` of demo (see that script)
-docker compose up
+cartesi build          # once — the guest snapshot, the chain's genesis state
+docker compose up      # the stack
 ```
+
+Two prerequisites: docker, and [@cartesi/cli](https://github.com/cartesi/cli)
+2.0 alpha for that first command (`npm i -g @cartesi/cli@alpha`). The build is
+driven by [`cartesi.toml`](../cartesi.toml) at the repo root and stores the
+machine under `.cartesi/image`.
 
 anvil as L1, the OP Stack L1 suite deployed with op-deployer, a Cartesi
 Machine, op-cartesi as the execution engine, op-node sequencing on top, a
@@ -109,9 +114,8 @@ reach from a laptop are published — to loopback.
 
 The guest is [`demo`](../demo/README.md) — the routed guest of
 [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md), TypeScript on `@cartesi/rollup`, its
-ledger on the accounts drive. `build-snapshot.ts` wraps `cartesi build`, which
-stores the booted machine under `demo/.cartesi/image`; that directory is the
-chain's genesis state.
+ledger on the accounts drive. `cartesi build` stores the booted machine under
+`.cartesi/image`; that directory is the chain's genesis state.
 
 op-node then drives block production: every L2 block carries the L1-attributes
 deposit it injects, that deposit is wrapped in an `EvmAdvance` envelope and fed
@@ -349,7 +353,7 @@ predeploy, `balance.ts` reads the drive
 and the ERC-20 façades, `contracts.ts` asks `cartesi_getContracts` what the
 guest routes — every recorded contract with its ABI, every token façade with
 its L1 token, straight off the machine's drives — and the guest they address
-is the one `build-snapshot.ts` builds — the routed guest
+is the one `cartesi build` builds — the routed guest
 ([demo](../demo/README.md), [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md)).
 Nothing here speaks a private dialect anymore; an app that wants one still
 can, through `cartesi_inspect` and `send-l2-tx.ts` with raw payloads.
@@ -508,8 +512,8 @@ rule expressed as compose says it.
 
 ## The snapshot is stored already booted
 
-`build-snapshot.ts` stores the machine where `cartesi-machine --store` leaves
-it: booted, and parked at its first input yield. This is how Cartesi Rollups
+`cartesi build` stores the machine where `cartesi-machine --store` leaves it:
+booted, and parked at its first input yield. This is how Cartesi Rollups
 distributes templates, and op-cartesi requires it — it refuses a machine stored
 at mcycle 0 rather than booting one itself:
 

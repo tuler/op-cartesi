@@ -7,9 +7,9 @@ it routes, send a raw L2 transaction — plus the one script that builds the
 guest they all address.
 
 ```sh
-bun install                    # once, at the repo root (bun workspace)
-./scripts/build-snapshot.ts    # once — `cartesi build` of demo/
-docker compose up              # in another terminal — the devnet
+bun install            # once, at the repo root (bun workspace)
+cartesi build          # once — the guest snapshot (@cartesi/cli)
+docker compose up      # in another terminal — the devnet
 ```
 
 | | |
@@ -22,7 +22,6 @@ docker compose up              # in another terminal — the devnet
 | `balance.ts <address> [l1-token]` | What the guest's ledger says — the accounts drive, or an ERC-20 façade |
 | `contracts.ts` | `cartesi_getContracts`: every address the guest routes, with its ABI |
 | `send-l2-tx.ts <to> [calldata] [value-wei]` | One signed L2 transaction, for payloads nothing else covers |
-| `build-snapshot.ts` | `cartesi build` of [`demo/`](../demo/README.md) — the stored machine that is the chain's genesis state |
 | `lib/portal.ts` | The L1 half of every OP-path withdrawal, on viem's op-stack actions: `waitToProve`, `buildProveWithdrawal`, `proveWithdrawal`, `finalizeWithdrawal` — plus the devnet-only time skipping and game resolving that stands in for `waitToFinalize` |
 | `lib/voucher.ts` | The second half of a voucher withdrawal: wait for a proposal, open its root claim, prove the output against it |
 | `lib/l2.ts` | Sending an L2 transaction the way a wallet would — viem fills the nonce and the fees, and signs EIP-1559 |

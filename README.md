@@ -40,6 +40,23 @@ Reports are not logs, because a log implies provability. They are served through
 
 ## Running it
 
+Two prerequisites for a devnet, and two more for working on the repository:
+
+| | | for |
+|---|---|---|
+| **docker** | with compose v2 (`docker compose`) | the devnet — every piece runs as a service |
+| **`cartesi`** | [@cartesi/cli](https://github.com/cartesi/cli) 2.0 alpha: `npm i -g @cartesi/cli@alpha` | building the guest snapshot, once |
+| bun | 1.3+ | the client scripts, the guest's tests, the type checks |
+| go | 1.25+ | building and testing op-cartesi outside a container |
+
+The snapshot is the chain's genesis state, so it comes first — one command, at
+the repo root, where [`cartesi.toml`](cartesi.toml) is:
+
+```sh
+cartesi build          # the guest of demo/, stored booted in .cartesi/image
+docker compose up      # the whole stack
+```
+
 `docker compose up` brings up the whole stack: anvil as L1, the OP Stack L1 suite deployed with `op-deployer`, a Cartesi Machine, op-cartesi, op-node in sequencer mode, op-batcher and op-proposer — plus a **second node** with its own machine, engine and op-node that sequences nothing and rebuilds the chain purely from what the batcher posted to L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
 
 Each piece is a compose service — including the machine's console and the guest's own per-transaction reports — so the stack is one dependency graph you can bring up in part, watch, and restart a piece at a time. Docker and a machine snapshot are all it needs on your machine: no bun, no go, no foundry, no op-deployer. Client scripts drive it from the host: `bun scripts/deposit.ts <address> <wei>`, `bun scripts/withdraw.ts <address> <wei>`, and the ERC-20 pair. See **[devnet/README.md](devnet/README.md)**.
@@ -53,12 +70,12 @@ Compatibility is checked against **op-node's own types** rather than hand-writte
 The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client is pinned to machine-emulator 0.21.0 by probing a running server, and `chain` and `machine` carry tests that load a real machine, build blocks on it, re-execute them as a verifier, and check that the outputs commitment the host computes is byte-identical to the one the guest maintains. They are skipped unless a snapshot is supplied:
 
 ```sh
-./scripts/build-snapshot.ts
-OP_CARTESI_TEST_SNAPSHOT=./demo/.cartesi/image \
-OP_CARTESI_TEST_LEDGER_SNAPSHOT=./demo/.cartesi/image go test ./...
+cartesi build
+OP_CARTESI_TEST_SNAPSHOT=./.cartesi/image \
+OP_CARTESI_TEST_LEDGER_SNAPSHOT=./.cartesi/image go test ./...
 ```
 
-The second variable turns on the deposit and token tests, which need a guest that means something by its inputs rather than merely consuming them — the routed guest of [`demo`](demo/README.md), which is what the snapshot script builds.
+The second variable turns on the deposit and token tests, which need a guest that means something by its inputs rather than merely consuming them — the routed guest of [`demo`](demo/README.md), which is what `cartesi build` builds.
 
 The withdrawal trie and the cross-domain encodings are pinned in three directions: Go against the guest's TypeScript encoders, Go against geth's own trie verifier, and Go against the vendored Solidity — Optimism's real `SecureMerkleTrie`, `Encoding` and `Hashing`, so the bytes are judged by the exact code that will judge them on L1.
 
