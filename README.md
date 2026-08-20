@@ -40,11 +40,11 @@ Reports are not logs, because a log implies provability. They are served through
 
 ## Running it
 
-`./devnet/start-devnet.ts` brings up the whole stack: anvil as L1, the OP Stack L1 suite deployed with `op-deployer`, a Cartesi Machine, op-cartesi, op-node in sequencer mode, op-batcher and op-proposer — plus a **second node** with its own machine, engine and op-node that sequences nothing and rebuilds the chain purely from what the batcher posted to L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
+`docker compose up` brings up the whole stack: anvil as L1, the OP Stack L1 suite deployed with `op-deployer`, a Cartesi Machine, op-cartesi, op-node in sequencer mode, op-batcher and op-proposer — plus a **second node** with its own machine, engine and op-node that sequences nothing and rebuilds the chain purely from what the batcher posted to L1. It reaches byte-identical blocks: same hash, same machine root, same outputs commitment. That is the property that makes this a rollup rather than a database with an RPC.
 
-Each piece runs in its own [mprocs](https://github.com/pvolok/mprocs) pane — including the machine's console and the guest's own per-transaction reports — so the whole stack is one screen you can watch, stop and restart a piece at a time. Client scripts drive it: `bun scripts/deposit.ts <address> <wei>`, `bun scripts/withdraw.ts <address> <wei>`, and the ERC-20 pair. See **[devnet/README.md](devnet/README.md)**.
+Each piece is a compose service — including the machine's console and the guest's own per-transaction reports — so the stack is one dependency graph you can bring up in part, watch, and restart a piece at a time. Docker and a machine snapshot are all it needs on your machine: no bun, no go, no foundry, no op-deployer. Client scripts drive it from the host: `bun scripts/deposit.ts <address> <wei>`, `bun scripts/withdraw.ts <address> <wei>`, and the ERC-20 pair. See **[devnet/README.md](devnet/README.md)**.
 
-The stack has been run against the **official released images** — op-node v1.19.3 and op-batcher v1.16.11 — as well as against locally built binaries. The OP monorepo ships no binaries of its own, so `./devnet/start-devnet.ts` falls back to docker when they are not on your `PATH`; nothing needs compiling but op-cartesi itself.
+The stack runs the **official released images** — op-node v1.19.3, op-batcher v1.16.11, op-proposer v1.16.3 — pinned in `compose.yaml`. The OP monorepo ships no binaries of its own, so its images are the distribution; nothing needs compiling but op-cartesi itself, which the compose build does.
 
 ## Verification
 
@@ -129,7 +129,7 @@ Only these versions are served, for the reason in [Fork support](#fork-support).
 | `mempool` | Bounded FIFO transaction ingress (the OP Stack has no public L2 mempool; the sequencer's RPC is the only entry point). |
 | `rollup` | Generates the `rollup.json` document op-node reads. |
 | `integration` | Separate Go module: compatibility tests driving the shim with op-node's wire types. Kept out of the main module so the shim itself depends only on op-geth. |
-| `devnet` | Brings the devnet up: anvil, the OP Stack L1 suite, the machine, the shim and op-node, one mprocs pane each. |
+| `devnet` | Brings the devnet up: anvil, the OP Stack L1 suite, the machine, the shim and op-node, one docker compose service each — plus the deploy steps and the configuration everything else reads. |
 | `scripts` | Client scripts for a running devnet — deposits, withdrawals, balances — and the machine snapshot they run against. |
 
 ## Development

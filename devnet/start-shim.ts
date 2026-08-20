@@ -4,10 +4,12 @@
 //
 //   bun devnet/start-shim.ts
 //
-// procs/engine.ts is what normally runs this — as a function call rather than
-// a subprocess — after waiting for the rollup config and the machine server.
-// This is the same engine started on its own, on whatever MACHINE_REMOTE and
-// ENGINE_ADDR/HTTP_ADDR say.
+// This is op-cartesi on its own, not a devnet: no L1, no contracts, no
+// op-node. The devnet is `docker compose up`, where the engine is a service
+// with a machine server and a rollup config behind it. Here it is one process
+// on whatever MACHINE_REMOTE and ENGINE_ADDR/HTTP_ADDR say — with no machine
+// server, the in-memory mock — which is enough to drive the Engine API by hand
+// and explore the RPC surface.
 
 import { stack } from "./lib/env.ts";
 import { ensureJwt, runEngine } from "./lib/opcartesi.ts";

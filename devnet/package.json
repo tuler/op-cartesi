@@ -2,7 +2,7 @@
     "name": "devnet",
     "version": "0.0.0",
     "private": true,
-    "description": "Launches the devnet: anvil, the OP Stack L1 suite, op-cartesi and op-node, one mprocs pane each",
+    "description": "The devnet: anvil, the OP Stack L1 suite, op-cartesi and op-node, one docker compose service each",
     "type": "module",
     "exports": {
         "./env": "./lib/env.ts",
@@ -16,7 +16,6 @@
     },
     "devDependencies": {
         "@types/bun": "^1.3.5",
-        "mprocs": "^0.9.6",
         "typescript": "^7.0.2"
     },
     "scripts": {

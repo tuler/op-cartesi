@@ -39,7 +39,7 @@ export async function deployOutputs(): Promise<void> {
     const a = addresses();
     const optimismPortal = chainParams().depositContractAddress;
     if (!a.disputeGameFactory) {
-        die("no DisputeGameFactory; run the devnet with WITH_CONTRACTS=1 first");
+        die("no DisputeGameFactory; bring the devnet up first (`docker compose up`)");
     }
     if (Bun.which("forge") === null) {
         die("forge is not on PATH; install foundry (https://getfoundry.sh)");

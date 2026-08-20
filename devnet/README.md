@@ -7,97 +7,105 @@ Running op-cartesi as a real OP Stack L2 needs four pieces:
 3. **op-cartesi** — the execution engine, serving the Engine API.
 4. **op-node** — in sequencer mode, pointed at the L1 and at op-cartesi.
 
-Steps 1 and 2 are ordinary OP Stack chain-bringup and are not automated here: `op-deployer` needs a funded L1 deployer key and produces the addresses that go into `rollup.json`. What *is* automated is step 3 and the configuration that ties it to step 4, which is where op-cartesi differs from an op-geth chain.
-
-You do not need to build op-node or op-batcher: `start-devnet.ts` will run the official docker images if the binaries are not on your `PATH`. See [below](#where-op-node-and-op-batcher-come-from).
+All four are automated here, as a docker compose stack: `docker compose up` at
+the repo root puts up the whole chain, and the only things it needs on your
+machine are docker and a machine snapshot. There is no second way in — the
+compose file is the bring-up.
 
 ## Quick start: the whole stack on anvil
 
-`start-devnet.ts` brings up anvil as L1, a Cartesi Machine, op-cartesi as the
-execution engine, and op-node sequencing on top:
-
 ```sh
-bun install                    # once, at the repo root (bun workspace)
 ./scripts/build-snapshot.ts    # once — `cartesi build` of demo (see that script)
-./devnet/start-devnet.ts
-```
-
-Every piece runs in a pane of its own under
-[mprocs](https://github.com/pvolok/mprocs), which `bun install` provides:
-
-```
-info              op-cartesi devnet
-l1                =================
-l1-contracts
-genesis             L1 (anvil)        http://127.0.0.1:8600        chain 900
-machine             L2 (op-cartesi)   http://127.0.0.1:8545        chain 901
-engine              op-node           http://127.0.0.1:9545
-guest               op-batcher        http://127.0.0.1:8548
-op-node             op-proposer       http://127.0.0.1:8560
-op-batcher          verifier L2       http://127.0.0.1:8565
-op-proposer         verifier op-node  http://127.0.0.1:9555
-verifier-machine
-verifier-engine   panes
-verifier-node     -----
-outputs             machine   the emulator's console: Linux booting, then …
-```
-
-Up and down pick a pane, `s` starts one, `x` stops it, `r` restarts it, `q`
-quits and stops everything. Every pane is also written to
-`devnet/logs/<pane>.log`, so `grep` still works.
-
-Three of the panes are not long-running processes but steps that finish and
-stay down: `l1-contracts` (op-deployer), `genesis` (the rollup config), and
-`outputs`, which does not start on its own at all — see
-[below](#how-the-bring-up-is-organized).
-
-### Or the same stack under docker compose
-
-There is a second bring-up in the repository, being tried out against this one:
-[`compose.yaml`](../compose.yaml) at the repo root, described in
-[compose/README.md](compose/README.md). Same stack, same deploy scripts, same
-ports — the ordering is `depends_on` and the readiness is a healthcheck instead
-of the port waits and marker files below, and the whole toolchain is in two
-images, so the host needs only docker and a snapshot.
-
-```sh
 docker compose up
 ```
 
-### Where op-node and op-batcher come from
+anvil as L1, the OP Stack L1 suite deployed with op-deployer, a Cartesi
+Machine, op-cartesi as the execution engine, op-node sequencing on top, a
+batcher, a proposer, and a second node verifying from L1 alone — one service
+each:
 
-The OP monorepo publishes **no binaries** — its releases carry source archives
-only — so unless you want to compile Go, docker is the official way to get
-them. `start-devnet.ts` uses whichever is available:
-
-| `OP_RUNTIME` | Behaviour |
-|---|---|
-| `auto` (default) | binaries on `PATH` if both are there, otherwise docker |
-| `native` | `op-node` and `op-batcher` from `PATH` |
-| `docker` | the images below, pulled on first use |
-
-```sh
-OP_RUNTIME=docker ./devnet/start-devnet.ts
+```
+l1               anvil            :8600     L1, chain 900
+l1-contracts     op-deployer                runs once, exits
+genesis-machine  the emulator               a machine server for the step below
+genesis          the rollup config          runs once, exits
+machine          the emulator     :6300     the guest's console
+engine           op-cartesi       :8545     the L2 RPC, :8551 the Engine API
+op-node          op-node          :9545     sequencing
+op-batcher       op-batcher       :8548     posting to L1 as calldata
+op-proposer      op-proposer      :8560     a game per proposal
+verifier-*       the second node  :8565     deriving from L1 alone, :9555 its node
+outputs          deploy-outputs.ts          manual
+guest            guest-log.ts               manual
 ```
 
-The images are pinned in `lib/env.ts` and versioned independently upstream, so the
-tags do not match:
+Nothing else is needed on the host: no bun, no go, no foundry, no op-deployer.
+The two images this builds carry them, and everything else is an image someone
+else publishes.
+
+Two services do not start with the stack, because each is a step you take
+rather than a process that runs:
+
+```sh
+docker compose run --rm outputs    # the outputs suite, once a proposal exists
+docker compose run --rm guest      # what the guest says about each transaction
+```
+
+Naming a service brings up that service and what it depends on, which is how
+you run less than everything:
+
+```sh
+docker compose up op-node        # sequencer only: no batcher, no proposer, no verifier
+docker compose up op-batcher     # ...and the batcher
+```
+
+The one thing you cannot ask for is a chain without L1 contracts. The compose
+file describes one topology, and in it the rollup is always anchored at a block
+where the SystemConfig exists.
+
+```sh
+docker compose logs -f machine        # the emulator's console: Linux, then the guest
+docker compose logs -f engine op-node # or several at once
+docker compose restart op-node        # one piece, without disturbing the rest
+docker compose down -v                # stop everything and forget it
+```
+
+Running `docker compose up` again is a no-op rather than a new chain: see
+[below](#how-the-bring-up-is-organized).
+
+### What runs in which image
+
+Two images are built from [`devnet/compose/Dockerfile`](compose/Dockerfile),
+and everything else is used as its publisher ships it:
+
+```
+node    the emulator's own image + the op-cartesi binary + curl
+tools   bun + the repo + op-deployer + forge
+```
+
+`node` runs the machine servers and the engines — one image for both, because
+an engine is only meaningful next to a machine server and the emulator's image
+is where a matching emulator comes from. `tools` runs the repo's own TypeScript:
+`deploy-l1.ts`, `deploy-outputs.ts` and `guest-log.ts`, plus the two thin steps
+in `compose/` that drive them. curl is in `node` for the healthchecks, since
+compose runs those inside the container being checked.
+
+The OP monorepo publishes **no binaries** — its releases carry source archives
+only — so its images are the official way to get op-node, op-batcher and
+op-proposer, and anvil and forge come from foundry's. They are pinned in
+`compose.yaml`, and versioned independently upstream, so the tags do not match:
 
 ```
 us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.3
 us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.16.11
+us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:v1.16.3
+us-docker.pkg.dev/oplabs-tools-artifacts/images/op-deployer:v0.7.1
 ```
 
-Two consequences of running them in containers, both handled by the script but
-worth knowing:
-
-- anvil and op-cartesi bind `0.0.0.0` instead of loopback, because a container
-  reaches the host over the host gateway. On a shared network that exposes
-  them, which is why it is not how the native path runs. macOS may also raise a
-  firewall prompt the first time.
-- op-batcher and op-node share a user-defined docker network and address each
-  other by container name. Publishing op-node's RPC to the host's loopback is
-  not enough — loopback is not reachable from the bridge gateway.
+Because every piece is a container on one network, there is no host gateway
+anywhere in the stack: services address each other by service name, on the same
+port numbers `lib/env.ts` defaults to, and only the ports you might want to
+reach from a laptop are published — to loopback.
 
 The guest is [`demo`](../demo/README.md) — the routed guest of
 [docs/EVM-COMPAT.md](../docs/EVM-COMPAT.md), TypeScript on `@cartesi/rollup`, its
@@ -111,8 +119,7 @@ to the machine, and the machine's Merkle root becomes the block's state root.
 
 `op-batcher` posts those blocks to L1 as calldata, which advances the safe
 head, and a second node — its own machine, engine and op-node — rebuilds the
-chain from that L1 data alone. Set `WITH_BATCHER=0` or `WITH_VERIFIER=0` to
-leave either out.
+chain from that L1 data alone.
 
 ```sh
 cast block-number --rpc-url http://127.0.0.1:8545
@@ -126,75 +133,85 @@ cast block 10 --rpc-url http://127.0.0.1:8565 | grep -E 'hash|stateRoot'
 
 ### How the bring-up is organized
 
-`start-devnet.ts` starts nothing. It checks that the run can succeed — the
-tools on `PATH`, the snapshot, the ports, the JWT secret — compiles
-op-cartesi once into `bin/`, clears what a previous run left behind, writes
-an mprocs config for the panes this run wants, and hands over. One script per
-process, under `devnet/procs/`:
+Compose does the sequencing, and it does it with the three notions this used to
+carry code for: `depends_on` for order, a healthcheck for readiness, and a
+container that exits for a step that finishes rather than runs.
 
-| pane | what it is |
+| service | what it is |
 |---|---|
-| `info` | the endpoint summary; prints and stays down |
 | `l1` | anvil, not `--silent`: L1 blocks and transactions as they land |
-| `l1-contracts` | `deploy-l1.ts` (op-deployer). Optional, runs once |
-| `genesis` | anchors the rollup and writes `rollup.json`. Runs once |
+| `l1-contracts` | `compose/l1-contracts.ts` → `deploy-l1.ts` (op-deployer). Exits |
+| `genesis-machine` | a machine server for the step below, and only for it |
+| `genesis` | `compose/genesis.ts`: anchors the rollup, writes `rollup.json`. Exits |
 | `machine` | `cartesi-jsonrpc-machine`: the guest's console |
-| `engine` | op-cartesi, the sequencer's engine |
-| `guest` | what the guest says about each transaction — its reports |
-| `op-node` `op-batcher` `op-proposer` | the OP tools, native or in docker |
+| `engine` | op-cartesi, the sequencer's engine, through `compose/engine.sh` |
+| `op-node` `op-batcher` `op-proposer` | the OP tools, from their published images |
 | `verifier-*` | the second node's machine, engine and op-node |
-| `outputs` | `deploy-outputs.ts`. Does not autostart — press `s` |
+| `outputs` `guest` | `deploy-outputs.ts` and `guest-log.ts`; started by hand |
 
-mprocs starts every pane at once and has no notion of dependencies, so the
-ordering the old single script did by hand each process now does for itself:
-`op-node` blocks until the engine's port answers, `engine` blocks until
-`genesis` has written the rollup config, `genesis` blocks until the contracts
-are deployed. Two kinds of signal, no log-scraping:
+The readiness checks are the checks the old bring-up made from the outside,
+made from within instead. op-cartesi binds its listeners only once the chain is
+open and the machine has booted, so the engine's healthcheck — one
+`eth_blockNumber` — is exact rather than approximate: an engine that answers is
+an engine that can serve. The two steps that finish announce themselves by
+exiting 0, and what waits for them says `condition:
+service_completed_successfully`.
 
-- **A port that answers.** For op-cartesi this is exact rather than
-  approximate: it binds its listeners only after the chain is open and the
-  machine has booted, so a port that answers is an engine that can serve.
-  (This is what the old "op-node must not start before the engine logs
-  `chain initialized`" note was about; it is now the engine's own business.)
-- **A marker under `devnet/.state`,** for the steps that finish rather than
-  run — a file exists from its first byte, so the deploy announces itself
-  when it is done rather than when it starts writing.
+Two of the OP images carry no shell at all, which is why op-node and op-batcher
+have no healthcheck; `restart: on-failure` covers the seconds between op-node's
+container starting and its RPC answering.
 
-Because each pane's waits are its own, any pane restarts on its own: `r` on
-`op-node` re-runs the same waits and comes back up against the running
-engine. `x` then `s` on `engine` restarts the chain against the same machine
-server.
+Values still travel between the pieces through `devnet/*.env`, which
+`lib/env.ts` reads back — that is how the engine, in a container of its own,
+ends up on exactly the genesis the rollup config was generated with. Two of
+them cross a container boundary as files that are read rather than merged:
 
-The one thing that has to travel between panes is consensus-relevant:
-`genesis` writes the L1 anchor and the L2 genesis timestamp to
-`devnet/chain-genesis.env`, which `lib/env.ts` reads back — that is how the
-engine, started from a different pane, ends up on exactly the genesis the
-rollup config was generated with. The deployment outputs travel the same way,
-and are re-read rather than cached, so a process that started before the
-deploy it waited for sees what the deploy wrote.
+- **`devnet/chain-flags`**, written by `compose/genesis.ts` and read by
+  `compose/engine.sh`. The chain flags determine the L2 genesis block hash, so
+  an engine that runs with different ones than `rollup.json` was generated with
+  is a chain op-node rejects. In one process that would be `chainFlags()`
+  called twice; in two containers it is this file — generated by the step that
+  committed to them, run by the step that has to match.
+- **`devnet/l1-addresses.env`**, sourced by `compose/proposer.sh`. Every other
+  command line is fixed before anything starts, because everything op-node and
+  op-batcher need is inside `rollup.json`. op-proposer takes its
+  DisputeGameFactory as a flag, and that address does not exist until
+  op-deployer has run.
 
-Quitting mprocs stops every process it started, killing each one's whole
-process group, which is what the machine servers need: op-cartesi forks a
-server per block and the ones it prunes reparent to init, out of reach of any
-parent-to-child walk but never out of their process group. (bun's children
-share their parent's group, so a pane is one group however many processes
-deep it goes.) If mprocs is killed rather than quit, `start-devnet.ts` tears
-the stack down on its way out; run `stop-devnet.ts` yourself if a terminal
-died and left the stack behind:
+`docker compose up` is a statement about what should be up rather than a run,
+and running it again — to add the batcher to a sequencing stack, or after a
+`stop` — does not build a new chain. The two steps that produce the chain ask
+L1 whether their own output is still true: is the recorded OptimismPortal still
+code, is the anchored block still that hash. When it is, they exit 0 without
+repeating themselves. When it is not, which is what a restarted anvil looks
+like, they redeploy and re-anchor — and the anchor step first clears what
+described the chain being replaced (`rollup.json`, `outputs-addresses.env`,
+`token.env`), because a new chain starts from nothing.
 
-```sh
-./devnet/stop-devnet.ts
-```
+Everything the stack keeps is in the containers and two volumes, so
+`docker compose down -v` is the whole teardown, including the machine servers
+op-cartesi forks per block.
+
+One thing outside the compose files exists because of them. A machine server in
+a container of its own needed `machine.Remote.Fork` to rewrite the address a
+fork reports: the server answers with the address its child bound, which is the
+parent's own bind address on a fresh port — `0.0.0.0:42693` for a server
+started with `--server-address=0.0.0.0:6300`. Dialing that verbatim means
+dialing your own machine, which is right only when the server is on it. `Fork`
+substitutes the host it reached the parent on, so `machine:6300` forks to
+`machine:42693` (`machine/jsonrpc.go`, `TestForkEndpoint`).
 
 ### Watching the guest
 
-The guest program inside the machine is visible in two panes, and they show
+The guest program inside the machine is visible two ways, and they show
 different things:
 
-- **`machine`** is the emulator's console — Linux booting, then anything the
-  guest writes to stdout. The servers op-cartesi forks per block inherit
-  these file descriptors, so their output lands in the same pane.
-- **`guest`** is the guest's account of the chain: the reports it emitted for
+- **`docker compose logs -f machine`** is the emulator's console — Linux
+  booting, then anything the guest writes to stdout. The servers op-cartesi
+  forks per block inherit these file descriptors, so their output lands in the
+  same log.
+- **`docker compose run --rm guest`** is the guest's account of the chain: the
+  reports it emitted for
   each transaction, read back over `cartesi_getTransactionEmissions`. Reports
   are diagnostic and explicitly not provable, so they never appear in a
   receipt — and for a rejected input they are the only account of why it
@@ -208,12 +225,12 @@ block 41 0x9f2c7a13…4b0e21 1 tx, 3.4M cycles
 ```
 
 Reports carry the router's one-byte tag ([EVM-COMPAT §8](../docs/EVM-COMPAT.md)),
-so the pane can tell an app diagnostic from `eth_call` return data from revert
+so the log can tell an app diagnostic from `eth_call` return data from revert
 data — a revert is shown decoded, `Error("nonce too low")` rather than a
 selector. Printable payloads are shown as text, everything else as hex.
 
-`WITH_GUEST_LOG=0` drops the pane. It is an ordinary client script, so it also
-runs standalone against any node — the verifier included:
+It is an ordinary client script, so it also runs on the host against any node —
+the verifier included:
 
 ```sh
 L2_RPC=http://127.0.0.1:8565 bun devnet/guest-log.ts
@@ -221,14 +238,11 @@ L2_RPC=http://127.0.0.1:8565 bun devnet/guest-log.ts
 
 ### L1 contracts, and proposals
 
-The `l1-contracts` pane deploys the full OP Stack L1 suite with `op-deployer`,
-and everything downstream waits for it — the rollup has to be anchored at a
-block where the SystemConfig already exists. `op-proposer` then runs against
-it. Set
-`WITH_CONTRACTS=0` for a faster bring-up on placeholder addresses — a
-sequencing-only smoke mode: blocks, derivation, restarts, but no deposits
-(there is no portal to call) and therefore no funded accounts, withdrawals
-or tokens. Set `WITH_PROPOSER=0` to deploy but not propose.
+The `l1-contracts` service deploys the full OP Stack L1 suite with
+`op-deployer`, and everything downstream waits for it — the rollup has to be
+anchored at a block where the SystemConfig already exists. `op-proposer` then
+runs against it, and `docker compose up op-batcher` is how you get the chain
+without one.
 
 Two things about a devnet L1 that the standard path does not handle:
 
@@ -283,18 +297,23 @@ import { l1Public, l2Chain } from "devnet/wallet";
 — and nothing goes the other way: the devnet never imports a script. That is
 the right direction, because the values are the devnet's own. The ports it
 binds and the addresses its deploys wrote are what a client has to agree
-with, and they are written into `devnet/*.env` by the panes that produced
-them.
+with, and they are written into `devnet/*.env` by the services that produced
+them — bind-mounted back out of the containers into the repository, which is
+why a script on the host finds them with no configuration at all. (The
+containers run as root, so on Linux those files come back owned by root; on
+macOS, where docker maps ownership, they do not.)
 
 | | |
 |---|---|
-| `start-devnet.ts` `stop-devnet.ts` `procs/*.ts` | the stack |
-| `deploy-l1.ts` `deploy-outputs.ts` | the deploys, and two of the panes |
-| `generate-config.ts` `start-shim.ts` | op-cartesi on its own |
-| `guest-log.ts` | the `guest` pane, and a tail for any node |
+| `../compose.yaml` | the stack: every service, and what waits for what |
+| `compose/Dockerfile` `compose/engine.sh` `compose/proposer.sh` | what the containers are and what they run |
+| `compose/l1-contracts.ts` `compose/genesis.ts` `compose/live.ts` | the two steps that produce the chain, and the question they ask first |
+| `deploy-l1.ts` `deploy-outputs.ts` | the deploys themselves |
+| `generate-config.ts` `start-shim.ts` | op-cartesi on its own, no chain around it |
+| `guest-log.ts` | the `guest` service, and a tail for any node |
 | `lib/env.ts` | all configuration — `devnet/env` |
 | `lib/wallet.ts` | the chains and the viem clients — `devnet/wallet` |
-| `lib/proc.ts` `lib/optools.ts` `lib/opcartesi.ts` | running and waiting |
+| `lib/genesis.ts` `lib/opcartesi.ts` `lib/proc.ts` | anchoring, invoking the engine, running things |
 
 There is no shell left in either package — not the client scripts, not the
 orchestration. For the transactional half this was always the argument: the Ethereum
@@ -308,10 +327,10 @@ the L1 suite now reads `SystemConfig.scalar()` with `readContract` instead
 of shelling out to `cast call` and decoding the result in a heredoc of
 Python, and `devnet/lib/env.ts` is the only place any variable is named.
 
-What is left of the shell's job — spawning a program, waiting for a port,
-signalling a process group — is `lib/proc.ts`, and it is smaller than the
-shell version: bun's children share their parent's process group, so the
-teardown that mattered most comes for free.
+What is left of the shell's job — spawning a program, failing loudly, removing
+a file — is `lib/proc.ts`, and it is smaller than it has ever been: the waiting
+and the teardown it used to carry are `depends_on`, a healthcheck and
+`docker compose down`.
 
 User overrides go in a `.env` at the repo root — `SENDER_KEY=…`, `L1_RPC=…`,
 anything `lib/env.ts` reads. It is loaded from the repo root explicitly
@@ -359,14 +378,13 @@ ordinary contracts. An app-private inspect dialect is still reachable
 through `cartesi_inspect`, which stays a raw passthrough in both
 directions.
 
-This calls `OptimismPortal.depositTransaction` — the path a real user takes —
-and requires the deployed contract suite; on a `WITH_CONTRACTS=0` devnet
-there is no portal, and `deposit.ts` says so and stops. (An earlier version
-carried a contract-less fallback: a minimal `TransactionDeposited` emitter
-installed with `anvil_setCode`, exploiting the fact that derivation reads
-the log rather than the contract that produced it. It was the last of the
-hand-packed hex, anvil-only, and the only thing the contract-less mode
-funded — retired once `WITH_CONTRACTS=1` became the default.)
+This calls `OptimismPortal.depositTransaction` — the path a real user takes.
+Without the deployed contract suite there is no portal, and `deposit.ts` says
+so and stops. (An earlier version carried a contract-less fallback: a minimal
+`TransactionDeposited` emitter installed with `anvil_setCode`, exploiting the
+fact that derivation reads the log rather than the contract that produced it.
+It was the last of the hand-packed hex, anvil-only, and the only thing a
+contract-less devnet funded — retired along with the option of running one.)
 
 ### Withdrawals
 
@@ -395,9 +413,9 @@ The voucher path remains for application outputs the portal has no notion
 of. `deploy-outputs.ts` puts its L1 half in place — the validator that opens
 an OP proposal's root claim, the executor that runs a proven output — and
 registers the standard messenger pair with the guest (which the ERC-20
-bridging below needs). It is the `outputs` pane, the one step of the flow
-that waits for you rather than for another process; select it and press
-`s`, or run `./devnet/deploy-outputs.ts` yourself. `execute-voucher.ts` and
+bridging below needs). It is the `outputs` service, the one step of the flow
+that waits for you rather than for another process:
+`docker compose run --rm outputs`. `execute-voucher.ts` and
 `scripts/lib/voucher.ts` then prove a voucher against the outputs root,
 which lives one storage slot inside the same withdrawal trie. The proof is
 built against the *proposed* block, not the block that emitted the voucher:
@@ -451,23 +469,27 @@ since an error inside the guest halts the machine, and a halted machine is a
 halted chain. (Its Lua predecessor had the same discipline in
 `test-guest.lua`, retired with the bank app.)
 
-Two operational notes, both easy to trip over by hand — and both handled by
-`devnet/procs/`:
+Two operational notes, both easy to trip over by hand — and both settled by the
+compose file:
 
 - A machine server holds exactly one machine, and `machine.load` refuses to
-  replace it. Config generation and the node each need their own server,
-  which is why `genesis` starts one of its own and stops it again.
-- op-node must not be started before the engine is serving. `procs/op-node.ts`
-  waits for the engine's port, which op-cartesi binds only once the chain is
-  open.
+  replace it. Config generation and the node each need their own server, which
+  is why `genesis-machine` exists and why the genesis step shuts it down again
+  when it is finished with it.
+- op-node must not be started before the engine is serving, which is what the
+  engine's healthcheck and op-node's `depends_on` say: op-cartesi answers on
+  its RPC only once the chain is open.
 
 ## Persistence
 
-`DATA_DIR` gives each node a store, and the chain survives a restart:
+`DATA_DIR` gives each node a store, and the chain survives a restart. It is a
+path inside the containers, and each node's engine and machine server share a
+volume at it — the engine keeps the blocks, the machine server writes the
+checkpoints:
 
 ```sh
-DATA_DIR=/tmp/op-cartesi-data CHECKPOINT_INTERVAL=25 ./devnet/start-devnet.ts
-ls /tmp/op-cartesi-data/checkpoints
+DATA_DIR=/data docker compose up
+docker compose exec engine ls /data/checkpoints
 ```
 
 Blocks and the machine's emissions go into a pebble database; the machine
@@ -480,8 +502,9 @@ not stall block production — measured at exactly 2.00 s per block across a
 checkpoint. Restarting loads the newest checkpoint and re-executes the blocks
 after it, checking each against the state root it was stored with.
 
-Each node needs its own directory: a pebble database is held by one process,
-so the verifier gets `$DATA_DIR-verifier` automatically.
+Each node needs its own store, because a pebble database is held by one
+process: the sequencer and the verifier have a volume each, which is the same
+rule expressed as compose says it.
 
 ## The snapshot is stored already booted
 
@@ -506,50 +529,24 @@ chain as the template hash.
 
 Node startup drops from tens of seconds to about one as a side effect.
 
-## Quick start (no L1, no contracts)
+## op-cartesi on its own
 
-`start-shim.ts` runs op-cartesi alone against the in-memory mock machine. Nothing derives from L1, but the Engine API is live and can be driven by hand, which is enough to explore the RPC surface:
+Not a devnet — no L1, no contracts, no op-node — but the engine alone is
+sometimes what you want to poke at. `start-shim.ts` runs it against the
+in-memory mock machine, writes a JWT secret to `devnet/jwt.hex`, starts the
+Engine API on `:8551` and the public `eth_*` port on `:8545`, and prints the
+genesis block hash:
 
 ```sh
+bun install            # this one does need the workspace
 ./devnet/start-shim.ts
 ```
 
-It writes a JWT secret to `devnet/jwt.hex`, starts the engine port on `:8551` and the public `eth_*` port on `:8545`, and prints the genesis block hash.
-
-## Full devnet
-
-```sh
-# 1. L1 (example: anvil with Cancun support)
-anvil --host 0.0.0.0 --port 8545 --chain-id 900 --block-time 4
-
-# 2. Deploy the OP Stack L1 contracts with op-deployer, then note:
-#      - OptimismPortal proxy address
-#      - SystemConfig proxy address
-#      - batch inbox address
-#      - batcher address
-#      - the L1 block hash/number to anchor the rollup to
-
-# 3. Generate rollup.json. The chain flags here MUST match the ones given to
-#    `run` below, since they determine the genesis block hash.
-./devnet/generate-config.ts
-
-# 4. Start op-cartesi
-./devnet/start-shim.ts
-
-# 5. Start op-node in sequencer mode
-op-node \
-  --l1=http://127.0.0.1:8545 \
-  --l1.beacon=http://127.0.0.1:5052 \
-  --l2=http://127.0.0.1:8551 \
-  --l2.jwt-secret=./devnet/jwt.hex \
-  --rollup.config=./devnet/rollup.json \
-  --sequencer.enabled \
-  --sequencer.l1-confs=0 \
-  --p2p.disable \
-  --rpc.addr=127.0.0.1 --rpc.port=9545
-```
-
-`op-batcher` and `op-proposer` then attach to op-node exactly as they would on any OP chain; nothing about them is op-cartesi-specific.
+`generate-config.ts` is the other half, generating a `rollup.json` against a
+machine server you point `MACHINE_REMOTE` at. The chain flags it uses must
+match the ones the engine runs with, which is why both come from
+`chainFlags()` rather than from two lists — and why, in the devnet, the genesis
+step writes them to a file the engine is started from.
 
 ## Fork support
 

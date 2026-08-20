@@ -9,10 +9,9 @@
 //
 //   bun scripts/deposit.ts <recipient> [wei]
 //
-// Requires the devnet to be running with the contract suite deployed
-// (./devnet/start-devnet.ts, the WITH_CONTRACTS=1 default): the portal is
-// the deposit path a real user takes, and the only one — the contract-less
-// mode has no deposits.
+// Requires the devnet to be running (`docker compose up`, which always deploys
+// the contract suite): the portal is the deposit path a real user takes, and
+// the only one.
 
 import { config, usage } from "devnet/env";
 import { l1Public, l1Wallet, l2Chain, l2Public } from "devnet/wallet";
@@ -30,8 +29,8 @@ const wallet = l1Wallet(config.depositorKey);
 const code = await l1.getCode({ address: config.depositContract });
 if (code === undefined || code === "0x") {
     console.error(
-        `no portal at ${config.depositContract} — this devnet has no contracts (WITH_CONTRACTS=0?); ` +
-            `start it with the WITH_CONTRACTS=1 default`,
+        `no portal at ${config.depositContract} — the L1 contracts have not been deployed; ` +
+            "bring the devnet up with `docker compose up`",
     );
     process.exit(1);
 }

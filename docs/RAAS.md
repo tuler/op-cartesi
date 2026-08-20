@@ -7,10 +7,10 @@ verifier anyone can run to check the whole thing from L1 data alone. That is the
 product. This document is about what stands between the repository as it is and
 that sentence being true.
 
-The devnet already performs the sequence. `./devnet/start-devnet.ts` deploys the
+The devnet already performs the sequence. `docker compose up` deploys the
 OP Stack L1 suite with op-deployer, boots a machine on the snapshot, derives the
 genesis block from its root hash, writes the `rollup.json` op-node derives from,
-and starts five processes plus an independent verifier that reaches
+and starts five services plus an independent verifier that reaches
 byte-identical blocks. Every step of a chain launch is in there somewhere. What
 is *not* in there is anything that survives being run twice, by two tenants,
 against an L1 that reorgs and charges real money — because the devnet was built
@@ -186,7 +186,7 @@ intervene when the trusted proposer is wrong. §9 returns to this. Add source
 verification while we are here; an unverified bridge contract on mainnet is not
 a serious offering.
 
-**Anchoring has to survive reorgs.** `devnet/procs/genesis.ts` reads back the L1
+**Anchoring has to survive reorgs.** `devnet/lib/genesis.ts` reads back the L1
 block the deployment recorded, compares hashes, and dies with *"the L1 reorged;
 redeploy"* if they differ. On anvil that is a sound assertion about an
 impossible event. On Sepolia it is a Tuesday. The anchor has to wait for a
@@ -225,13 +225,15 @@ determine which Engine API methods are called. The repository has run against
 op-node v1.19.3 and op-batcher v1.16.11; a service needs to know which chain is
 on which set and to be able to move one without moving all.
 
-**Orchestration.** mprocs and the `markReady`/`waitReady` marker files are a
-human's screen: excellent for watching a stack, unusable for supervising a
-hundred. Per-chain Helm releases or the equivalent, with health probes and a
-restart policy, replace them. One specific trap deserves carrying over from the
-devnet's teardown code: op-cartesi forks a machine server per block for
-snapshots, and those forks reparent to init, out of reach of any process-tree
-walk. Teardown must be scoped by cgroup or process group, or every restart leaks
+**Orchestration.** One compose project is a laptop's stack: excellent for
+watching a chain, unusable for supervising a hundred. Per-chain Helm releases or
+the equivalent, with health probes and a restart policy, replace it — and the
+translation is less than it once was, since `depends_on` conditions and
+healthchecks are the shapes a scheduler already speaks. One specific trap
+carries over: op-cartesi forks a machine server per block for snapshots, and
+those forks reparent to init, out of reach of any process-tree walk. In compose
+they are inside the machine server's container and go when it does; anywhere
+else, teardown must be scoped by cgroup or process group, or every restart leaks
 half a gigabyte of resident machine.
 
 **Storage, sized from measurements rather than guesses.** [DESIGN §7](DESIGN.md) has the

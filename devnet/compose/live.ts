@@ -10,7 +10,8 @@
 //
 // So the two steps that produce the chain ask first whether their own output
 // is still true, and a step whose work is already done exits 0 without
-// repeating it. The question is answered against L1 rather than against a
+// repeating it — which is also what makes `up` after a `stop` pick the same
+// chain back up rather than build a new one. The question is answered against L1 rather than against a
 // marker, because the thing that invalidates it is anvil forgetting
 // everything: a devnet L1 restarts empty, so the recorded block is either
 // still there with the hash the deploy committed to, or the deployment it

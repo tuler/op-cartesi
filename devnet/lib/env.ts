@@ -34,7 +34,8 @@ const REPO_DIR = dirname(DEVNET_DIR);
 export const paths = {
     devnet: DEVNET_DIR,
     repo: REPO_DIR,
-    /** The engine, compiled once by start-devnet.ts. */
+    /** The engine, if it has been built into the repo (`go build -o bin/`).
+     * In a container it is on PATH instead, through OP_CARTESI_BIN. */
     opCartesiBin: join(REPO_DIR, "bin", "op-cartesi"),
     jwtSecret: process.env.JWT_SECRET_FILE ?? join(DEVNET_DIR, "jwt.hex"),
     rollupConfig: process.env.ROLLUP_CONFIG_FILE ?? join(DEVNET_DIR, "rollup.json"),
@@ -44,9 +45,9 @@ export const paths = {
     outputsAddresses: process.env.OUTPUTS_ENV_FILE ?? join(DEVNET_DIR, "outputs-addresses.env"),
     tokenEnv: process.env.TOKEN_ENV_FILE ?? join(DEVNET_DIR, "token.env"),
     deployWorkdir: process.env.DEPLOY_WORKDIR ?? join(DEVNET_DIR, "deployment"),
-    logs: process.env.LOG_DIR ?? join(DEVNET_DIR, "logs"),
-    /** Readiness markers, pid records and the generated mprocs config. */
-    state: process.env.STATE_DIR ?? join(DEVNET_DIR, ".state"),
+    /** The chain flags rollup.json was generated with, which the engines are
+     * run with — see devnet/compose/genesis.ts. */
+    chainFlags: process.env.CHAIN_FLAGS_FILE ?? join(DEVNET_DIR, "chain-flags"),
 } as const;
 
 /** One `KEY=value` file, as a map. Missing is empty, which is what a file a
@@ -101,13 +102,6 @@ function optionalEnv(name: string): string | undefined {
 function num(name: string, fallback: number): number {
     const v = process.env[name];
     return v === undefined || v === "" ? fallback : Number(v);
-}
-
-/** `WITH_*` flags are 1/0 in the environment, as they were for the shell. */
-function flag(name: string, fallback: boolean): boolean {
-    const v = process.env[name];
-    if (v === undefined || v === "") return fallback;
-    return v !== "0" && v.toLowerCase() !== "false";
 }
 
 /** The guards earn viem's template-literal types by inspection, the same
@@ -173,76 +167,19 @@ export const config = {
 };
 
 // --- the stack --------------------------------------------------------------
-// Ports, and which of the optional pieces this run wants. Nothing here comes
-// from a deployment, so unlike the addresses it is a snapshot: a process that
-// waits does not need to re-read its own port.
+// What the host has to know about a running devnet, which is less than the
+// devnet itself does: compose.yaml is the topology now — every port a service
+// binds and every image it runs is written there once — and this is the part
+// the scripts and the engine still need to agree with it on.
 export const stack = {
     l1Port,
-    /** anvil's --block-time. The L2's own is `blockTime` below. */
-    l1BlockTime: num("L1_BLOCK_TIME", 2),
-    machinePort: num("MACHINE_PORT", 6300),
-    // Generating the rollup config loads the snapshot too, and a machine
-    // server holds exactly one machine, so the generator gets its own server
-    // rather than recycling the node's.
-    genesisMachinePort: num("GENESIS_MACHINE_PORT", 6301),
-    opNodeRpcPort: num("OPNODE_RPC_PORT", 9545),
-    batcherRpcPort: num("BATCHER_RPC_PORT", 8548),
-    proposerRpcPort: num("PROPOSER_RPC_PORT", 8560),
     engineAddr: env("ENGINE_ADDR", "127.0.0.1:8551"),
     httpAddr: env("HTTP_ADDR", httpAddrDefault),
-    // The second node: its own engine, machine server and op-node, deriving
-    // purely from L1 rather than sequencing.
-    verifierEngineAddr: env("VERIFIER_ENGINE_ADDR", "127.0.0.1:8571"),
-    verifierHttpAddr: env("VERIFIER_HTTP_ADDR", "127.0.0.1:8565"),
-    verifierMachinePort: num("VERIFIER_MACHINE_PORT", 6400),
-    verifierOpNodeRpcPort: num("VERIFIER_OPNODE_RPC_PORT", 9555),
-
-    withContracts: flag("WITH_CONTRACTS", true),
-    withBatcher: flag("WITH_BATCHER", true),
-    withProposer: flag("WITH_PROPOSER", true),
-    withVerifier: flag("WITH_VERIFIER", true),
-    withGuestLog: flag("WITH_GUEST_LOG", true),
-
     /** The routed guest's snapshot, as `cartesi build` stores it. */
     snapshotDir: process.env.SNAPSHOT_DIR ?? join(REPO_DIR, "demo", ".cartesi", "image"),
     /** Directory for the chain store. Empty keeps the chain in memory. */
     dataDir: process.env.DATA_DIR ?? "",
-    /** How long a process waits for what it depends on. Deploying the L1
-     * suite takes about a minute and booting Linux inside the machine can
-     * take two, so this is generous on purpose. */
-    waitTimeoutMs: num("WAIT_TIMEOUT", 600) * 1000,
-
-    // The OP monorepo ships no binaries: its releases carry source archives
-    // only, so docker is the official distribution. `auto` uses whatever is on
-    // PATH and falls back to the published images; force either with
-    // OP_RUNTIME=docker or OP_RUNTIME=native. The three are versioned
-    // independently upstream, so the tags do not match.
-    opRuntime: process.env.OP_RUNTIME ?? "auto",
-    opNodeImage: env(
-        "OP_NODE_IMAGE",
-        "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-node:v1.19.3",
-    ),
-    opBatcherImage: env(
-        "OP_BATCHER_IMAGE",
-        "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-batcher:v1.16.11",
-    ),
-    opProposerImage: env(
-        "OP_PROPOSER_IMAGE",
-        "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-proposer:v1.16.3",
-    ),
-    opDeployerImage: env(
-        "OP_DEPLOYER_IMAGE",
-        "us-docker.pkg.dev/oplabs-tools-artifacts/images/op-deployer:v0.7.1",
-    ),
-
-    containerPrefix: "op-cartesi-devnet",
-    dockerNetwork: "op-cartesi-devnet",
 } as const;
-
-/** The port half of a `host:port` listen address. */
-export function portOf(addr: string): number {
-    return Number(addr.slice(addr.lastIndexOf(":") + 1));
-}
 
 // --- consensus-relevant parameters ------------------------------------------
 // These determine the L2 genesis block hash, so `generate-config.ts` and the
@@ -273,7 +210,7 @@ export function chainParams() {
         checkpointInterval: value("CHECKPOINT_INTERVAL", "25"),
         /** Anchored to the L1 block the rollup starts after, so op-node's
          * derivation clock and the engine's genesis agree. Written by
-         * procs/genesis.ts. */
+         * lib/genesis.ts. */
         genesisTimestamp: value("GENESIS_TIMESTAMP", "0"),
         l1GenesisHash: hash("L1_GENESIS_HASH", `0x${"0".repeat(64)}`),
         l1GenesisNumber: value("L1_GENESIS_NUMBER", "0"),
