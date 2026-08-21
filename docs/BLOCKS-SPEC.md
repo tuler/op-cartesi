@@ -695,29 +695,33 @@ specification when it happens.
 
 ## 17. Conformance vectors
 
-This specification is not testable as prose. The intended companion is a
-`conformance/` corpus, in the shape
-[`accounts-drive/testdata/golden.json`](../accounts-drive/testdata/golden.json)
-already has for the drives: fixtures both implementations read, rather than
-one implementation checking itself against another.
+This specification is not testable as prose, so it has a companion corpus:
+[`conformance/`](../conformance), fixtures both implementations read, in the
+shape [`accounts-drive/testdata/golden.json`](../accounts-drive/testdata/golden.json)
+already has for the drives.
 
-The vectors this document implies, roughly in dependency order:
-
-| Vector set | Input | Expected |
+| Vector set | Pins | Section |
 |---|---|---|
-| `genesis` | §4.1 parameters + a machine root hash | genesis header fields, RLP, block hash |
-| `extradata` | timestamp, attribute parameters, chain defaults | the 9 `extraData` bytes |
-| `envelope` | context + a raw transaction | the `EvmAdvance` bytes, including `msgSender` recovery |
-| `outputs-tree` | a list of raw outputs | leaf hashes, the root after each append, one proof per leaf |
-| `withdrawal` | a `Withdrawal` struct | the notice-wrapped output bytes, the withdrawal hash, the slot |
-| `passer-trie` | a sequence of withdrawals + outputs roots | the trie root after each block, one storage proof each |
-| `block` | parent header, attributes, recorded machine responses | the full header, `gasUsed`, the block hash |
-| `import` | a payload, valid and in each §13 failure mode | the status and the reason |
+| [`blocks/genesis.json`](../conformance/blocks/genesis.json) | the genesis header, its RLP and its hash | §6 |
+| [`blocks/extradata.json`](../conformance/blocks/extradata.json) | the 9 `extraData` bytes, valid and invalid | §12.2 |
+| [`encodings/evmadvance.json`](../conformance/encodings/evmadvance.json) | the input envelope, `msgSender` recovery, chain-wide indices | §7 |
+| [`encodings/withdrawal.json`](../conformance/encodings/withdrawal.json) | the withdrawal notice, its hash and its slot | §11.2 |
+| [`commitments/outputs-tree.json`](../conformance/commitments/outputs-tree.json) | leaves, roots and proofs | §10 |
+| [`commitments/passer-trie.json`](../conformance/commitments/passer-trie.json) | trie roots block by block, and storage proofs | §11 |
+| [`blocks/block.json`](../conformance/blocks/block.json) | whole blocks: admission, metering, commitments, the header | §8–§12 |
+| [`blocks/import.json`](../conformance/blocks/import.json) | the verdict, one payload per validation rule | §13 |
 
-The `block` and `import` sets need recorded machine responses — accepted or
-rejected, cycles, emissions — so that a vector exercises the header rules
-without needing an emulator. Vectors that *do* need a real machine belong
-with the existing snapshot-gated tests instead.
+The block and import sets carry **recorded machine responses** — accepted or
+rejected, cycles, emissions, the post-state root — consumed one per attempted
+input in call order. An implementation replays them against a stub built from
+that list, so a vector pins the header rules without needing an emulator;
+[`conformance/README.md`](../conformance/README.md) gives the stub's exact
+contract. Vectors that do need a real machine belong with the existing
+snapshot-gated tests instead.
+
+Two things this corpus deliberately does not fix: error message text (only the
+status in `import.json` is normative, per
+[ENGINE-RPC-SPEC §9.2](ENGINE-RPC-SPEC.md)), and anything in §15.
 
 ## References
 

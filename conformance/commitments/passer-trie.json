@@ -1,0 +1,152 @@
+{
+    "description": "The withdrawal commitment (BLOCKS-SPEC §11): a real Ethereum storage trie over the L2ToL1MessagePasser slots, secure-keyed, holding 0x01 per sent withdrawal and the Cartesi outputs root at keccak256(\"op-cartesi.outputsMerkleRoot\"). Its root is the header's withdrawalsRoot; every proof here was verified with geth's own verifier before being written, which is the algorithm OptimismPortal's SecureMerkleTrie implements.",
+    "spec": "docs/BLOCKS-SPEC.md#11-the-withdrawal-commitment",
+    "outputsRootSlot": "0xe7ef0b3c6a6398bbd7521bc0120b75bdde7002226f670516e49ee4d849cc0966",
+    "emptyTrieRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+    "cases": [
+        {
+            "name": "genesis: the reserved slot alone, holding the empty tree's root",
+            "steps": [
+                {
+                    "outputsRoot": "0x0a162946e56158bac0673e6dd3bdfdc1e4a0e7744a120fdb640050c8d7abe1c6",
+                    "root": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+                }
+            ],
+            "proofs": [
+                {
+                    "name": "the reserved outputs root slot",
+                    "slot": "0xe7ef0b3c6a6398bbd7521bc0120b75bdde7002226f670516e49ee4d849cc0966",
+                    "value": "0x0a162946e56158bac0673e6dd3bdfdc1e4a0e7744a120fdb640050c8d7abe1c6",
+                    "nodes": [
+                        "0xf844a120e1162d2015e595ff56791af1c06d5810127772b016e35987e7b4ce78a875e407a1a00a162946e56158bac0673e6dd3bdfdc1e4a0e7744a120fdb640050c8d7abe1c6"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "the Solidity fixture's single-slot trie: the reserved slot alone",
+            "steps": [
+                {
+                    "outputsRoot": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
+                    "root": "0xeb1f9992f27f25df88c87c5bce969cb7ac49298870c512cf55481d1c2219b9ea"
+                }
+            ],
+            "proofs": [
+                {
+                    "name": "the reserved outputs root slot",
+                    "slot": "0xe7ef0b3c6a6398bbd7521bc0120b75bdde7002226f670516e49ee4d849cc0966",
+                    "value": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
+                    "nodes": [
+                        "0xf844a120e1162d2015e595ff56791af1c06d5810127772b016e35987e7b4ce78a875e407a1a0c6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "the Solidity suite's trie: two withdrawals and the outputs root",
+            "steps": [
+                {
+                    "insertWithdrawals": [
+                        "0x27f31ff201b73d4a552b801c296a72166443942679761eb8f895fc846e2edb39",
+                        "0xb3eb3decba3830b9d78bed4d85fb5a8d4c1ac75032d150fad77b3a8c068c6760"
+                    ],
+                    "outputsRoot": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
+                    "root": "0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398"
+                }
+            ],
+            "proofs": [
+                {
+                    "name": "the reserved outputs root slot",
+                    "slot": "0xe7ef0b3c6a6398bbd7521bc0120b75bdde7002226f670516e49ee4d849cc0966",
+                    "value": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
+                    "nodes": [
+                        "0xf871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080",
+                        "0xf843a031162d2015e595ff56791af1c06d5810127772b016e35987e7b4ce78a875e407a1a0c6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5"
+                    ]
+                },
+                {
+                    "name": "a sent withdrawal",
+                    "slot": "0x2a6a101de67adffe9812999c6511d5c530f9b7b7f5e1fd806951aef67df64193",
+                    "value": "0x01",
+                    "nodes": [
+                        "0xf871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080",
+                        "0xe2a031f7ec4d5c9c587a91dc980620e3089ad157af828577d83e11486bc470a43dfc01"
+                    ]
+                },
+                {
+                    "name": "a sent withdrawal",
+                    "slot": "0x0309a28b96ec5305f61e63a3a76891d2865d20c759970bc2183f1c5e687dc752",
+                    "value": "0x01",
+                    "nodes": [
+                        "0xf871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080",
+                        "0xe2a03d16185c9593de9c7ed38d2cadc95d33034378b6e226296253fec9c8545a294301"
+                    ]
+                },
+                {
+                    "name": "an absent withdrawal (exclusion proof)",
+                    "slot": "0x256f42d17fcb53c07a0728af8452a1da3fb2ba2db1d91c505d46ea2764040c57",
+                    "value": "0x",
+                    "nodes": [
+                        "0xf871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080"
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "block by block: the trie is cumulative and the reserved slot is overwritten",
+            "steps": [
+                {
+                    "outputsRoot": "0x0a162946e56158bac0673e6dd3bdfdc1e4a0e7744a120fdb640050c8d7abe1c6",
+                    "root": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+                },
+                {
+                    "insertWithdrawals": [
+                        "0x27f31ff201b73d4a552b801c296a72166443942679761eb8f895fc846e2edb39"
+                    ],
+                    "outputsRoot": "0xe172091ce34d57729af5a4d0b2e8e3ab06f088609d03c8470732d40b1de72b34",
+                    "root": "0x478e14d3b2de412fad9d1cc7239798ca3f818a90c48e931875e9faf3f9b7d222"
+                },
+                {
+                    "insertWithdrawals": [
+                        "0xb3eb3decba3830b9d78bed4d85fb5a8d4c1ac75032d150fad77b3a8c068c6760"
+                    ],
+                    "outputsRoot": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
+                    "root": "0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398"
+                },
+                {
+                    "outputsRoot": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
+                    "root": "0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398"
+                }
+            ],
+            "proofs": [
+                {
+                    "name": "the reserved outputs root slot",
+                    "slot": "0xe7ef0b3c6a6398bbd7521bc0120b75bdde7002226f670516e49ee4d849cc0966",
+                    "value": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
+                    "nodes": [
+                        "0xf871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080",
+                        "0xf843a031162d2015e595ff56791af1c06d5810127772b016e35987e7b4ce78a875e407a1a0c6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5"
+                    ]
+                },
+                {
+                    "name": "a sent withdrawal",
+                    "slot": "0x2a6a101de67adffe9812999c6511d5c530f9b7b7f5e1fd806951aef67df64193",
+                    "value": "0x01",
+                    "nodes": [
+                        "0xf871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080",
+                        "0xe2a031f7ec4d5c9c587a91dc980620e3089ad157af828577d83e11486bc470a43dfc01"
+                    ]
+                },
+                {
+                    "name": "a sent withdrawal",
+                    "slot": "0x0309a28b96ec5305f61e63a3a76891d2865d20c759970bc2183f1c5e687dc752",
+                    "value": "0x01",
+                    "nodes": [
+                        "0xf871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080",
+                        "0xe2a03d16185c9593de9c7ed38d2cadc95d33034378b6e226296253fec9c8545a294301"
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -14,7 +14,12 @@
             // Foundry's vendored deps and build output.
             "!contracts/lib/",
             "!contracts/out/",
-            "!contracts/cache/"
+            "!contracts/cache/",
+            // Generated fixtures. They are written by
+            // `go test ./chain -run TestConformance -update`, whose output
+            // the Go replay compares byte for byte; a second formatter would
+            // make the two fight over every regeneration.
+            "!conformance"
         ]
     },
     // 4-space indent and double quotes: the style the TypeScript already

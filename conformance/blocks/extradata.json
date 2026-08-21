@@ -1,0 +1,62 @@
+{
+    "description": "Header extraData from the Holocene EIP-1559 parameters (BLOCKS-SPEC §12.2). Zeroed attribute parameters mean 'use the chain defaults'; a pair with exactly one zero is invalid.",
+    "spec": "docs/BLOCKS-SPEC.md#122-extradata",
+    "cases": [
+        {
+            "name": "zeroed attribute parameters take the chain defaults",
+            "chainDenominator": 250,
+            "chainElasticity": 6,
+            "timestamp": 1700000002,
+            "attributeParams": "0x0000000000000000",
+            "extraData": "0x00000000fa00000006"
+        },
+        {
+            "name": "explicit attribute parameters are echoed",
+            "chainDenominator": 250,
+            "chainElasticity": 6,
+            "timestamp": 1700000004,
+            "attributeParams": "0x0000006400000004",
+            "extraData": "0x000000006400000004"
+        },
+        {
+            "name": "the chain defaults are not the OP defaults",
+            "chainDenominator": 50,
+            "chainElasticity": 10,
+            "timestamp": 1700000006,
+            "attributeParams": "0x0000000000000000",
+            "extraData": "0x00000000320000000a"
+        },
+        {
+            "name": "the largest parameters that fit",
+            "chainDenominator": 250,
+            "chainElasticity": 6,
+            "timestamp": 1700000008,
+            "attributeParams": "0xffffffffffffffff",
+            "extraData": "0x00ffffffffffffffff"
+        },
+        {
+            "name": "a zero denominator with a nonzero elasticity is invalid",
+            "chainDenominator": 250,
+            "chainElasticity": 6,
+            "timestamp": 1,
+            "attributeParams": "0x0000000000000004",
+            "invalid": true
+        },
+        {
+            "name": "a zero elasticity with a nonzero denominator is invalid",
+            "chainDenominator": 250,
+            "chainElasticity": 6,
+            "timestamp": 1,
+            "attributeParams": "0x0000006400000000",
+            "invalid": true
+        },
+        {
+            "name": "parameters of the wrong length are invalid",
+            "chainDenominator": 250,
+            "chainElasticity": 6,
+            "timestamp": 1,
+            "attributeParams": "0x000000",
+            "invalid": true
+        }
+    ]
+}

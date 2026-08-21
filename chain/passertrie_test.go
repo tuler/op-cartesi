@@ -232,63 +232,10 @@ func encodeWithdrawalOutput(t *testing.T, w *Withdrawal) []byte {
 	return encoded
 }
 
-// TestPasserTrieMatchesSolidityVectors mirrors PasserTrieVectors.t.sol: the
-// same trie contents must reach the same root here and under the vendored
-// SecureMerkleTrie in the contracts suite. If this constant moves, move it
-// there too — the point is that both suites break together.
-func TestPasserTrieMatchesSolidityVectors(t *testing.T) {
-	outputsRoot := common.HexToHash("0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5")
-	tree := NewOutputTree().Append(
-		crypto.Keccak256Hash([]byte("cartesi output 0")),
-		crypto.Keccak256Hash([]byte("cartesi output 1")),
-	)
-	if tree.Root() != outputsRoot {
-		t.Fatalf("outputs root %s, but the Solidity side pins %s", tree.Root(), outputsRoot)
-	}
-
-	w1 := &Withdrawal{
-		Nonce:    new(big.Int).Lsh(big.NewInt(1), 240),
-		Sender:   common.HexToAddress("0x1111111111111111111111111111111111111111"),
-		Target:   common.HexToAddress("0x2222222222222222222222222222222222222222"),
-		Value:    big.NewInt(1e15),
-		GasLimit: big.NewInt(100000),
-	}
-	w2 := &Withdrawal{
-		Nonce:    new(big.Int).Or(new(big.Int).Lsh(big.NewInt(1), 240), new(big.Int).Lsh(big.NewInt(1), 32)),
-		Sender:   common.HexToAddress("0x3333333333333333333333333333333333333333"),
-		Target:   common.HexToAddress("0x4444444444444444444444444444444444444444"),
-		Value:    big.NewInt(2e15),
-		GasLimit: big.NewInt(100000),
-		Data:     []byte{0xbe, 0xef},
-	}
-	h1, err := w1.Hash()
-	if err != nil {
-		t.Fatal(err)
-	}
-	h2, err := w2.Hash()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	full := NewPasserTrie()
-	for _, h := range []common.Hash{h1, h2} {
-		if err := full.InsertWithdrawal(h); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if err := full.SetOutputsRoot(outputsRoot); err != nil {
-		t.Fatal(err)
-	}
-	if want := common.HexToHash("0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398"); full.Root() != want {
-		t.Errorf("withdrawals root %s, but the Solidity side pins %s", full.Root(), want)
-	}
-
-	// The single-slot trie PasserTrieFixture builds in Solidity.
-	single := NewPasserTrie()
-	if err := single.SetOutputsRoot(outputsRoot); err != nil {
-		t.Fatal(err)
-	}
-	if want := common.HexToHash("0xeb1f9992f27f25df88c87c5bce969cb7ac49298870c512cf55481d1c2219b9ea"); single.Root() != want {
-		t.Errorf("single-slot root %s, but the Solidity fixture pins %s", single.Root(), want)
-	}
-}
+// The roots PasserTrieVectors.t.sol hardcodes — the two-withdrawal trie and
+// the single-slot fixture — used to be reasserted here so that both suites
+// broke together. They now live in conformance/commitments/passer-trie.json,
+// where TestConformancePasserTrie asserts them before writing and checks
+// every proof in the file with geth's own verifier, which is the algorithm
+// SecureMerkleTrie implements. The Solidity suite still carries its copies;
+// repointing it at the file is noted in conformance/README.md.
