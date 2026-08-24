@@ -6,73 +6,96 @@ import {Test} from "forge-std/Test.sol";
 import {SecureMerkleTrie} from "../src/vendor/optimism/SecureMerkleTrie.sol";
 import {RLPReader} from "../src/vendor/optimism/RLPReader.sol";
 import {PasserTrieFixture} from "./PasserTrie.sol";
+import {Vectors} from "./Vectors.sol";
 
-/// @notice Pins the node's Go withdrawal trie (chain/passertrie.go) to the
-/// Solidity verifier OptimismPortal uses. Every constant below was produced
-/// by the Go side for a trie holding two withdrawals and the outputs-root
-/// slot; if either implementation drifts, these proofs stop verifying here
-/// — before they stop verifying on L1.
+/// @notice Pins the node's withdrawal trie (`chain/passertrie.go`) to the
+/// Solidity verifier `OptimismPortal` uses.
 ///
-/// The mirrored Go test is chain/passertrie_test.go's
-/// TestPasserTrieMatchesSolidityVectors, which asserts the same root.
+/// Everything below — the roots, the withdrawal hashes, the proof nodes —
+/// comes from `conformance/commitments/passer-trie.json` and
+/// `conformance/encodings/withdrawal.json` (BLOCKS-SPEC §11), the same files
+/// the node's own suite replays. The node generates them and checks every
+/// proof with geth's verifier before writing; this checks the same bytes with
+/// the verifier that will actually run on L1. If either implementation drifts,
+/// these proofs stop verifying here — before they stop verifying on L1.
 contract PasserTrieVectorsTest is Test {
-    bytes32 internal constant OUTPUTS_ROOT_SLOT = keccak256("op-cartesi.outputsMerkleRoot");
+    /// @dev The two-withdrawal trie, and the withdrawals it holds.
+    uint256 constant TRIE = 2;
+    string constant TRIE_ID = "solidity-two-withdrawals";
+    uint256 constant SINGLE = 1;
+    string constant SINGLE_ID = "solidity-single-slot";
 
-    // A cumulative outputs tree holding keccak256("cartesi output 0") and
-    // keccak256("cartesi output 1").
-    bytes32 constant OUTPUTS_ROOT = 0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5;
+    /// @dev Proof order within the trie case, as the node emits it.
+    uint256 constant P_OUTPUTS_ROOT = 0;
+    uint256 constant P_W1 = 1;
+    uint256 constant P_FORGED = 3;
 
-    // Withdrawal 1: nonce v1|0, 0x1111… -> 0x2222…, 1e15 wei, gas 100000.
-    bytes32 constant W1_HASH = 0x27f31ff201b73d4a552b801c296a72166443942679761eb8f895fc846e2edb39;
-    // Withdrawal 2: nonce v1|(1<<32), 0x3333… -> 0x4444…, 2e15 wei, data 0xbeef.
-    bytes32 constant W2_HASH = 0xb3eb3decba3830b9d78bed4d85fb5a8d4c1ac75032d150fad77b3a8c068c6760;
+    bytes32 withdrawalsRoot;
+    bytes32 outputsRootSlot;
 
-    // The trie root the Go side committed for the three slots above.
-    bytes32 constant WITHDRAWALS_ROOT = 0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398;
-
-    function outputsProof() internal pure returns (bytes[] memory proof) {
-        proof = new bytes[](2);
-        proof[0] =
-            hex"f871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080";
-        proof[1] =
-            hex"f843a031162d2015e595ff56791af1c06d5810127772b016e35987e7b4ce78a875e407a1a0c6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5";
+    function setUp() public {
+        withdrawalsRoot = Vectors.trieRoot(TRIE, TRIE_ID);
+        outputsRootSlot = Vectors.outputsRootSlot();
     }
 
-    function w1Proof() internal pure returns (bytes[] memory proof) {
-        proof = new bytes[](2);
-        proof[0] =
-            hex"f871a0a1dd8b8e825f70c1d35603753b60890c2a63648d1dc97c3bc1e14ae5930056f780a08dbdb6f3be331c3ced19b0a2baf59d1baffb600ee552c90cacbe9132e36490528080808080808080808080a055629c587fe7c44a7b2d7b4ef327c31b9fddddc94e9a3cf208d815ac957f9cc88080";
-        proof[1] = hex"e2a031f7ec4d5c9c587a91dc980620e3089ad157af828577d83e11486bc470a43dfc01";
+    /// @notice The reserved slot is the hash of its name, not a small integer,
+    /// so colliding with a sentMessages slot would take a keccak collision.
+    function testReservedSlotIsTheHashedName() public view {
+        assertEq(outputsRootSlot, keccak256("op-cartesi.outputsMerkleRoot"));
     }
 
-    /// The sentMessages slot proves with value 0x01 — byte for byte the check
-    /// OptimismPortal.proveWithdrawalTransaction performs.
-    function testWithdrawalSlotProvesLikeThePortal() public pure {
-        bytes32 slot = keccak256(abi.encode(W1_HASH, uint256(0)));
-        bool ok = SecureMerkleTrie.verifyInclusionProof(
-            abi.encode(slot), hex"01", w1Proof(), WITHDRAWALS_ROOT
+    /// @notice The sentMessages slot proves with value 0x01 — byte for byte
+    /// the check `OptimismPortal.proveWithdrawalTransaction` performs.
+    function testWithdrawalSlotProvesLikeThePortal() public view {
+        Vectors.Withdrawal memory w = Vectors.withdrawal(1, "portal-1");
+        (bytes32 slot, bytes memory value, bytes[] memory proof) =
+            Vectors.storageProof(TRIE, TRIE_ID, P_W1);
+
+        // The slot the node proved is the one the portal will ask for.
+        assertEq(slot, keccak256(abi.encode(w.hash, uint256(0))), "slot");
+        assertEq(slot, w.slot, "the withdrawal vector's own slot");
+        // A single 0x01 byte is its own RLP encoding, so the decoded value the
+        // vector carries is what the portal passes to the verifier verbatim.
+        assertEq(value, hex"01", "stored value");
+
+        assertTrue(
+            SecureMerkleTrie.verifyInclusionProof(
+                abi.encode(slot), value, proof, withdrawalsRoot
+            ),
+            "the node's proof failed the portal's verifier"
         );
-        assertTrue(ok, "the Go trie's proof failed the portal's verifier");
     }
 
-    /// The outputs root opens from the same root, through the same verifier.
-    function testOutputsRootOpensFromTheSameRoot() public pure {
-        bytes memory value =
-            SecureMerkleTrie.get(abi.encode(OUTPUTS_ROOT_SLOT), outputsProof(), WITHDRAWALS_ROOT);
-        bytes memory decoded = RLPReader.readBytes(RLPReader.toRLPItem(value));
-        assertEq(decoded.length, 32, "outputs root value length");
-        assertEq(bytes32(decoded), OUTPUTS_ROOT, "outputs root mismatch");
+    /// @notice The outputs root opens from the same root, through the same
+    /// verifier — which is how one header field serves both the portal's
+    /// withdrawal proofs and Cartesi's output proofs.
+    function testOutputsRootOpensFromTheSameRoot() public view {
+        (bytes32 slot, bytes memory expected, bytes[] memory proof) =
+            Vectors.storageProof(TRIE, TRIE_ID, P_OUTPUTS_ROOT);
+        assertEq(slot, outputsRootSlot, "the proof is not of the reserved slot");
+
+        bytes memory stored = SecureMerkleTrie.get(abi.encode(slot), proof, withdrawalsRoot);
+        bytes memory decoded = RLPReader.readBytes(RLPReader.toRLPItem(stored));
+        assertEq(decoded.length, 32, "outputs root length");
+        assertEq(decoded, expected, "outputs root differs from the vector");
+        assertEq(
+            bytes32(decoded),
+            Vectors.committedOutputsRoot(TRIE, TRIE_ID),
+            "the slot does not hold the root the block committed"
+        );
     }
 
-    /// A hash the guest never emitted does not prove. Reusing a real
-    /// withdrawal's proof for a forged key makes the verifier revert — the
-    /// path does not lead where the key demands — which is just as much a
-    /// failure to prove as returning false.
+    /// @notice A hash the guest never emitted does not prove. The node serves
+    /// a real exclusion proof for it, and reusing it as an inclusion proof
+    /// makes the verifier revert — the path does not lead where the key
+    /// demands — which is just as much a failure to prove as returning false.
     function testForgedWithdrawalDoesNotProve() public {
-        bytes32 forged = keccak256("never sent");
-        bytes32 slot = keccak256(abi.encode(forged, uint256(0)));
+        (bytes32 slot, bytes memory value, bytes[] memory proof) =
+            Vectors.storageProof(TRIE, TRIE_ID, P_FORGED);
+        assertEq(value.length, 0, "the vector's forged slot is not empty");
+
         vm.expectRevert();
-        this.verifyExternal(abi.encode(slot), hex"01", w1Proof(), WITHDRAWALS_ROOT);
+        this.verifyExternal(abi.encode(slot), hex"01", proof, withdrawalsRoot);
     }
 
     /// @dev expectRevert needs a call frame; internal library calls have none.
@@ -84,18 +107,17 @@ contract PasserTrieVectorsTest is Test {
         return SecureMerkleTrie.verifyInclusionProof(key, value, proof, root);
     }
 
-    /// The Solidity single-slot fixture agrees with the Go trie: a trie
-    /// holding only the outputs-root slot reaches the same root both sides.
-    function testFixtureMatchesGoForSingleSlotTrie() public pure {
-        (bytes32 root, bytes[] memory proof) = PasserTrieFixture.outputsOnlyTrie(OUTPUTS_ROOT);
-        bytes memory value = SecureMerkleTrie.get(abi.encode(OUTPUTS_ROOT_SLOT), proof, root);
-        bytes memory decoded = RLPReader.readBytes(RLPReader.toRLPItem(value));
-        assertEq(bytes32(decoded), OUTPUTS_ROOT);
-        // Pinned from Go: NewPasserTrie().SetOutputsRoot(OUTPUTS_ROOT).Root().
-        assertEq(
-            root,
-            0xeb1f9992f27f25df88c87c5bce969cb7ac49298870c512cf55481d1c2219b9ea,
-            "fixture root diverges from the Go trie"
-        );
+    /// @notice The Solidity single-slot fixture agrees with the node: a trie
+    /// holding only the reserved slot reaches the same root both sides. That
+    /// is what lets the execution tests build honestly-verified storage
+    /// proofs instead of hardcoding them.
+    function testFixtureMatchesTheNodeForASingleSlotTrie() public view {
+        bytes32 outputsRoot = Vectors.committedOutputsRoot(SINGLE, SINGLE_ID);
+        (bytes32 root, bytes[] memory proof) = PasserTrieFixture.outputsOnlyTrie(outputsRoot);
+
+        assertEq(root, Vectors.trieRoot(SINGLE, SINGLE_ID), "fixture root diverges from the node");
+
+        bytes memory stored = SecureMerkleTrie.get(abi.encode(outputsRootSlot), proof, root);
+        assertEq(bytes32(RLPReader.readBytes(RLPReader.toRLPItem(stored))), outputsRoot);
     }
 }

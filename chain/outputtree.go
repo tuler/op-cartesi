@@ -100,7 +100,8 @@ func (t *OutputTree) insert(leaf common.Hash) {
 }
 
 // Root returns the root of the fixed-height tree, padding the unfilled right
-// side with zero subtrees. TestOutputTreeMatchesSolidity pins the result
+// side with zero subtrees. conformance/commitments/outputs-tree.json pins
+// the result, and contracts/test/OutputTree.t.sol checks the proofs in it
 // against Cartesi's on-chain verifier.
 func (t OutputTree) Root() common.Hash {
 	node := common.Hash{}

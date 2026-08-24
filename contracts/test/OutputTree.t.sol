@@ -7,6 +7,7 @@ import {LibOutputValidityProof} from "cartesi-rollups-contracts/src/library/LibO
 import {OutputValidityProof} from "cartesi-rollups-contracts/src/common/OutputValidityProof.sol";
 
 import {OutputTree} from "./OutputTree.sol";
+import {Vectors} from "./Vectors.sol";
 
 /// @notice Exposes the proof library's internal, calldata-taking functions.
 contract ProofChecker {
@@ -27,66 +28,85 @@ contract ProofChecker {
 
 /// @notice Pins the node's outputs tree to Cartesi's on-chain verifier.
 ///
-/// The node builds the tree in Go (`chain/outputtree.go`) and the proof in
-/// `chain/outputproof.go`; the chain that has to accept the result is this one.
-/// Nothing checks that agreement automatically — the two implementations share
-/// no code — so it is pinned here by a root computed by the Go side, over
-/// outputs `TestOutputTreeMatchesSolidity` in `chain/outputproof_test.go` uses
-/// verbatim. Change either implementation and one of the two tests fails.
+/// The node builds the tree in `chain/outputtree.go` and the proof in
+/// `chain/outputproof.go`; the chain that has to accept the result is this
+/// one. The two implementations share no code, so the agreement is checked
+/// against the shared vectors
+/// (`conformance/commitments/outputs-tree.json`, BLOCKS-SPEC §10): the outputs
+/// and the root come from the file, and so do the **proofs the node actually
+/// serves** — which is the stronger check, because a proof this suite built
+/// itself would only prove the two builders agree.
+///
+/// `OutputTree.sol` stays as an independent Solidity builder, checked against
+/// the same file: three implementations of one tree, one set of expectations.
 contract OutputTreeTest is Test {
     using OutputTree for bytes32[];
 
-    /// @dev The root `chain/outputtree.go` computes over OUTPUTS below.
-    bytes32 constant GO_ROOT =
-        0x49afe364b0c4fe906304bbfc9d6273a94df905335403d8e65eeda219ea7fb717;
+    /// @dev The case whose five outputs this suite has always used.
+    uint256 constant CASE = 2;
+    string constant CASE_ID = "solidity-five";
 
     ProofChecker checker;
     bytes[] outputs;
     bytes32[] leaves;
+    bytes32 root;
 
     function setUp() public {
         checker = new ProofChecker();
-        outputs.push("output zero");
-        outputs.push("output one");
-        outputs.push("output two");
-        outputs.push("output three");
-        outputs.push("output four");
+        outputs = Vectors.outputs(CASE, CASE_ID);
+        root = Vectors.finalRoot(CASE, CASE_ID);
         for (uint256 i; i < outputs.length; ++i) {
             leaves.push(keccak256(outputs[i]));
         }
     }
 
-    function testRootMatchesTheGoImplementation() public view {
-        assertEq(leaves.root(), GO_ROOT);
+    /// @notice The Solidity builder reaches the root the node committed.
+    function testRootMatchesTheNode() public view {
+        assertEq(leaves.root(), root);
     }
 
-    /// @notice Every proof reproduces the root through Cartesi's own verifier.
-    ///
-    /// This is the property the withdrawal path rests on, and it is checked
-    /// against the released library rather than a reimplementation of it: the
-    /// contract on L1 will run exactly this code.
-    function testEveryProofVerifiesUnderCartesi() public view {
+    /// @notice Every proof the node serves reproduces the root through
+    /// Cartesi's own verifier — the code that will run on L1, not a
+    /// reimplementation of it.
+    function testNodeProofsVerifyUnderCartesi() public view {
         for (uint256 i; i < outputs.length; ++i) {
             OutputValidityProof memory proof = OutputValidityProof({
                 outputIndex: uint64(i),
-                outputHashesSiblings: leaves.siblings(i)
+                outputHashesSiblings: Vectors.outputSiblings(CASE, CASE_ID, i)
             });
             assertTrue(checker.siblingsValid(proof));
-            assertEq(checker.rootOf(outputs[i], proof), GO_ROOT);
+            assertEq(checker.rootOf(outputs[i], proof), root);
+        }
+    }
+
+    /// @notice The Solidity builder's own co-paths agree with the node's, leaf
+    /// for leaf. If they diverge, one of the two builders is wrong and the
+    /// test above would not say which.
+    function testSiblingsMatchTheNode() public view {
+        for (uint256 i; i < outputs.length; ++i) {
+            assertEq(
+                keccak256(abi.encode(leaves.siblings(i))),
+                keccak256(abi.encode(Vectors.outputSiblings(CASE, CASE_ID, i))),
+                "co-path differs from the one the node serves"
+            );
         }
     }
 
     /// @notice A leaf the machine never emitted does not reach the root.
     function testForgedLeafDoesNotReproduceTheRoot() public view {
-        OutputValidityProof memory proof =
-            OutputValidityProof({outputIndex: 2, outputHashesSiblings: leaves.siblings(2)});
-        assertTrue(checker.rootOf("an output the machine never emitted", proof) != GO_ROOT);
+        OutputValidityProof memory proof = OutputValidityProof({
+            outputIndex: 2,
+            outputHashesSiblings: Vectors.outputSiblings(CASE, CASE_ID, 2)
+        });
+        assertTrue(checker.rootOf("an output the machine never emitted", proof) != root);
     }
 
     /// @notice A proof of the right shape but the wrong position fails too.
     function testProofAtTheWrongIndexIsRejected() public view {
-        OutputValidityProof memory proof =
-            OutputValidityProof({outputIndex: 3, outputHashesSiblings: leaves.siblings(2)});
-        assertTrue(checker.rootOf(outputs[3], proof) != GO_ROOT);
+        OutputValidityProof memory proof = OutputValidityProof({
+            outputIndex: 3,
+            outputHashesSiblings: Vectors.outputSiblings(CASE, CASE_ID, 2)
+        });
+        assertTrue(checker.rootOf(outputs[3], proof) != root);
     }
 }

@@ -7,6 +7,7 @@
     "messagePasser": "0x4200000000000000000000000000000000000016",
     "cases": [
         {
+            "id": "guest-encoder",
             "name": "the guest's encoder vector: data, and an ordinal past zero",
             "withdrawal": {
                 "nonce": "1766847064778384329583297500742918515827483896875618958121606381681246209",
@@ -22,6 +23,7 @@
             "slot": "0xe5f78cab44757434cb0d286ea1e1c46a44e77b64c4cf6c46e1f14a66e0aa9436"
         },
         {
+            "id": "portal-1",
             "name": "portal vector 1: ether, no data",
             "withdrawal": {
                 "nonce": "1766847064778384329583297500742918515827483896875618958121606201292619776",
@@ -37,6 +39,7 @@
             "slot": "0x2a6a101de67adffe9812999c6511d5c530f9b7b7f5e1fd806951aef67df64193"
         },
         {
+            "id": "portal-2",
             "name": "portal vector 2: a later input, with data",
             "withdrawal": {
                 "nonce": "1766847064778384329583297500742918515827483896875618958121606205587587072",
@@ -52,6 +55,7 @@
             "slot": "0x0309a28b96ec5305f61e63a3a76891d2865d20c759970bc2183f1c5e687dc752"
         },
         {
+            "id": "messenger",
             "name": "a messenger-shaped withdrawal wrapping a relayMessage",
             "withdrawal": {
                 "nonce": "1766847064778384329583297500742918515827483896875618958121606381681246208",

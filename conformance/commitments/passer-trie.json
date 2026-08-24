@@ -5,6 +5,7 @@
     "emptyTrieRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
     "cases": [
         {
+            "id": "genesis",
             "name": "genesis: the reserved slot alone, holding the empty tree's root",
             "steps": [
                 {
@@ -12,6 +13,8 @@
                     "root": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
                 }
             ],
+            "root": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb",
+            "outputsRoot": "0x0a162946e56158bac0673e6dd3bdfdc1e4a0e7744a120fdb640050c8d7abe1c6",
             "proofs": [
                 {
                     "name": "the reserved outputs root slot",
@@ -24,6 +27,7 @@
             ]
         },
         {
+            "id": "solidity-single-slot",
             "name": "the Solidity fixture's single-slot trie: the reserved slot alone",
             "steps": [
                 {
@@ -31,6 +35,8 @@
                     "root": "0xeb1f9992f27f25df88c87c5bce969cb7ac49298870c512cf55481d1c2219b9ea"
                 }
             ],
+            "root": "0xeb1f9992f27f25df88c87c5bce969cb7ac49298870c512cf55481d1c2219b9ea",
+            "outputsRoot": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
             "proofs": [
                 {
                     "name": "the reserved outputs root slot",
@@ -43,6 +49,7 @@
             ]
         },
         {
+            "id": "solidity-two-withdrawals",
             "name": "the Solidity suite's trie: two withdrawals and the outputs root",
             "steps": [
                 {
@@ -54,6 +61,8 @@
                     "root": "0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398"
                 }
             ],
+            "root": "0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398",
+            "outputsRoot": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
             "proofs": [
                 {
                     "name": "the reserved outputs root slot",
@@ -93,6 +102,7 @@
             ]
         },
         {
+            "id": "cumulative",
             "name": "block by block: the trie is cumulative and the reserved slot is overwritten",
             "steps": [
                 {
@@ -118,6 +128,8 @@
                     "root": "0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398"
                 }
             ],
+            "root": "0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398",
+            "outputsRoot": "0xc6848d313a7dbcdb409c9606318673fde2df2896460c76716c63ba695a0466e5",
             "proofs": [
                 {
                     "name": "the reserved outputs root slot",

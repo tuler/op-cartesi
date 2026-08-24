@@ -36,12 +36,16 @@ implementation, and hides which side is the reference.
 - **The guest (TypeScript)** — [`evm-compat/js/test/conformance.test.ts`](../evm-compat/js/test/conformance.test.ts)
   replays the four sets `@op-cartesi/evm` implements: withdrawals, events,
   the call envelope, and output leaf hashing.
-- **The contracts (Solidity)** — not yet. `contracts/test/PasserTrieVectors.t.sol`
-  and `contracts/test/CrossDomainVectors.t.sol` still carry their own copies of
-  the roots and hashes. Repointing them at these files with `vm.parseJson` is
-  the obvious next step and wants someone with foundry installed; until then the
-  generator asserts those constants (see below), so the two cannot drift
-  silently.
+- **The contracts (Solidity)** — [`contracts/test/Vectors.sol`](../contracts/test/Vectors.sol)
+  loads them with `vm.parseJson`, and the three suites that used to carry pasted
+  constants read it: `OutputTree.t.sol`, `PasserTrieVectors.t.sol` and
+  `CrossDomainVectors.t.sol`. That side is the interesting one, because it runs
+  the proofs in these files through the code that will actually judge them on
+  L1 — Cartesi's `LibOutputValidityProof` and OP's `SecureMerkleTrie`.
+
+  `vm.parseJson` cannot select an array element by field value, so cases are
+  addressed by index and every accessor asserts the `id` at that index.
+  Reordering a file fails loudly instead of silently testing a different case.
 - **A second implementation** — this is what the files are for. Nothing in
   them is Go-shaped: integers are JSON numbers or decimal strings, byte
   strings are `0x` hex, and the machine is a script rather than an emulator.
@@ -65,8 +69,8 @@ Generation is not a rubber stamp, though. Before anything is written:
 - every header is hashed from the fields the file records, not from the
   object that produced them;
 - and the constants that predate these files are asserted: the withdrawal
-  payload captured from the TypeScript guest, and the four roots and hashes
-  the Solidity suite hardcodes. A change that moves any of them fails
+  payload captured from the TypeScript guest, and the five roots and hashes the
+  Solidity suites used to hardcode. A change that moves any of them fails
   generation instead of quietly rewriting the file.
 
 ## The scripted machine
@@ -113,7 +117,8 @@ here yet:
   today an in-process Go harness using op-node's own wire types — into a
   cross-implementation test. Making that harness take an endpoint is the
   prerequisite for a second engine.
-- **`crossdomain`** — the messenger encodings. Unlike everything above, the
+- **`crossdomain`** — the messenger encodings, the last pasted constant in the
+  Solidity suite (`CrossDomainVectors.t.sol`'s v1 message hash). Unlike everything above, the
   reference for those is the *guest*, so the generator would have to be the
   TypeScript side. `encodings/withdrawal.json` already carries the relayMessage
   payload as opaque withdrawal data, which is the half that reaches consensus.

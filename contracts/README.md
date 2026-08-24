@@ -11,8 +11,10 @@ the voucher path for everything the portal cannot execute.
 supporting libraries, copied verbatim (MIT) with only import paths rewritten:
 `OPOutputsMerkleRootValidator` opens the Cartesi outputs root out of the
 withdrawal trie with the *same* verifier the portal runs, and
-`test/PasserTrieVectors.t.sol` pins the node's Go trie to it with fixed
-vectors — mirrored on the Go side by `TestPasserTrieMatchesSolidityVectors`.
+`test/PasserTrieVectors.t.sol` pins the node's Go trie to it with the shared
+vectors in [`../conformance`](../conformance/README.md), which the node
+generates and its own suite replays — so the roots and proofs this suite
+judges are the bytes the node actually serves, not a copy of them.
 
 A [Foundry](https://getfoundry.sh) project. Dependencies come from
 [soldeer](https://soldeer.xyz) — the Cartesi Rollups contracts and OpenZeppelin
@@ -23,6 +25,11 @@ verify a voucher here are the ones a real Cartesi chain runs:
 forge soldeer install   # populates dependencies/
 forge test
 ```
+
+The suite reads [`../conformance`](../conformance/README.md) — hence the
+read-only `fs_permissions` entry in `foundry.toml`. Regenerating those files is
+a Go command (`go test ./chain -run TestConformance -update`); this side only
+consumes them.
 
 `dependencies/` is generated and gitignored. `remappings.txt` is checked in and
 `soldeer.remappings_generate` is off, so the import paths are a file you can
@@ -39,9 +46,11 @@ Cartesi Rollups is pinned to **3.0.0-alpha.6**. Two things follow from that:
   right split: a contract never builds the outputs tree, it only checks a proof
   against a root. The builder now lives in the node (`chain/outputtree.go`),
   with a copy in `test/OutputTree.sol` for the tests. Since the two share no
-  code, `test/OutputTree.t.sol` and `TestOutputTreeMatchesSolidity` in the Go
-  package pin both to the same root over the same outputs — a disagreement
-  there would otherwise surface as a withdrawal that cannot be executed.
+  code, `test/OutputTree.t.sol` checks both against
+  `../conformance/commitments/outputs-tree.json` — the same outputs, the same
+  root, and the proofs the node serves run through Cartesi's own verifier. A
+  disagreement would otherwise surface as a withdrawal that cannot be
+  executed.
 
 The verification itself is unchanged between 2.2 and 3.0: same
 `OutputValidityProof` struct, same height-63 zero-padded keccak tree, same

@@ -244,11 +244,12 @@ What it costs:
   layout of `sentMessages` are things the host and guest must reproduce
   byte-exactly, forever. That surface is small — one struct hash, one mapping
   slot, plus the messenger encodings §6 adds — and it is pinned by cross-tests
-  in three directions: Go against the guest's TypeScript encoding
-  (`chain/withdrawal_test.go`), Go against geth's verifier
-  (`chain/passertrie_test.go`), and Go against the vendored Solidity verifier
-  (`contracts/test/PasserTrieVectors.t.sol`, mirrored by
-  `TestPasserTrieMatchesSolidityVectors`).
+  in three directions, all through one file — the shared vectors of
+  [`conformance/`](../conformance/README.md): the guest's TypeScript encoders
+  replay it (`evm-compat/js/test/conformance.test.ts`), the node generates it
+  and checks every proof in it with geth's verifier
+  (`chain/conformance_test.go`), and the vendored Solidity verifier judges the
+  same bytes (`contracts/test/PasserTrieVectors.t.sol`).
 - **The account proof stays impossible.** Anything that verifies the
   `0x4200…0016` *account* against `stateRoot` — a third-party prover service,
   a pre-Isthmus consumer — still breaks. viem and the portal do not.

@@ -55,6 +55,7 @@ const (
 	pinnedSolidityWithdrawalsRoot = "0xb9e3308bcb994a5eb2144c3841889a2eab0c855b9b3251b41c67b856cff0f398"
 	pinnedSolidityOutputsOnlyRoot = "0xeb1f9992f27f25df88c87c5bce969cb7ac49298870c512cf55481d1c2219b9ea"
 	pinnedSolidityMessengerHash   = "0xbbbf25d8ab7f7259713453eddad8ecdb6317541a9e5b0b4f3152169d421253a8"
+	pinnedSolidityFiveOutputsRoot = "0x49afe364b0c4fe906304bbfc9d6273a94df905335403d8e65eeda219ea7fb717"
 
 	// The relayMessage payload CrossDomainVectors.t.sol pins, carried here as
 	// opaque withdrawal data: it is what makes the messenger-shaped
@@ -948,6 +949,7 @@ type withdrawalJSON struct {
 }
 
 type withdrawalCase struct {
+	ID         string         `json:"id"`
 	Name       string         `json:"name"`
 	Withdrawal withdrawalJSON `json:"withdrawal"`
 	// Payload is the Withdrawal call encoding; Output is it wrapped in a
@@ -980,6 +982,7 @@ func versionedNonce(inputIndex, ordinal uint64) *big.Int {
 }
 
 func conformanceWithdrawals(t *testing.T) []struct {
+	id            string
 	name          string
 	w             *Withdrawal
 	pinnedHash    string
@@ -987,12 +990,14 @@ func conformanceWithdrawals(t *testing.T) []struct {
 } {
 	t.Helper()
 	return []struct {
+		id            string
 		name          string
 		w             *Withdrawal
 		pinnedHash    string
 		pinnedPayload string
 	}{
 		{
+			id:   "guest-encoder",
 			name: "the guest's encoder vector: data, and an ordinal past zero",
 			w: &Withdrawal{
 				Nonce:  versionedNonce(42, 1),
@@ -1004,6 +1009,7 @@ func conformanceWithdrawals(t *testing.T) []struct {
 			pinnedPayload: pinnedTSWithdrawalPayload,
 		},
 		{
+			id:   "portal-1",
 			name: "portal vector 1: ether, no data",
 			w: &Withdrawal{
 				Nonce:  versionedNonce(0, 0),
@@ -1014,6 +1020,7 @@ func conformanceWithdrawals(t *testing.T) []struct {
 			pinnedHash: pinnedSolidityW1Hash,
 		},
 		{
+			id:   "portal-2",
 			name: "portal vector 2: a later input, with data",
 			w: &Withdrawal{
 				Nonce:  versionedNonce(1, 0),
@@ -1025,6 +1032,7 @@ func conformanceWithdrawals(t *testing.T) []struct {
 			pinnedHash: pinnedSolidityW2Hash,
 		},
 		{
+			id:   "messenger",
 			name: "a messenger-shaped withdrawal wrapping a relayMessage",
 			w: &Withdrawal{
 				Nonce:  versionedNonce(42, 0),
@@ -1065,7 +1073,7 @@ func TestConformanceWithdrawal(t *testing.T) {
 			t.Fatalf("%s: the encoding does not parse back", in.name)
 		}
 		cases = append(cases, withdrawalCase{
-			Name: in.name,
+			ID: in.id, Name: in.name,
 			Withdrawal: withdrawalJSON{
 				Nonce: dec(in.w.Nonce), Sender: in.w.Sender.Hex(), Target: in.w.Target.Hex(),
 				Value: dec(in.w.Value), GasLimit: dec(in.w.GasLimit), Data: hexs(in.w.Data),
@@ -1151,6 +1159,7 @@ type outputsTreeFile struct {
 }
 
 type outputsTreeCase struct {
+	ID      string   `json:"id"`
 	Name    string   `json:"name"`
 	Outputs []string `json:"outputs"`
 	// Leaves are keccak256 of each output, in order.
@@ -1169,21 +1178,36 @@ type outputProofJSON struct {
 
 func TestConformanceOutputsTree(t *testing.T) {
 	inputs := []struct {
+		id        string
 		name      string
 		outputs   [][]byte
 		withProof bool
 	}{
 		{
+			id:        "solidity-two",
 			name:      "the Solidity suite's two outputs",
 			outputs:   [][]byte{[]byte("cartesi output 0"), []byte("cartesi output 1")},
 			withProof: true,
 		},
 		{
+			id:        "odd-count",
 			name:      "an odd count, which pads the right side with zero subtrees",
 			outputs:   [][]byte{[]byte("a"), []byte("b"), []byte("c")},
 			withProof: true,
 		},
 		{
+			// The five outputs OutputTree.t.sol has always built its tree
+			// from, so the root it pinned survives the move into this file.
+			id:   "solidity-five",
+			name: "the Solidity suite's five outputs",
+			outputs: [][]byte{
+				[]byte("output zero"), []byte("output one"), []byte("output two"),
+				[]byte("output three"), []byte("output four"),
+			},
+			withProof: true,
+		},
+		{
+			id:   "nine",
 			name: "enough outputs to carry the frontier past two levels",
 			outputs: func() [][]byte {
 				out := make([][]byte, 9)
@@ -1199,7 +1223,7 @@ func TestConformanceOutputsTree(t *testing.T) {
 	for _, in := range inputs {
 		var leaves []common.Hash
 		tree := NewOutputTree()
-		c := outputsTreeCase{Name: in.name}
+		c := outputsTreeCase{ID: in.id, Name: in.name}
 		for _, output := range in.outputs {
 			leaf := OutputLeaf(output)
 			leaves = append(leaves, leaf)
@@ -1231,10 +1255,21 @@ func TestConformanceOutputsTree(t *testing.T) {
 		}
 		cases = append(cases, c)
 	}
-	// The first case is the one the Solidity suite pins; if it moves, the
-	// contracts break too.
-	if got := cases[0].RootAfter[len(cases[0].RootAfter)-1]; got != pinnedSolidityOutputsRoot {
+	// The two roots the Solidity suite pinned before this file existed.
+	finalRoot := func(id string) string {
+		for _, c := range cases {
+			if c.ID == id {
+				return c.RootAfter[len(c.RootAfter)-1]
+			}
+		}
+		t.Fatalf("no case with id %q", id)
+		return ""
+	}
+	if got := finalRoot("solidity-two"); got != pinnedSolidityOutputsRoot {
 		t.Fatalf("outputs root %s, but the Solidity suite pins %s", got, pinnedSolidityOutputsRoot)
+	}
+	if got := finalRoot("solidity-five"); got != pinnedSolidityFiveOutputsRoot {
+		t.Fatalf("five-output root %s, but OutputTree.t.sol pins %s", got, pinnedSolidityFiveOutputsRoot)
 	}
 
 	built := outputsTreeFile{
@@ -1292,8 +1327,15 @@ type passerTrieFile struct {
 }
 
 type passerTrieCase struct {
+	ID    string           `json:"id"`
 	Name  string           `json:"name"`
 	Steps []passerTrieStep `json:"steps"`
+	// Root and OutputsRoot are the last step's, hoisted: what the case's
+	// final block commits. A consumer that only wants the committed values
+	// should not have to walk the steps, and a JSONPath projection over a
+	// one-step case does not come back as an array.
+	Root        string `json:"root"`
+	OutputsRoot string `json:"outputsRoot"`
 	// Proofs are against the root after the last step.
 	Proofs []storageProofJSON `json:"proofs"`
 }
@@ -1353,6 +1395,7 @@ func TestConformancePasserTrie(t *testing.T) {
 	twoOutputs := common.HexToHash(pinnedSolidityOutputsRoot)
 
 	inputs := []struct {
+		id    string
 		name  string
 		steps []struct {
 			inserts []common.Hash
@@ -1361,6 +1404,7 @@ func TestConformancePasserTrie(t *testing.T) {
 		probe []common.Hash
 	}{
 		{
+			id:   "genesis",
 			name: "genesis: the reserved slot alone, holding the empty tree's root",
 			steps: []struct {
 				inserts []common.Hash
@@ -1369,6 +1413,7 @@ func TestConformancePasserTrie(t *testing.T) {
 			probe: []common.Hash{OutputsRootSlot},
 		},
 		{
+			id:   "solidity-single-slot",
 			name: "the Solidity fixture's single-slot trie: the reserved slot alone",
 			steps: []struct {
 				inserts []common.Hash
@@ -1377,6 +1422,7 @@ func TestConformancePasserTrie(t *testing.T) {
 			probe: []common.Hash{OutputsRootSlot},
 		},
 		{
+			id:   "solidity-two-withdrawals",
 			name: "the Solidity suite's trie: two withdrawals and the outputs root",
 			steps: []struct {
 				inserts []common.Hash
@@ -1386,6 +1432,7 @@ func TestConformancePasserTrie(t *testing.T) {
 				withdrawalSlot(crypto.Keccak256Hash([]byte("never sent")))},
 		},
 		{
+			id:   "cumulative",
 			name: "block by block: the trie is cumulative and the reserved slot is overwritten",
 			steps: []struct {
 				inserts []common.Hash
@@ -1403,7 +1450,7 @@ func TestConformancePasserTrie(t *testing.T) {
 	cases := make([]passerTrieCase, 0, len(inputs))
 	for _, in := range inputs {
 		p := NewPasserTrie()
-		c := passerTrieCase{Name: in.name}
+		c := passerTrieCase{ID: in.id, Name: in.name}
 		for _, step := range in.steps {
 			inserts := make([]string, 0, len(step.inserts))
 			for _, h := range step.inserts {
@@ -1420,6 +1467,8 @@ func TestConformancePasserTrie(t *testing.T) {
 			})
 		}
 		root := p.Root()
+		c.Root = root.Hex()
+		c.OutputsRoot = c.Steps[len(c.Steps)-1].OutputsRoot
 		for _, slot := range in.probe {
 			nodes, err := p.Prove(slot)
 			if err != nil {
@@ -1451,19 +1500,19 @@ func TestConformancePasserTrie(t *testing.T) {
 	}
 	// Both roots the Solidity suite hardcodes. If either moves, the contracts
 	// break with this file rather than after it.
-	rootOf := func(name string) string {
+	rootOf := func(id string) string {
 		for _, c := range cases {
-			if c.Name == name {
-				return c.Steps[len(c.Steps)-1].Root
+			if c.ID == id {
+				return c.Root
 			}
 		}
-		t.Fatalf("no case named %q", name)
+		t.Fatalf("no case with id %q", id)
 		return ""
 	}
-	if got := rootOf("the Solidity fixture's single-slot trie: the reserved slot alone"); got != pinnedSolidityOutputsOnlyRoot {
+	if got := rootOf("solidity-single-slot"); got != pinnedSolidityOutputsOnlyRoot {
 		t.Fatalf("outputs-only root %s, but the Solidity fixture pins %s", got, pinnedSolidityOutputsOnlyRoot)
 	}
-	if got := rootOf("the Solidity suite's trie: two withdrawals and the outputs root"); got != pinnedSolidityWithdrawalsRoot {
+	if got := rootOf("solidity-two-withdrawals"); got != pinnedSolidityWithdrawalsRoot {
 		t.Fatalf("withdrawals root %s, but the Solidity suite pins %s", got, pinnedSolidityWithdrawalsRoot)
 	}
 
@@ -1498,6 +1547,9 @@ func TestConformancePasserTrie(t *testing.T) {
 			if p.Root().Hex() != step.Root {
 				t.Errorf("%s: root after step %d is %s, vector says %s", c.Name, i, p.Root(), step.Root)
 			}
+		}
+		if p.Root().Hex() != c.Root || c.OutputsRoot != c.Steps[len(c.Steps)-1].OutputsRoot {
+			t.Errorf("%s: the hoisted committed values disagree with the last step", c.Name)
 		}
 		for _, proof := range c.Proofs {
 			nodes := make([][]byte, 0, len(proof.Nodes))
