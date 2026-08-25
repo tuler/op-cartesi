@@ -716,6 +716,31 @@ outcomes, encodings — and the application owns only its semantics:
   it.
 - **The reserved namespaces are enforced at registration**: the 0xC751
   pattern and the adopted predeploys refuse application addresses.
+- **A contract may declare a per-block tick.** `onBlock` runs once at the
+  head of every block, whether or not the block carries transactions — for
+  logic that advances on its own clock rather than on a caller's. It costs
+  the chain nothing to offer, because the input was already arriving: §2's
+  first observation is that every block opens with op-node's attributes
+  deposit to `L1Block`, and the sequencer runs it before any mempool
+  transaction, so a block with no user transactions is still a block in
+  which the guest runs. The router fires the ticks once that deposit's
+  attributes are stored, gated on the canonical depositor as sender — the
+  address alone is not authority, or a user transaction with
+  attributes-shaped calldata could mint extra ticks. It is a *start*-of-block
+  hook by construction: the attributes deposit is transaction index 0 and no
+  input follows a block's last transaction, so a tick sees this block's
+  header context with the previous block's transactions applied. It is not
+  an ABI entry — a tick has no selector and no sender — and it carries the
+  §5 outcome model minus REJECT, with per-tick isolation: one journal mark
+  and one output sink each, attributes stored first, so neither an
+  application's bug nor another contract's tick can be taken down by it.
+  What isolation cannot cover is cost. A tick is unpriced (no sender, so no
+  fee and no nonce), its cycles are billed to the attributes deposit and
+  count against the block gas limit, and that input is mandatory in a way
+  no other is — the sequencer aborts the build when a deposit fails *hard*,
+  so a runaway tick stalls block production rather than costing a sender a
+  transaction. Exceptions are contained; unbounded work is the application's
+  own responsibility. *(done — `Router.runTicks`, `ContractSpec.onBlock`.)*
 
 And the manifest becomes machine-readable state: every registered address
 and its ABI — built-ins as kind 0, applications as kind 1 — is recorded in

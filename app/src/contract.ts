@@ -14,12 +14,20 @@
 // already written state the journal does not cover, i.e. its own RAM,
 // throws `Fail` instead of `Revert`: same error report to the caller, but
 // the ledger and the outputs stand rather than being rolled back under it.
+//
+// Besides the two ABI-driven entries there is a third, callerless one:
+// `onBlock`, the per-block tick, for logic that must advance whether or not
+// anyone sent a transaction. It has no selector and no sender, so it is not
+// an ABI entry — see the README, "The per-block tick".
 
 import {
     type AdvanceOutcome,
+    type BlockContext,
     type CallContext,
     errorRevert,
+    type L1Attributes,
     type OutputsSink,
+    type TickContext,
     type TxContext,
     tryDecodeCalldata,
     type ViewOutcome,
@@ -35,7 +43,7 @@ import {
     type Hex,
 } from "viem";
 import type { Ledger } from "./ledger.ts";
-import type { Handler } from "./types.ts";
+import type { Handler, TickOutcome } from "./types.ts";
 
 /** Thrown by a callback to revert with chosen data (or an Error(string)
  * reason). Any other exception reverts with the exception's message. */
@@ -76,6 +84,16 @@ export interface TransactionEnv {
 export interface ViewEnv {
     call: CallContext;
     ledger: Ledger;
+}
+
+/** What a tick callback receives. No `tx`: a tick has no sender, no value
+ * and no calldata, because nobody called it. `block` is this block's header
+ * context and `l1` the attributes the same input just delivered. */
+export interface BlockEnv {
+    block: BlockContext;
+    l1: L1Attributes;
+    ledger: Ledger;
+    out: OutputsSink;
 }
 
 type Mutable = "nonpayable" | "payable";
@@ -122,6 +140,20 @@ export interface ContractSpec<abi extends Abi> {
     payable?: boolean;
     transactions?: TransactionCallbacks<abi>;
     views?: ViewCallbacks<abi>;
+    /** The per-block tick: run once at the head of every block, whether or
+     * not the block carries transactions — the hook for logic that advances
+     * on its own clock rather than on a caller's.
+     *
+     * It is not an ABI entry, and deliberately: a tick has no selector and
+     * no caller, so recording one would misdescribe the contract's interface
+     * surface to the ABI drive and to the tooling that reads it.
+     *
+     * Same failure rule as a transaction callback (`Revert` before the first
+     * private write, `Fail` after), and the same guarantee: nothing thrown
+     * here can reject the input. What it cannot be protected from is cost —
+     * every block pays for it, on the critical path of block production, so
+     * keep it bounded. See the README, "The per-block tick". */
+    onBlock?: (env: BlockEnv) => Promise<void> | void;
 }
 
 function mutabilityOf(abi: Abi, functionName: string): AbiStateMutability | undefined {
@@ -162,8 +194,9 @@ export function contractHandler<const abi extends Abi>(spec: ContractSpec<abi>):
     // the typeof-function guard at its call site.
     const transactions: Record<string, unknown> = spec.transactions ?? {};
     const views: Record<string, unknown> = spec.views ?? {};
+    const onBlock = spec.onBlock;
 
-    return {
+    const handler: Handler = {
         payable: spec.payable ?? false,
 
         async advance(ctx: TxContext, out: OutputsSink, ledger: Ledger): Promise<AdvanceOutcome> {
@@ -208,4 +241,22 @@ export function contractHandler<const abi extends Abi>(spec: ContractSpec<abi>):
             }
         },
     };
+
+    // Left undefined when the contract declares no tick, so the router can
+    // skip it without calling into a no-op every block.
+    if (onBlock) {
+        handler.onBlock = async (
+            tick: TickContext,
+            out: OutputsSink,
+            ledger: Ledger,
+        ): Promise<TickOutcome> => {
+            try {
+                await onBlock({ block: tick.block, l1: tick.l1, ledger, out });
+                return { kind: "accept" };
+            } catch (e) {
+                return failureOutcome(e);
+            }
+        };
+    }
+    return handler;
 }

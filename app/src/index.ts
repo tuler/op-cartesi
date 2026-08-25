@@ -8,6 +8,7 @@
 export type { ApplicationOptions } from "./application.ts";
 export { Application } from "./application.ts";
 export type {
+    BlockEnv,
     ContractSpec,
     TransactionCallbacks,
     TransactionEnv,
@@ -25,4 +26,4 @@ export {
 } from "./ledger.ts";
 export type { AdvanceResult, InspectResult, RouterConfig } from "./router.ts";
 export { Router } from "./router.ts";
-export type { Handler } from "./types.ts";
+export type { Handler, TickOutcome } from "./types.ts";

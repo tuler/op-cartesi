@@ -24,6 +24,12 @@ export const CONFIG_ADDRESS: Address = "0xc7510000000000000000000000000000000000
  * attributes deposit every block (EVM-COMPAT §6). */
 export const L1BLOCK_ADDRESS: Address = "0x4200000000000000000000000000000000000015";
 
+/** op-node's canonical L1-attributes depositor. It is the sender of the
+ * deposit that opens every block, and therefore the only authority for
+ * "this input is the chain's own per-block attributes transaction" —
+ * a user transaction to L1BLOCK_ADDRESS is not one, whatever its calldata. */
+export const L1_INFO_DEPOSITOR: Address = "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001";
+
 /** Domain tag of the token façade derivation. */
 export const TOKEN_DOMAIN = "ctsi.erc20.v1";
 

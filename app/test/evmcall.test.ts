@@ -1,15 +1,12 @@
 // The inspect surface: EvmCall return/revert framing, EOA semantics,
 // EvmSimulate's no-mutation guarantee, and the adopted L1Block predeploy.
 
-import { encodeEvmCall, L1BLOCK_ADDRESS, l1BlockAbi } from "@op-cartesi/evm";
+import { encodeEvmCall, L1_INFO_DEPOSITOR, L1BLOCK_ADDRESS, l1BlockAbi } from "@op-cartesi/evm";
 import { concat, encodeFunctionData, type Hex, toBytes, toFunctionSelector, toHex } from "viem";
 import { describe, expect, it } from "vitest";
 import { block, CHAIN_ID, depositTx, driveBytes, makeRouter, user } from "./helpers.ts";
 
 const EOA = "0x00000000000000000000000000000000000000aa";
-
-// op-node's canonical L1-attributes depositor.
-const L1_INFO_DEPOSITOR = "0xdeaddeaddeaddeaddeaddeaddeaddeaddead0001";
 
 function call(to: `0x${string}`, data: Uint8Array, simulate = false, value = 0n): Uint8Array {
     return toBytes(

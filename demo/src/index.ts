@@ -25,8 +25,14 @@ async function main(): Promise<void> {
     const counterAbi = parseAbi([
         "function increment()",
         "function count() view returns (uint256)",
+        "function blocks() view returns (uint256)",
     ]);
     let count = 0n;
+    // The other half of the demonstration: a number that moves with no
+    // transactions at all. onBlock runs at the head of every block — the
+    // chain's own attributes deposit is the input it rides — so `blocks()`
+    // climbs on an idle devnet while `count()` sits still.
+    let blocks = 0n;
     await app.contract({
         address: "0xc0de000000000000000000000000000000000001",
         abi: counterAbi,
@@ -37,6 +43,10 @@ async function main(): Promise<void> {
         },
         views: {
             count: () => count,
+            blocks: () => blocks,
+        },
+        onBlock: () => {
+            blocks += 1n;
         },
     });
 

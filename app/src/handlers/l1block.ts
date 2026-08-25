@@ -21,6 +21,7 @@ import type {
     AdvanceOutcome,
     CallContext,
     Handler,
+    L1Attributes,
     OutputsSink,
     TxContext,
     ViewOutcome,
@@ -28,18 +29,6 @@ import type {
 
 const SET_ECOTONE: Hex = toFunctionSelector("setL1BlockValuesEcotone()");
 const SET_ISTHMUS: Hex = toFunctionSelector("setL1BlockValuesIsthmus()");
-
-interface L1Attributes {
-    baseFeeScalar: number;
-    blobBaseFeeScalar: number;
-    sequenceNumber: bigint;
-    timestamp: bigint;
-    number: bigint;
-    basefee: bigint;
-    blobBaseFee: bigint;
-    hash: Hex;
-    batcherHash: Hex;
-}
 
 function u(view: DataView, off: number, bytes: number): bigint {
     let v = 0n;

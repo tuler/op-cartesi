@@ -35,6 +35,30 @@ export interface TxContext {
     mint: bigint;
 }
 
+/** The L1 attributes op-node deposits at the head of every block, decoded
+ * out of the Ecotone/Isthmus packed calldata. Shared vocabulary because two
+ * parties read them: the L1Block predeploy, which serves them as views, and
+ * the per-block tick, which receives them alongside the L2 block context. */
+export interface L1Attributes {
+    baseFeeScalar: number;
+    blobBaseFeeScalar: number;
+    sequenceNumber: bigint;
+    timestamp: bigint;
+    number: bigint;
+    basefee: bigint;
+    blobBaseFee: bigint;
+    hash: Hex;
+    batcherHash: Hex;
+}
+
+/** The context a per-block tick receives: this block's header context, and
+ * the L1 attributes the same input just delivered. There is no sender, no
+ * value and no calldata — a tick has no caller. */
+export interface TickContext {
+    block: BlockContext;
+    l1: L1Attributes;
+}
+
 /** A view call (EvmCall over inspect — EVM-COMPAT §7). */
 export interface CallContext {
     sender: Address;

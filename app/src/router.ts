@@ -23,6 +23,7 @@ import {
     encodeEvmLog,
     encodeWithdrawal,
     errorRevert,
+    L1_INFO_DEPOSITOR,
     L1BLOCK_ADDRESS,
     L2_BRIDGE_ADDRESS,
     L2_MESSENGER_ADDRESS,
@@ -57,6 +58,8 @@ import {
     TAG_FAIL,
     TAG_RETURN,
     TAG_REVERT,
+    type TickContext,
+    type TickOutcome,
     type TxContext,
     type ViewOutcome,
 } from "./types.ts";
@@ -82,12 +85,24 @@ export interface InspectResult {
 
 class BufferSink implements OutputsSink {
     emissions: Emission[] = [];
-    private withdrawals = 0n;
 
-    /** The chain-wide input index seeds withdrawal nonces; a sink is built
-     * per input, so the per-input ordinal lives here and rolls back with the
-     * buffered emissions when the outcome drops them. */
-    constructor(private readonly inputIndex: bigint) {}
+    /** The chain-wide input index seeds withdrawal nonces; the per-input
+     * ordinal is the sink's own, and rolls back with the buffered emissions
+     * when the outcome drops them.
+     *
+     * One input can run more than one sink — the block's ticks each get
+     * theirs, so one tick's revert cannot drop another's outputs — so the
+     * ordinal is handed in and read back out, keeping withdrawal nonces
+     * unique across every sink the input opens. */
+    constructor(
+        private readonly inputIndex: bigint,
+        private withdrawals = 0n,
+    ) {}
+
+    /** The ordinal to hand the next sink of this input. */
+    get nextOrdinal(): bigint {
+        return this.withdrawals;
+    }
 
     notice(payload: Hex): void {
         this.emissions.push({ kind: "notice", payload });
@@ -151,6 +166,9 @@ function tagged(tag: number, data: Hex): Hex {
 
 export class Router {
     private manifest = new Map<Address, Handler>();
+    /** The handlers that declared a tick, in registration order — which is
+     * the order they run in, every block. */
+    private tickers: NonNullable<Handler["onBlock"]>[] = [];
     private erc20 = new Erc20Facade();
     private portalReceiver = new PortalReceiver();
     readonly l1Block = new L1Block();
@@ -190,6 +208,8 @@ export class Router {
             throw new Error(`address ${address} is already routed`);
         }
         this.manifest.set(key, handler);
+        const onBlock = handler.onBlock;
+        if (onBlock) this.tickers.push(onBlock.bind(handler));
     }
 
     /** Manifest first, then the portal receiver, then the token façades.
@@ -233,7 +253,14 @@ export class Router {
         }
 
         if (parsed.kind === "deposit") {
-            return this.advanceDeposit(block, parsed);
+            const res = await this.advanceDeposit(block, parsed);
+            if (!this.isAttributesDeposit(parsed, res)) return res;
+            // The block's one guaranteed input has landed and its attributes
+            // are stored: this is where the block begins for an application.
+            return {
+                ...res,
+                emissions: [...res.emissions, ...(await this.runTicks(block))],
+            };
         }
         return this.advanceSigned(block, parsed);
     }
@@ -278,6 +305,93 @@ export class Router {
         // after this mark does not.
         const afterMint = this.ledger.journal.mark();
         return this.execute(ctx, afterMint, null);
+    }
+
+    /** Is this input the chain's own per-block attributes deposit, applied?
+     *
+     * Both halves matter. The **sender** is the authority — op-node's
+     * canonical depositor, not merely the L1Block address — so a user
+     * transaction carrying attributes-shaped calldata cannot mint extra
+     * ticks by paying a fee. And the **outcome** must be accept: a malformed
+     * attributes input reverts having stored nothing, and a block whose L1
+     * context never landed is not one the application should be told about.
+     *
+     * op-node deposits exactly one of these per block, at its head, so this
+     * fires exactly once per block — including a block with no transactions
+     * in it, which is the whole point (EVM-COMPAT §2). */
+    private isAttributesDeposit(
+        d: Extract<ReturnType<typeof parseInput>, { kind: "deposit" }>,
+        res: AdvanceResult,
+    ): boolean {
+        return (
+            res.outcome === "accept" &&
+            d.to !== undefined &&
+            sameAddress(d.to, L1BLOCK_ADDRESS) &&
+            sameAddress(d.from, L1_INFO_DEPOSITOR)
+        );
+    }
+
+    /** Runs the block's ticks, in registration order, each isolated from the
+     * others.
+     *
+     * The isolation is the point. This input is mandatory in a way no other
+     * input is: the sequencer aborts the whole block build if a deposit fails
+     * hard, so a tick must never take the input, the block's L1 attributes,
+     * or another contract's tick down with it. Hence the attributes being
+     * stored before we are called, one journal mark and one output sink per
+     * tick, and no path from here to REJECT.
+     *
+     * Within a tick the outcome model is the usual one (EVM-COMPAT §5):
+     * accept keeps everything, revert rolls that tick's ledger writes back
+     * and drops its outputs while keeping its reports, fail keeps both and
+     * reports the error. What is missing is the charge — a tick has no
+     * sender, so there is no nonce to bump and no fee to take. Its cycles
+     * are billed to the attributes deposit and count against the block gas
+     * limit, which is the honest place for them and the reason a tick must
+     * stay bounded. */
+    private async runTicks(block: BlockContext): Promise<Emission[]> {
+        const l1 = this.l1Block.attributes;
+        if (!l1 || this.tickers.length === 0) return [];
+        const emissions: Emission[] = [];
+        // Withdrawal nonces are (inputIndex, ordinal): the ordinal carries
+        // across the input's sinks, and a reverted tick's outputs give theirs
+        // back with the rest of what was dropped.
+        let ordinal = 0n;
+        for (const onBlock of this.tickers) {
+            // Copies, not the live objects: `l1` is what the L1Block views
+            // serve for the rest of the block and `block` is what the parked
+            // machine answers eth_call from, and neither is an application's
+            // to write. The context a tick gets is read-only by construction
+            // everywhere else; here it is read-only in fact.
+            const tick: TickContext = { block: { ...block }, l1: { ...l1 } };
+            const mark = this.ledger.journal.mark();
+            const sink = new BufferSink(block.inputIndex, ordinal);
+            let outcome: TickOutcome;
+            try {
+                outcome = await onBlock(tick, sink, this.ledger);
+            } catch (e) {
+                // contractHandler already catches for application callbacks;
+                // a hand-written handler that throws lands here and is held
+                // to the same rule — a tick cannot escape upward.
+                outcome = { kind: "revert", data: errorRevert(describe(e)) };
+            }
+            if (outcome.kind === "revert") {
+                await this.ledger.journal.rollbackTo(mark);
+                await this.ledger.afterRollback();
+                emissions.push(...sink.reportsOnly(), {
+                    kind: "report",
+                    payload: tagged(TAG_REVERT, outcome.data),
+                });
+                continue;
+            }
+            emissions.push(...sink.emissions);
+            if (outcome.kind === "fail") {
+                emissions.push({ kind: "report", payload: tagged(TAG_FAIL, outcome.data) });
+            }
+            ordinal = sink.nextOrdinal;
+        }
+        this.ledger.journal.commit();
+        return emissions;
     }
 
     private async advanceSigned(
