@@ -1,0 +1,462 @@
+{
+    "description": "A whole sequencing run as JSON-RPC: three blocks built, fetched, imported and adopted, then a forkchoice on an unknown head. Recorded from the engine `op-cartesi run` serves with no flags, so it replays against a stock development node as well as against an implementation that reproduces the machine below.",
+    "spec": "docs/ENGINE-RPC-SPEC.md#4-engine--the-engine-api",
+    "machine": {
+        "kind": "mock",
+        "seed": "op-cartesi-dev-901",
+        "rule": "root0 = keccak256(seed); every input advances root' = keccak256(root || input) and costs 1000 + 10*len(input) mcycles; every input is accepted and emits nothing."
+    },
+    "params": {
+        "chainId": 901,
+        "genesisTimestamp": 0,
+        "gasLimit": 30000000
+    },
+    "genesisHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+    "calls": [
+        {
+            "note": "the genesis block, as a client reads it",
+            "method": "eth_getBlockByNumber",
+            "params": [
+                "earliest",
+                false
+            ],
+            "result": {
+                "baseFeePerGas": "0x3b9aca00",
+                "blobGasUsed": "0x0",
+                "difficulty": "0x0",
+                "excessBlobGas": "0x0",
+                "extraData": "0x00000000fa00000006",
+                "gasLimit": "0x1c9c380",
+                "gasUsed": "0x0",
+                "hash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                "miner": "0x0000000000000000000000000000000000000000",
+                "mixHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "nonce": "0x0000000000000000",
+                "number": "0x0",
+                "parentBeaconBlockRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "parentHash": "0x0000000000000000000000000000000000000000000000000000000000000000",
+                "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                "requestsHash": "0xe3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                "sha3Uncles": "0x1dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347",
+                "stateRoot": "0xcaded0c302806563f395ab35fca423eea91819c1b8ff2c65acfdcc5b29f56908",
+                "timestamp": "0x0",
+                "transactions": [],
+                "transactionsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                "uncles": [],
+                "withdrawals": [],
+                "withdrawalsRoot": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+            }
+        },
+        {
+            "note": "block 1: start building on 0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+            "method": "engine_forkchoiceUpdatedV3",
+            "params": [
+                {
+                    "headBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                    "safeBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                    "finalizedBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e"
+                },
+                {
+                    "timestamp": "0x2",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "suggestedFeeRecipient": "0x4200000000000000000000000000000000000011",
+                    "withdrawals": [],
+                    "parentBeaconBlockRoot": "0x00000000000000000000000000000000000000000000000000000000000beac0",
+                    "transactions": [
+                        "0x7ef860a05fe7f977e71dba2ea1a68e21057beebb9be2ac30c6410aa38d4f3fbe41dcffd294deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "gasLimit": "0x1c9c380",
+                    "eip1559Params": "0x0000000000000000"
+                }
+            ],
+            "result": {
+                "payloadId": null,
+                "payloadStatus": {
+                    "status": "VALID",
+                    "latestValidHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                    "validationError": null
+                }
+            },
+            "payloadIdOut": true
+        },
+        {
+            "note": "block 1: fetch what was built",
+            "method": "engine_getPayloadV4",
+            "params": [
+                null
+            ],
+            "result": {
+                "executionPayload": {
+                    "parentHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                    "feeRecipient": "0x4200000000000000000000000000000000000011",
+                    "stateRoot": "0x24d319bc438c42f8bdd1334dda8378ca2511561dc9f27221980e7347261f3e84",
+                    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "blockNumber": "0x1",
+                    "gasLimit": "0x1c9c380",
+                    "gasUsed": "0x5",
+                    "timestamp": "0x2",
+                    "extraData": "0x00000000fa00000006",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "blockHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "transactions": [
+                        "0x7ef860a05fe7f977e71dba2ea1a68e21057beebb9be2ac30c6410aa38d4f3fbe41dcffd294deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "withdrawals": [],
+                    "blobGasUsed": "0x0",
+                    "excessBlobGas": "0x0",
+                    "slotNumber": null,
+                    "withdrawalsRoot": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+                },
+                "blockValue": "0x0",
+                "blobsBundle": {
+                    "commitments": [],
+                    "proofs": [],
+                    "blobs": []
+                },
+                "executionRequests": null,
+                "shouldOverrideBuilder": false,
+                "parentBeaconBlockRoot": "0x00000000000000000000000000000000000000000000000000000000000beac0"
+            },
+            "payloadIdIn": true
+        },
+        {
+            "note": "block 1: import it, as a verifier would",
+            "method": "engine_newPayloadV4",
+            "params": [
+                {
+                    "parentHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                    "feeRecipient": "0x4200000000000000000000000000000000000011",
+                    "stateRoot": "0x24d319bc438c42f8bdd1334dda8378ca2511561dc9f27221980e7347261f3e84",
+                    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "blockNumber": "0x1",
+                    "gasLimit": "0x1c9c380",
+                    "gasUsed": "0x5",
+                    "timestamp": "0x2",
+                    "extraData": "0x00000000fa00000006",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "blockHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "transactions": [
+                        "0x7ef860a05fe7f977e71dba2ea1a68e21057beebb9be2ac30c6410aa38d4f3fbe41dcffd294deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "withdrawals": [],
+                    "blobGasUsed": "0x0",
+                    "excessBlobGas": "0x0",
+                    "withdrawalsRoot": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+                },
+                [],
+                "0x00000000000000000000000000000000000000000000000000000000000beac0",
+                []
+            ],
+            "result": {
+                "status": "VALID",
+                "latestValidHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                "validationError": null
+            }
+        },
+        {
+            "note": "block 1: adopt it as the head",
+            "method": "engine_forkchoiceUpdatedV3",
+            "params": [
+                {
+                    "headBlockHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "safeBlockHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "finalizedBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e"
+                },
+                null
+            ],
+            "result": {
+                "payloadStatus": {
+                    "status": "VALID",
+                    "latestValidHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "validationError": null
+                },
+                "payloadId": null
+            }
+        },
+        {
+            "note": "block 2: start building on 0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+            "method": "engine_forkchoiceUpdatedV3",
+            "params": [
+                {
+                    "headBlockHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "safeBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                    "finalizedBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e"
+                },
+                {
+                    "timestamp": "0x4",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "suggestedFeeRecipient": "0x4200000000000000000000000000000000000011",
+                    "withdrawals": [],
+                    "parentBeaconBlockRoot": "0x00000000000000000000000000000000000000000000000000000000000beac0",
+                    "transactions": [
+                        "0x7ef860a0f2ee15ea639b73fa3db9b34a245bdfa015c260c598b211bf05a1ecc4b3e3b4f294deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "gasLimit": "0x1c9c380",
+                    "eip1559Params": "0x0000000000000000"
+                }
+            ],
+            "result": {
+                "payloadId": null,
+                "payloadStatus": {
+                    "status": "VALID",
+                    "latestValidHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "validationError": null
+                }
+            },
+            "payloadIdOut": true
+        },
+        {
+            "note": "block 2: fetch what was built",
+            "method": "engine_getPayloadV4",
+            "params": [
+                null
+            ],
+            "result": {
+                "executionPayload": {
+                    "parentHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "feeRecipient": "0x4200000000000000000000000000000000000011",
+                    "stateRoot": "0xa18ce2012d0f5fed54c074eaf1ea5ed46b85105ffc1a581a593f72625fa5bd1e",
+                    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "blockNumber": "0x2",
+                    "gasLimit": "0x1c9c380",
+                    "gasUsed": "0x5",
+                    "timestamp": "0x4",
+                    "extraData": "0x00000000fa00000006",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "blockHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "transactions": [
+                        "0x7ef860a0f2ee15ea639b73fa3db9b34a245bdfa015c260c598b211bf05a1ecc4b3e3b4f294deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "withdrawals": [],
+                    "blobGasUsed": "0x0",
+                    "excessBlobGas": "0x0",
+                    "slotNumber": null,
+                    "withdrawalsRoot": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+                },
+                "blockValue": "0x0",
+                "blobsBundle": {
+                    "commitments": [],
+                    "proofs": [],
+                    "blobs": []
+                },
+                "executionRequests": null,
+                "shouldOverrideBuilder": false,
+                "parentBeaconBlockRoot": "0x00000000000000000000000000000000000000000000000000000000000beac0"
+            },
+            "payloadIdIn": true
+        },
+        {
+            "note": "block 2: import it, as a verifier would",
+            "method": "engine_newPayloadV4",
+            "params": [
+                {
+                    "parentHash": "0x24ea83f157ad061efb5d9c47336d20566871780b6b219c62ca5b42f0ec1cf5d5",
+                    "feeRecipient": "0x4200000000000000000000000000000000000011",
+                    "stateRoot": "0xa18ce2012d0f5fed54c074eaf1ea5ed46b85105ffc1a581a593f72625fa5bd1e",
+                    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "blockNumber": "0x2",
+                    "gasLimit": "0x1c9c380",
+                    "gasUsed": "0x5",
+                    "timestamp": "0x4",
+                    "extraData": "0x00000000fa00000006",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "blockHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "transactions": [
+                        "0x7ef860a0f2ee15ea639b73fa3db9b34a245bdfa015c260c598b211bf05a1ecc4b3e3b4f294deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "withdrawals": [],
+                    "blobGasUsed": "0x0",
+                    "excessBlobGas": "0x0",
+                    "withdrawalsRoot": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+                },
+                [],
+                "0x00000000000000000000000000000000000000000000000000000000000beac0",
+                []
+            ],
+            "result": {
+                "status": "VALID",
+                "latestValidHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                "validationError": null
+            }
+        },
+        {
+            "note": "block 2: adopt it as the head",
+            "method": "engine_forkchoiceUpdatedV3",
+            "params": [
+                {
+                    "headBlockHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "safeBlockHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "finalizedBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e"
+                },
+                null
+            ],
+            "result": {
+                "payloadStatus": {
+                    "status": "VALID",
+                    "latestValidHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "validationError": null
+                },
+                "payloadId": null
+            }
+        },
+        {
+            "note": "block 3: start building on 0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+            "method": "engine_forkchoiceUpdatedV3",
+            "params": [
+                {
+                    "headBlockHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "safeBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                    "finalizedBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e"
+                },
+                {
+                    "timestamp": "0x6",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "suggestedFeeRecipient": "0x4200000000000000000000000000000000000011",
+                    "withdrawals": [],
+                    "parentBeaconBlockRoot": "0x00000000000000000000000000000000000000000000000000000000000beac0",
+                    "transactions": [
+                        "0x7ef860a069c322e3248a5dfc29d73c5b0553b0185a35cd5bb6386747517ef7e53b15e28794deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "gasLimit": "0x1c9c380",
+                    "eip1559Params": "0x0000000000000000"
+                }
+            ],
+            "result": {
+                "payloadId": null,
+                "payloadStatus": {
+                    "status": "VALID",
+                    "latestValidHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "validationError": null
+                }
+            },
+            "payloadIdOut": true
+        },
+        {
+            "note": "block 3: fetch what was built",
+            "method": "engine_getPayloadV4",
+            "params": [
+                null
+            ],
+            "result": {
+                "executionPayload": {
+                    "parentHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "feeRecipient": "0x4200000000000000000000000000000000000011",
+                    "stateRoot": "0x1a3c080a99de44754977e86310403a47f704975abed900c95baa8f95d1f0c1d5",
+                    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "blockNumber": "0x3",
+                    "gasLimit": "0x1c9c380",
+                    "gasUsed": "0x5",
+                    "timestamp": "0x6",
+                    "extraData": "0x00000000fa00000006",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "blockHash": "0xdb691fc10c972eb4ac2a6f5242bb94e7756139dbbe8c36091626373f8899e165",
+                    "transactions": [
+                        "0x7ef860a069c322e3248a5dfc29d73c5b0553b0185a35cd5bb6386747517ef7e53b15e28794deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "withdrawals": [],
+                    "blobGasUsed": "0x0",
+                    "excessBlobGas": "0x0",
+                    "slotNumber": null,
+                    "withdrawalsRoot": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+                },
+                "blockValue": "0x0",
+                "blobsBundle": {
+                    "commitments": [],
+                    "proofs": [],
+                    "blobs": []
+                },
+                "executionRequests": null,
+                "shouldOverrideBuilder": false,
+                "parentBeaconBlockRoot": "0x00000000000000000000000000000000000000000000000000000000000beac0"
+            },
+            "payloadIdIn": true
+        },
+        {
+            "note": "block 3: import it, as a verifier would",
+            "method": "engine_newPayloadV4",
+            "params": [
+                {
+                    "parentHash": "0x075b6cab91bdbc95711ae12a8f00e1529449657f1a7fa18bf106cf900e0a5e74",
+                    "feeRecipient": "0x4200000000000000000000000000000000000011",
+                    "stateRoot": "0x1a3c080a99de44754977e86310403a47f704975abed900c95baa8f95d1f0c1d5",
+                    "receiptsRoot": "0x56e81f171bcc55a6ff8345e692c0f86e5b48e01b996cadc001622fb5e363b421",
+                    "logsBloom": "0x00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+                    "prevRandao": "0x000000000000000000000000000000000000000000000000000000000badc0de",
+                    "blockNumber": "0x3",
+                    "gasLimit": "0x1c9c380",
+                    "gasUsed": "0x5",
+                    "timestamp": "0x6",
+                    "extraData": "0x00000000fa00000006",
+                    "baseFeePerGas": "0x3b9aca00",
+                    "blockHash": "0xdb691fc10c972eb4ac2a6f5242bb94e7756139dbbe8c36091626373f8899e165",
+                    "transactions": [
+                        "0x7ef860a069c322e3248a5dfc29d73c5b0553b0185a35cd5bb6386747517ef7e53b15e28794deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f4240808d6c312061747472696275746573"
+                    ],
+                    "withdrawals": [],
+                    "blobGasUsed": "0x0",
+                    "excessBlobGas": "0x0",
+                    "withdrawalsRoot": "0xd18f436732d95d825a4374d756a9a820b7372a54a5fb5650382e467727ec7eeb"
+                },
+                [],
+                "0x00000000000000000000000000000000000000000000000000000000000beac0",
+                []
+            ],
+            "result": {
+                "status": "VALID",
+                "latestValidHash": "0xdb691fc10c972eb4ac2a6f5242bb94e7756139dbbe8c36091626373f8899e165",
+                "validationError": null
+            }
+        },
+        {
+            "note": "block 3: adopt it as the head",
+            "method": "engine_forkchoiceUpdatedV3",
+            "params": [
+                {
+                    "headBlockHash": "0xdb691fc10c972eb4ac2a6f5242bb94e7756139dbbe8c36091626373f8899e165",
+                    "safeBlockHash": "0xdb691fc10c972eb4ac2a6f5242bb94e7756139dbbe8c36091626373f8899e165",
+                    "finalizedBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e"
+                },
+                null
+            ],
+            "result": {
+                "payloadStatus": {
+                    "status": "VALID",
+                    "latestValidHash": "0xdb691fc10c972eb4ac2a6f5242bb94e7756139dbbe8c36091626373f8899e165",
+                    "validationError": null
+                },
+                "payloadId": null
+            }
+        },
+        {
+            "note": "a head the engine has never seen is SYNCING, not an error",
+            "method": "engine_forkchoiceUpdatedV3",
+            "params": [
+                {
+                    "headBlockHash": "0x00000000000000000000000000000000000000000000000000000000deadbeef",
+                    "safeBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e",
+                    "finalizedBlockHash": "0xcc6524b41abaae4f4df22f0646bddd08c1e41093c37b6fc81041c9369e63b03e"
+                },
+                null
+            ],
+            "result": {
+                "payloadStatus": {
+                    "status": "SYNCING",
+                    "latestValidHash": null,
+                    "validationError": null
+                },
+                "payloadId": null
+            }
+        }
+    ]
+}

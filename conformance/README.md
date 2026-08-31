@@ -28,6 +28,7 @@ implementation, and hides which side is the reference.
 | `encodings/evmcall.json` | the `eth_call` envelope and the report tags | ENGINE-RPC §5.4 |
 | `commitments/outputs-tree.json` | the height-63 outputs tree: leaves, roots and proofs | BLOCKS §10.2 |
 | `commitments/passer-trie.json` | the withdrawal trie: roots block by block, and storage proofs | BLOCKS §11 |
+| `engine/sequencing.json` | a whole sequencing run as the JSON-RPC that crossed the wire | ENGINE-RPC §4 |
 
 ## Who reads them
 
@@ -50,10 +51,42 @@ implementation, and hides which side is the reference.
   them is Go-shaped: integers are JSON numbers or decimal strings, byte
   strings are `0x` hex, and the machine is a script rather than an emulator.
 
+## The engine transcript
+
+`engine/sequencing.json` is the odd one out, and the one a second engine will
+reach for first. Everything else pins a computation; this pins the **wire** —
+method names, argument order, the shape of an envelope, `SYNCING` where an
+error would be wrong — which no header vector can.
+
+It is a recording of `op-cartesi run` with **no flags**: chain 901, genesis
+timestamp 0, a 30M gas limit, and the deterministic mock machine that
+configuration uses. So it replays against a stock development node, not just
+against the suite that made it:
+
+```sh
+op-cartesi run &                                    # the engine as it ships
+OP_CARTESI_TEST_ENGINE_URL=http://127.0.0.1:8551 \
+  go test ./integration -run TestEngineTranscript   # replay
+```
+
+The machine's rule is in the file, and it is four lines: the root starts at
+`keccak256(seed)`, every input advances it to `keccak256(root ‖ input)` and
+costs `1000 + 10·len(input)` mcycles, and every input is accepted and emits
+nothing. An implementation that reproduces that can replay the transcript
+before it has an emulator.
+
+Two things are compared loosely on purpose. **Payload ids** are opaque and
+need only be stable within one node (BLOCKS §15), so they are blanked in the
+file and the replay threads its own through. And a **null field** and an
+absent one are treated as equal, because op-node decodes these into typed
+structs where they are the same thing — an implementation should not fail for
+emitting one rather than the other.
+
 ## Regenerating
 
 ```sh
-go test ./chain -run TestConformance -update
+go test ./chain -run TestConformance -update             # everything else
+go test ./integration -run TestEngineTranscript -update  # the transcript
 ```
 
 Then **read the diff**. A vector file is only as good as the review of the
@@ -108,15 +141,9 @@ a real machine do not belong here — they are the snapshot-gated tests in
 
 ## Still missing
 
-The two sets [ENGINE-RPC §10](../docs/ENGINE-RPC-SPEC.md) asks for that are not
-here yet:
+The sets [ENGINE-RPC §10](../docs/ENGINE-RPC-SPEC.md) asks for that are not
+here yet — `eth-block`, `eth-receipt`, `getproof`, `cartesi` and `jwt` — plus:
 
-- **`engine` transcripts** — recorded request/response pairs for a whole
-  sequencing run. Driven over authenticated HTTP they are implementation-agnostic
-  by construction, which is what would turn [`integration/`](../integration) —
-  today an in-process Go harness using op-node's own wire types — into a
-  cross-implementation test. Making that harness take an endpoint is the
-  prerequisite for a second engine.
 - **`crossdomain`** — the messenger encodings, the last pasted constant in the
   Solidity suite (`CrossDomainVectors.t.sol`'s v1 message hash). Unlike everything above, the
   reference for those is the *guest*, so the generator would have to be the

@@ -6,7 +6,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 // nodeClient is the non-engine half of the surface: the eth_* subset and the
@@ -21,10 +20,10 @@ import (
 // already, so asking for it over the wire is both a truer test and what lets
 // the same suite run against an engine written in another language.
 type nodeClient struct {
-	rpc *rpc.Client
+	rpc caller
 }
 
-func newNodeClient(c *rpc.Client) *nodeClient {
+func newNodeClient(c caller) *nodeClient {
 	return &nodeClient{rpc: c}
 }
 

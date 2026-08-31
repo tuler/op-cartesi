@@ -6,7 +6,6 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/ethereum/go-ethereum/rpc"
 )
 
 // engineClient issues the same Engine API calls, with the same method names,
@@ -21,11 +20,17 @@ import (
 // being exercised is the real thing. Swap this for sources.EngineAPIClient if
 // the upstream module becomes consumable.
 type engineClient struct {
-	rpc *rpc.Client
+	rpc caller
 }
 
-func newEngineClient(c *rpc.Client) *engineClient {
+func newEngineClient(c caller) *engineClient {
 	return &engineClient{rpc: c}
+}
+
+// caller is what this suite needs of a JSON-RPC client: rpc.Client satisfies
+// it, and so does the recorder that captures a run into a transcript.
+type caller interface {
+	CallContext(ctx context.Context, result any, method string, args ...any) error
 }
 
 func (e *engineClient) ForkchoiceUpdate(ctx context.Context, fc *eth.ForkchoiceState, attrs *eth.PayloadAttributes) (*eth.ForkchoiceUpdatedResult, error) {
