@@ -47,8 +47,8 @@ func (h *harness) sequenceBlock(ctx context.Context, parent eth.L2BlockRef, extr
 
 	fc := eth.ForkchoiceState{
 		HeadBlockHash:      parent.Hash,
-		SafeBlockHash:      h.genesisRef.Hash,
-		FinalizedBlockHash: h.genesisRef.Hash,
+		SafeBlockHash:      h.base.Hash,
+		FinalizedBlockHash: h.base.Hash,
 	}
 	attrs := h.buildAttributes(parent, extraTxs...)
 	result, err := h.engine.ForkchoiceUpdate(ctx, &fc, attrs)
@@ -141,7 +141,7 @@ func TestSequenceBlocksWithOpNodeClient(t *testing.T) {
 	ctx := context.Background()
 	h := newHarness(t)
 
-	parent := h.genesisRef
+	parent := h.base
 	for i := range 3 {
 		env := h.sequenceBlock(ctx, parent)
 		payload := env.ExecutionPayload
@@ -168,8 +168,8 @@ func TestSequenceBlocksWithOpNodeClient(t *testing.T) {
 		parent = payloadRef(env)
 	}
 
-	if head := h.chain.HeadBlock(); head.NumberU64() != 3 {
-		t.Fatalf("head at %d, want 3", head.NumberU64())
+	if head := h.head(ctx); head != 3 {
+		t.Fatalf("head at %d, want 3", head)
 	}
 }
 
@@ -180,8 +180,8 @@ func TestStateRootAdvancesDeterministically(t *testing.T) {
 	ctx := context.Background()
 
 	run := func() []eth.Bytes32 {
-		h := newHarness(t)
-		parent := h.genesisRef
+		h := newExclusiveHarness(t)
+		parent := h.base
 		var roots []eth.Bytes32
 		for range 3 {
 			env := h.sequenceBlock(ctx, parent)
@@ -213,8 +213,10 @@ func TestMempoolTransactionIsSequenced(t *testing.T) {
 		t.Fatal(err)
 	}
 	to := common.HexToAddress("0x1234")
-	tx, err := types.SignNewTx(key, types.LatestSignerForChainID(new(big.Int).SetUint64(l2ChainID)), &types.DynamicFeeTx{
-		ChainID:   new(big.Int).SetUint64(l2ChainID),
+	// The chain's own id, read from the engine, so a remote one with a
+	// different id still gets a transaction it will admit.
+	tx, err := types.SignNewTx(key, types.LatestSignerForChainID(new(big.Int).SetUint64(h.chainID)), &types.DynamicFeeTx{
+		ChainID:   new(big.Int).SetUint64(h.chainID),
 		Nonce:     0,
 		GasTipCap: big.NewInt(1),
 		GasFeeCap: big.NewInt(2_000_000_000),
@@ -229,11 +231,20 @@ func TestMempoolTransactionIsSequenced(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.pool.Add(raw); err != nil {
+	if _, err := h.node.SendRawTransaction(ctx, raw); err != nil {
 		t.Fatal(err)
 	}
+	// Before the block, the node reports it with null block coordinates:
+	// known, not mined (ENGINE-RPC-SPEC §5.2).
+	pending, err := h.node.TransactionByHash(ctx, tx.Hash())
+	if err != nil || pending == nil {
+		t.Fatalf("the node does not know the transaction it accepted: %v", err)
+	}
+	if pending.BlockHash != nil || pending.BlockNumber != nil {
+		t.Fatalf("a queued transaction reports block coordinates %v/%v", pending.BlockHash, pending.BlockNumber)
+	}
 
-	env := h.sequenceBlock(ctx, h.genesisRef)
+	env := h.sequenceBlock(ctx, h.base)
 	txs := env.ExecutionPayload.Transactions
 	if len(txs) != 2 {
 		t.Fatalf("expected deposit + pool transaction, got %d", len(txs))
@@ -253,8 +264,14 @@ func TestMempoolTransactionIsSequenced(t *testing.T) {
 	if second.Hash() != tx.Hash() {
 		t.Fatalf("sequenced tx %s, want %s", second.Hash(), tx.Hash())
 	}
-	if h.pool.Len() != 0 {
-		t.Fatal("included transaction still queued in the mempool")
+	// And after it, with the block it landed in — which is how a client sees
+	// the queue drain, and all a client can see.
+	mined, err := h.node.TransactionByHash(ctx, tx.Hash())
+	if err != nil || mined == nil {
+		t.Fatalf("the sequenced transaction is unknown to the node: %v", err)
+	}
+	if mined.BlockHash == nil || *mined.BlockHash != common.Hash(env.ExecutionPayload.BlockHash) {
+		t.Fatalf("transaction reports block %v, want %s", mined.BlockHash, env.ExecutionPayload.BlockHash)
 	}
 }
 
@@ -266,8 +283,8 @@ func TestUnknownHeadReportsSyncing(t *testing.T) {
 
 	result, err := h.engine.ForkchoiceUpdate(ctx, &eth.ForkchoiceState{
 		HeadBlockHash:      common.HexToHash("0xdeadbeef"),
-		SafeBlockHash:      h.genesisRef.Hash,
-		FinalizedBlockHash: h.genesisRef.Hash,
+		SafeBlockHash:      h.base.Hash,
+		FinalizedBlockHash: h.base.Hash,
 	}, nil)
 	if err != nil {
 		t.Fatalf("forkchoiceUpdate returned a transport error: %v", err)
@@ -283,13 +300,13 @@ func TestUnknownHeadReportsSyncing(t *testing.T) {
 func TestVerifierRebuildsBlockFromPayload(t *testing.T) {
 	ctx := context.Background()
 	sequencer := newHarness(t)
-	verifier := newHarness(t)
+	verifier := newExclusiveHarness(t)
 
-	if sequencer.genesisRef.Hash != verifier.genesisRef.Hash {
+	if sequencer.base.Hash != verifier.base.Hash {
 		t.Fatal("independent nodes disagree on genesis")
 	}
 
-	env := sequencer.sequenceBlock(ctx, sequencer.genesisRef)
+	env := sequencer.sequenceBlock(ctx, sequencer.base)
 	payload := env.ExecutionPayload
 
 	status, err := verifier.engine.NewPayload(ctx, payload, env.ParentBeaconBlockRoot)
@@ -306,7 +323,7 @@ func TestVerifierRebuildsBlockFromPayload(t *testing.T) {
 	result, err := verifier.engine.ForkchoiceUpdate(ctx, &eth.ForkchoiceState{
 		HeadBlockHash:      payload.BlockHash,
 		SafeBlockHash:      payload.BlockHash,
-		FinalizedBlockHash: verifier.genesisRef.Hash,
+		FinalizedBlockHash: verifier.base.Hash,
 	}, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -314,7 +331,7 @@ func TestVerifierRebuildsBlockFromPayload(t *testing.T) {
 	if result.PayloadStatus.Status != eth.ExecutionValid {
 		t.Fatalf("verifier forkchoice status %s", result.PayloadStatus.Status)
 	}
-	if got := verifier.chain.HeadBlock().Hash(); got != payload.BlockHash {
+	if got := verifier.headHash(ctx); got != common.Hash(payload.BlockHash) {
 		t.Fatalf("verifier head %s, want %s", got, payload.BlockHash)
 	}
 }

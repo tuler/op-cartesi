@@ -95,6 +95,43 @@ is where a matching emulator comes from. `tools` runs the repo's own TypeScript:
 in `compose/` that drive them. curl is in `node` for the healthchecks, since
 compose runs those inside the container being checked.
 
+### The engine is a slot
+
+`op-node` drives a service that speaks
+[docs/ENGINE-RPC-SPEC.md](../docs/ENGINE-RPC-SPEC.md); which implementation
+does the speaking is `ENGINE_IMAGE`, and the verifier's is
+`VERIFIER_ENGINE_IMAGE`. Both default to the `node` image built here, so
+nothing changes unless you set them:
+
+```sh
+# a second implementation as the verifier, the Go engine still sequencing
+VERIFIER_ENGINE_IMAGE=someone/op-cartesi-rs:v0 docker compose up
+```
+
+The verifier is the low-risk slot for a new implementation: it sequences
+nothing, learns the chain only from what the batcher posted to L1, and must
+reach byte-identical blocks — so a divergence surfaces immediately, as a
+refused payload, and nothing downstream depends on it.
+
+An image standing in that slot must:
+
+- run `engine.sh` on its PATH (the service's `command`), or ship its own
+  entrypoint of that name;
+- read its configuration from the environment the service sets —
+  `MACHINE_REMOTE`, `MACHINE_SNAPSHOT`, `DATA_DIR`, `ENGINE_ADDR`,
+  `HTTP_ADDR`, `JWT_SECRET_FILE`, and `CHAIN_FLAGS_FILE`, whose file the
+  `genesis` step writes with the consensus parameters every node of the chain
+  must agree on;
+- serve the authenticated Engine API on `ENGINE_ADDR` and the public `eth_`
+  and `cartesi_` surface on `HTTP_ADDR`;
+- answer `eth_blockNumber` on the public port once it can serve, which is
+  what the healthcheck asks;
+- carry `curl`, since compose runs healthchecks inside the container.
+
+The chain-flags file is currently a list of *Go command-line flags*, which a
+second implementation cannot consume — turning it into a configuration
+document is [BLOCKS-SPEC §16.1](../docs/BLOCKS-SPEC.md#16-known-underspecification).
+
 The OP monorepo publishes **no binaries** — its releases carry source archives
 only — so its images are the official way to get op-node, op-batcher and
 op-proposer, and anvil and forge come from foundry's. They are pinned in

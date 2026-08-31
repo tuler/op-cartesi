@@ -35,6 +35,20 @@ x-node: &node
   image: op-cartesi/devnet-node
   restart: "no"
 
+# The engines, as a slot rather than a fixed image. What op-node drives is a
+# service that speaks docs/ENGINE-RPC-SPEC.md; which implementation does the
+# speaking is a variable, and the verifier's is separate from the sequencer's
+# so a second implementation can take the verifier slot alone — the low-risk
+# place for one, since it sequences nothing and a divergence shows up as a
+# refused payload. The contract an image must meet is in devnet/README.md.
+#
+# No build: here. The image is built by the machine services above, which
+# always run and always use the repository's own.
+x-engine: &engine
+  image: ${ENGINE_IMAGE:-op-cartesi/devnet-node}
+  command: ["engine.sh"]
+  restart: "no"
+
 x-tools: &tools
   build:
     context: .
@@ -154,8 +168,7 @@ services:
   # chain is open and the machine has booted, so the healthcheck below is
   # exact rather than approximate — an engine that answers can serve.
   engine:
-    <<: *node
-    command: ["engine.sh"]
+    <<: *engine
     environment:
       MACHINE_REMOTE: http://machine:6300
       MACHINE_SNAPSHOT: /snapshot
@@ -304,8 +317,8 @@ services:
     healthcheck: *machine-healthcheck
 
   verifier-engine:
-    <<: *node
-    command: ["engine.sh"]
+    <<: *engine
+    image: ${VERIFIER_ENGINE_IMAGE:-op-cartesi/devnet-node}
     environment:
       MACHINE_REMOTE: http://verifier-machine:6300
       MACHINE_SNAPSHOT: /snapshot

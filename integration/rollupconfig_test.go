@@ -36,11 +36,14 @@ var (
 
 func generateRollupJSON(t *testing.T, h *harness) map[string]json.RawMessage {
 	t.Helper()
-	genesis := h.chain.HeadBlock()
+	genesis, err := h.node.BlockByTag(t.Context(), "earliest")
+	if err != nil {
+		t.Fatal(err)
+	}
 	cfg, err := opcrollup.Build(opcrollup.L2Genesis{
-		Hash:      genesis.Hash(),
-		Timestamp: genesis.Time(),
-		GasLimit:  genesis.Header.GasLimit,
+		Hash:      genesis.Hash,
+		Timestamp: uint64(genesis.Timestamp),
+		GasLimit:  uint64(genesis.GasLimit),
 	}, h.rollupParams())
 	if err != nil {
 		t.Fatal(err)
@@ -60,7 +63,7 @@ func generateRollupJSON(t *testing.T, h *harness) map[string]json.RawMessage {
 // `genesis` subcommand writes against op-node's rollup.Config schema, and
 // against the chain the shim actually serves.
 func TestGeneratedRollupConfigMatchesOpNodeSchema(t *testing.T) {
-	h := newEmittingHarness(t)
+	h := newHarness(t)
 	doc := generateRollupJSON(t, h)
 
 	for _, key := range requiredRollupKeys {
@@ -92,15 +95,18 @@ func TestGeneratedRollupConfigMatchesOpNodeSchema(t *testing.T) {
 
 	// The config must describe the chain this node actually serves, or op-node
 	// would derive against a genesis block the engine does not have.
-	head := h.chain.HeadBlock()
-	if genesis.L2.Hash != head.Hash().Hex() {
-		t.Errorf("rollup.json L2 genesis hash %s, but the shim serves %s", genesis.L2.Hash, head.Hash())
+	served, err := h.node.BlockByTag(t.Context(), "earliest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if genesis.L2.Hash != served.Hash.Hex() {
+		t.Errorf("rollup.json L2 genesis hash %s, but the engine serves %s", genesis.L2.Hash, served.Hash)
 	}
 	if genesis.L2.Number != 0 {
 		t.Errorf("rollup.json L2 genesis number %d, want 0", genesis.L2.Number)
 	}
-	if genesis.L2Time != head.Time() {
-		t.Errorf("rollup.json l2_time %d, but genesis block timestamp is %d", genesis.L2Time, head.Time())
+	if genesis.L2Time != uint64(served.Timestamp) {
+		t.Errorf("rollup.json l2_time %d, but genesis block timestamp is %d", genesis.L2Time, uint64(served.Timestamp))
 	}
 	for _, key := range requiredSystemConfigKeys {
 		if _, ok := genesis.SystemConfig[key]; !ok {

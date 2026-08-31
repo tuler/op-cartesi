@@ -27,7 +27,7 @@ func TestIsthmusOutputRootThroughOpNode(t *testing.T) {
 	ctx := context.Background()
 	h := newEmittingHarness(t)
 
-	parent := h.genesisRef
+	parent := h.base
 	var previous eth.Bytes32
 	for i := range 3 {
 		env := h.sequenceBlock(ctx, parent)
@@ -55,19 +55,19 @@ func TestIsthmusOutputRootThroughOpNode(t *testing.T) {
 		// The commitment must be the chain's own withdrawal trie root — the
 		// message passer trie holding the outputs accumulator root at its
 		// reserved slot — and it must move as outputs accumulate.
-		tree, ok := h.chain.OutputTreeAt(payload.BlockHash)
-		if !ok {
-			t.Fatalf("block %d: no outputs accumulator", i)
+		outputs, err := h.node.OutputsRoot(ctx, common.Hash(payload.BlockHash))
+		if err != nil {
+			t.Fatalf("block %d: %v", i, err)
 		}
 		trie := chain.NewPasserTrie()
-		if err := trie.SetOutputsRoot(tree.Root()); err != nil {
+		if err := trie.SetOutputsRoot(outputs.Root); err != nil {
 			t.Fatal(err)
 		}
 		if common.Hash(*payload.WithdrawalsRoot) != trie.Root() {
 			t.Fatalf("block %d: header commits %s, trie over the accumulator root is %s", i, *payload.WithdrawalsRoot, trie.Root())
 		}
-		if want := uint64(i + 1); tree.Count() != want {
-			t.Fatalf("block %d: accumulator holds %d outputs, want %d", i, tree.Count(), want)
+		if want := uint64(i + 1); uint64(outputs.Count) != want {
+			t.Fatalf("block %d: accumulator holds %d outputs, want %d", i, uint64(outputs.Count), want)
 		}
 		parent = payloadRef(env)
 	}
@@ -79,9 +79,9 @@ func TestIsthmusOutputRootThroughOpNode(t *testing.T) {
 // matches; this test pins the Isthmus-specific fields explicitly.
 func TestIsthmusHeaderShape(t *testing.T) {
 	ctx := context.Background()
-	h := newEmittingHarness(t)
+	h := newHarness(t)
 
-	env := h.sequenceBlock(ctx, h.genesisRef)
+	env := h.sequenceBlock(ctx, h.base)
 	payload := env.ExecutionPayload
 
 	if payload.Withdrawals == nil || len(*payload.Withdrawals) != 0 {
