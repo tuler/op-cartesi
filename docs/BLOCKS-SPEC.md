@@ -140,15 +140,42 @@ An implementation MUST therefore serve `engine_forkchoiceUpdatedV3` and the
 **V4** payload methods, and no other versions
 ([ENGINE-RPC-SPEC §4](ENGINE-RPC-SPEC.md)).
 
-### 4.5 Delivering the parameters
+### 4.5 The chain configuration document
 
-How an engine is *told* its parameters is deliberately outside this
-specification — but every node of a chain, and the `rollup.json` generator,
-MUST be given the same §4.1 and §4.2 values, because a mismatch is not
-detectable for §4.2 at all. The reference implementation passes them as
-command-line flags and the devnet writes one shared flag file; a second
-implementation with a different flag syntax needs a shared *document*
-instead. See §16.1.
+Every node of a chain, and the `rollup.json` generator, MUST be given the same
+§4.1 and §4.2 values. A mismatch in §4.1 surfaces as a genesis hash op-node
+rejects; a mismatch in §4.2 surfaces as a state root divergence at the first
+block that notices, and nothing catches it earlier.
+
+They therefore travel as one document, which an implementation SHOULD accept
+in this form:
+
+```json
+{
+    "chainId": 901,
+    "genesisTimestamp": 1700000000,
+    "gasLimit": 30000000,
+    "baseFee": "1000000000",
+    "maxCyclesPerInput": 1000000000,
+    "appContract": "0x0000000000000000000000000000000000000000",
+    "eip1559Denominator": 250,
+    "eip1559Elasticity": 6
+}
+```
+
+`baseFee` is a decimal **string**: it is a uint256, and a JSON number is a
+float to most parsers. A field that is absent takes its default from the table
+in §4.1 or §4.2; a field that is present is what the document says, so an
+explicit `"baseFee": "0"` is zero rather than the default. An implementation
+SHOULD reject a key it does not define, since a misspelled consensus parameter
+would otherwise be dropped and the node would serve a chain nobody described.
+
+Node policy (§4.3) MUST NOT appear in the document: two nodes of the same
+chain may differ there, and carrying it would suggest otherwise.
+
+The reference implementation writes the document with `op-cartesi config`,
+reads it with `-chain-config`, and refuses a command line that sets both it
+and an individual consensus flag.
 
 ## 5. The machine backend
 
@@ -321,7 +348,7 @@ outputs, no reports and **no gas**, and the machine carries on with the next
 one. Note that §8.2 says a sequencer can never *produce* such a block —
 a hard-failing deposit aborts the build, a hard-failing mempool transaction
 is excluded — so this branch is unreachable for honestly built blocks. It is
-nonetheless part of the transition function, and §16.3 records that as a
+nonetheless part of the transition function, and §16.1 records that as a
 hazard rather than a feature.
 
 ### 8.4 Data-availability backpressure
@@ -654,39 +681,26 @@ has made a choice that this specification records but does not yet justify,
 or where two implementations could diverge while both looking correct. Each
 is a candidate for a conformance vector (§17) or a fix.
 
-**16.1 The parameters have no document.** §4.2 changes what the machine
-computes but is invisible to the `op-node` genesis handshake, and the
-reference implementation delivers it as command-line flags — with the devnet
-sharing them between the config generator and the engines as a file of
-*Go flag strings*. A second implementation cannot consume that. These
-parameters want a JSON chain-config document with a schema, which every
-implementation reads and which the `rollup.json` generator reads too.
-
-**16.2 Two consensus parameters have no flag.** `baseFee` (§4.1, in the
-genesis hash and every header) and `appContract` (§4.2, in every input
-envelope) are struct fields with defaults and no command-line surface. They
-are consensus-critical and currently unsettable.
-
-**16.3 The verifier tolerates a block no builder can make.** §8.3 skips a
+**16.1 The verifier tolerates a block no builder can make.** §8.3 skips a
 hard-failing transaction; §8.2 can never produce one. The branch is
 unreachable in practice and unproven in principle, and it is exactly the
 kind of asymmetry a fault proof would have to adjudicate. Either the
 verifier should reject such a block, or the rule should be stated as
 intentional.
 
-**16.4 Import does not check `baseFeePerGas` or `gasLimit`.** §13 validates
+**16.2 Import does not check `baseFeePerGas` or `gasLimit`.** §13 validates
 the state root, the gas used and the withdrawal commitment, but accepts
 whatever base fee and gas limit the payload carries. Since the sequencer
 stamps a constant base fee (§9.2), a payload with any other base fee is a
 block this chain would never build, and the verifier admits it.
 
-**16.5 Per-transaction gas can exceed the block's.** The block's `gasUsed`
+**16.3 Per-transaction gas can exceed the block's.** The block's `gasUsed`
 is capped at the gas limit (§9.1); the per-transaction figures reported in
 receipts are not, so their sum can exceed the header's. Receipts are
 uncommitted (§15), so this is a reporting inconsistency rather than a
 consensus one.
 
-**16.6 The outputs root is computed outside the machine.** The engine
+**16.4 The outputs root is computed outside the machine.** The engine
 computes the commitment in host code and cross-checks it against the root
 the guest reports where the guest maintains one. A referee cannot dispute a
 value that is not in the proven state; moving it inside the machine is

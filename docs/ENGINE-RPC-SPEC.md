@@ -205,7 +205,7 @@ The reference encoding, per transaction:
 - `status` is 1 when the machine accepted the input and 0 when it rejected
   it;
 - `gasUsed` is that transaction's cycles over `CyclesPerGas`, uncapped
-  ([BLOCKS-SPEC §16.5](BLOCKS-SPEC.md));
+  ([BLOCKS-SPEC §16.3](BLOCKS-SPEC.md));
 - `cumulativeGasUsed` accumulates it across the block;
 - `effectiveGasPrice` is the chain's constant base fee;
 - `contractAddress` is always `null` — there is no contract creation;

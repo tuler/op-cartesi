@@ -6,29 +6,31 @@
 // Four outputs: the JWT secret, devnet/chain-genesis.env (the L1 anchor),
 // devnet/rollup.json (what op-node derives the chain from), and
 //
-//   devnet/chain-flags   the chain flags rollup.json was generated with.
+//   devnet/chain-config.json   the consensus parameters it was generated from.
 //
-// Those flags determine the L2 genesis block hash, so the engine has to run
-// with exactly the ones the config was generated with or op-node rejects it
-// for serving a different genesis. Generating and running are two containers,
-// and this file is how the second is told what the first committed to
-// (compose/engine.sh).
+// Those parameters determine the L2 genesis block hash, so an engine has to
+// serve exactly the chain the config was generated for or op-node rejects it
+// for serving a different genesis — and the ones below genesis (the input
+// envelope, the cycle budget) op-node cannot check at all, so a disagreement
+// there surfaces as a state root divergence instead. Generating and running
+// are two containers, and this file is how the second is told what the first
+// committed to (compose/engine.sh).
 //
 // The machine server is a container of its own too (`genesis-machine`), since
 // a server holds exactly one machine and the sequencer's is already holding
 // the chain's.
 
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { paths, readEnvFile } from "../lib/env.ts";
 import { anchorRollup } from "../lib/genesis.ts";
-import { chainFlags, ensureJwt, generateRollupConfig } from "../lib/opcartesi.ts";
+import { ensureJwt, generateRollupConfig, writeChainConfig } from "../lib/opcartesi.ts";
 import { die, forget, say } from "../lib/proc.ts";
 import { alreadyDone, anchorStillOnL1 } from "./live.ts";
 
 const remote = process.env.MACHINE_REMOTE;
 if (!remote) die("MACHINE_REMOTE is unset — this step needs a machine server of its own");
 const snapshot = process.env.MACHINE_SNAPSHOT ?? "/snapshot";
-const flagsFile = paths.chainFlags;
+const configFile = paths.chainConfig;
 
 // Already anchored, to the deployment that is on L1 now? Then this chain is
 // the running one and re-anchoring would only move it out from under the
@@ -39,7 +41,7 @@ const deployed = readEnvFile(paths.l1Addresses);
 const anchored = readEnvFile(paths.chainGenesis);
 if (
     existsSync(paths.rollupConfig) &&
-    existsSync(flagsFile) &&
+    existsSync(configFile) &&
     anchored.L1_GENESIS_HASH !== undefined &&
     anchored.L1_GENESIS_HASH === deployed.L1_GENESIS_HASH &&
     (await anchorStillOnL1(anchored))
@@ -65,11 +67,11 @@ ensureJwt();
 await anchorRollup();
 await generateRollupConfig({ remote, snapshot });
 
-// Empty machine options on purpose: what the engine gets from this file is the
-// consensus-relevant flags only. Which machine it drives is the engine's own
-// business — and differs between the sequencer and the verifier.
-writeFileSync(flagsFile, `${chainFlags({ remote: "", snapshot: "" }).join(" ")}\n`);
-say(`wrote ${flagsFile} — the flags the engines must run with`);
+// One file, one source, both engines. It carries the consensus parameters and
+// nothing else: which machine an engine drives is its own business, and
+// differs between the sequencer and the verifier.
+await writeChainConfig();
+say(`wrote ${configFile} — the chain every engine here must serve`);
 
 // The generator is done with the machine, and a booted one is not cheap to
 // leave sitting around. Shutting the server down is how a step cleans up the

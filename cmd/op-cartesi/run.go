@@ -55,7 +55,7 @@ func runCommand(args []string) error {
 	// (docs/ACCOUNTS.md §6.2) — so a machine without a drive (the mock, or a
 	// pre-drive guest) simply reports nonce 0 and the gate degrades to
 	// duplicate-(sender,nonce) filtering.
-	pool.SetNonceGate(new(big.Int).SetUint64(cf.chainID), func(addr common.Address) (uint64, error) {
+	pool.SetNonceGate(new(big.Int).SetUint64(c.Config().ChainID), func(addr common.Address) (uint64, error) {
 		nonce, _, err := c.AccountAt(ctx, c.HeadBlock().Hash(), addr)
 		if errors.Is(err, chain.ErrNoAccountsDrive) {
 			return 0, nil
@@ -64,7 +64,7 @@ func runCommand(args []string) error {
 	})
 	head := c.HeadBlock()
 	slog.Info("chain initialized",
-		"chainId", cf.chainID,
+		"chainId", c.Config().ChainID,
 		"genesisHash", c.GenesisHash(),
 		"head", head.NumberU64(),
 		"headStateRoot", head.Header.Root,

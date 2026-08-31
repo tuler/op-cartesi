@@ -38,10 +38,12 @@ its items are what most of the work is about.
    machine, it adopts one (`machine.Remote.CheckReady`, `chain.New`). Genesis is
    therefore reproducible in the strongest sense available: the same directory
    yields the same chain.
-2. **The consensus parameters** — `chainFlags` in `cmd/op-cartesi/common.go`:
-   chain id, genesis timestamp, gas limit, `MaxCyclesPerInput`, the Holocene
-   EIP-1559 pair, and the checkpoint policy. The fork schedule is deliberately
-   not among them; every fork through Isthmus is active from genesis and none is
+2. **The consensus parameters** — the chain configuration document,
+   `chain.Params` ([BLOCKS-SPEC §4](BLOCKS-SPEC.md)): chain id, genesis
+   timestamp, gas limit, base fee, `MaxCyclesPerInput`, the application
+   contract, and the Holocene EIP-1559 pair. Checkpoint and snapshot policy is
+   deliberately *not* among them — that is each node's own — and neither is the
+   fork schedule: every fork through Isthmus is active from genesis and none is
    optional.
 3. **An L1 deployment**: the OP Stack suite through op-deployer — `OptimismPortal`,
    `SystemConfig`, `DisputeGameFactory`, `L1StandardBridge`,
@@ -58,11 +60,14 @@ its items are what most of the work is about.
 The load-bearing fact is the coupling between (1), (2) and (4). The genesis
 block hash is a function of the snapshot's root hash and the consensus
 parameters; `rollup.json` commits to that hash; and op-node refuses to start
-against an engine whose genesis disagrees with its rollup config. Today that
-agreement is maintained by `chainFlags()` in `devnet/lib/opcartesi.ts` being
-*the single copy* of a command line, from which both the `genesis` invocation
-and the `run` invocation are built. That is a property of a devnet with one
-chain in it. With two tenants it is a bug waiting for a maintenance window.
+against an engine whose genesis disagrees with its rollup config. That
+agreement is maintained by the chain configuration document being *the single
+copy* of the parameters: `op-cartesi config` writes it, and both the `genesis`
+invocation and the `run` invocation are given it with `-chain-config`. A
+document is per-chain in a way a shared command line was not, which is most of
+what multi-tenancy needs from this piece — what it still lacks is a place to
+keep one document per tenant, and something that refuses to start a chain
+against another's.
 
 ---
 

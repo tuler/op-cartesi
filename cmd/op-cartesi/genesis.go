@@ -64,7 +64,10 @@ func genesisCommand(args []string) error {
 	}
 	defer m.Close(ctx)
 
-	cfg := cf.chainConfig()
+	cfg, err := cf.chainConfig()
+	if err != nil {
+		return err
+	}
 	c, err := chain.New(ctx, cfg, m, nil)
 	if err != nil {
 		return err
@@ -73,7 +76,7 @@ func genesisCommand(args []string) error {
 
 	params := rollup.Params{
 		L1ChainID: *l1ChainID,
-		L2ChainID: cf.chainID,
+		L2ChainID: cfg.ChainID,
 		L1Genesis: rollup.BlockID{
 			Hash:   common.HexToHash(*l1GenesisHash),
 			Number: *l1GenesisNum,
@@ -86,8 +89,8 @@ func genesisCommand(args []string) error {
 		BatchInboxAddress:      common.HexToAddress(*batchInbox),
 		DepositContractAddress: common.HexToAddress(*portal),
 		L1SystemConfigAddress:  common.HexToAddress(*sysConfig),
-		EIP1559Denominator:     uint32(cf.denominator),
-		EIP1559Elasticity:      uint32(cf.elasticity),
+		EIP1559Denominator:     uint32(cfg.EIP1559Denominator),
+		EIP1559Elasticity:      uint32(cfg.EIP1559Elasticity),
 		BaseFeeScalar:          uint32(*baseFeeScalar),
 		BlobBaseFeeScalar:      uint32(*blobBaseFeeScalar),
 	}

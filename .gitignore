@@ -11,7 +11,7 @@ devnet/l1-addresses.env
 devnet/outputs-addresses.env
 devnet/chain-genesis.env
 # Written by the compose bring-up (devnet/compose/genesis.ts) for engine.sh.
-devnet/chain-flags
+devnet/chain-config.json
 devnet/token.env
 node_modules/
 .env

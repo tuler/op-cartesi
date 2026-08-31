@@ -5,7 +5,8 @@
 //
 // The chain flags must match those the engine runs with, or op-node rejects
 // the engine for serving a different genesis block — which is why both come
-// from chainFlags() in lib/opcartesi.ts rather than from two lists.
+// from the chain configuration document lib/opcartesi.ts writes rather than
+// from two lists.
 //
 // The devnet does this in the `genesis` service (compose/genesis.ts), which
 // also anchors the rollup to L1 and records the flags for the engines. This is

@@ -47,7 +47,7 @@ export const paths = {
     deployWorkdir: process.env.DEPLOY_WORKDIR ?? join(DEVNET_DIR, "deployment"),
     /** The chain flags rollup.json was generated with, which the engines are
      * run with — see devnet/compose/genesis.ts. */
-    chainFlags: process.env.CHAIN_FLAGS_FILE ?? join(DEVNET_DIR, "chain-flags"),
+    chainConfig: process.env.CHAIN_CONFIG_FILE ?? join(DEVNET_DIR, "chain-config.json"),
 } as const;
 
 /** One `KEY=value` file, as a map. Missing is empty, which is what a file a

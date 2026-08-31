@@ -8,6 +8,7 @@
 //
 //	run      serve the Engine API and eth RPC (default)
 //	genesis  print the rollup.json op-node needs to derive this chain
+//	config   print the chain configuration document every node must share
 package main
 
 import (
@@ -29,10 +30,13 @@ func main() {
 		err = runCommand(args)
 	case "genesis":
 		err = genesisCommand(args)
+	case "config":
+		err = configCommand(args)
 	case "help", "-h", "--help":
-		fmt.Fprint(os.Stderr, "usage: op-cartesi [run|genesis] [flags]\n\n"+
+		fmt.Fprint(os.Stderr, "usage: op-cartesi [run|genesis|config] [flags]\n\n"+
 			"  run      serve the Engine API (op-node) and eth RPC\n"+
-			"  genesis  print the rollup.json op-node needs to derive this chain\n\n"+
+			"  genesis  print the rollup.json op-node needs to derive this chain\n"+
+			"  config   print the chain configuration document every node must share\n\n"+
 			"Run 'op-cartesi <command> -h' for the flags of each command.\n")
 		return
 	default:

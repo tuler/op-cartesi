@@ -306,42 +306,23 @@ func fromHeaderJSON(t *testing.T, j headerJSON) *types.Header {
 
 // ------------------------------------------------------------- chain params
 
-// paramsJSON is the chain configuration a vector runs under: the genesis
-// parameters of BLOCKS-SPEC §4.1 and the state-transition parameters of §4.2,
-// which together are everything an implementation must be told.
-type paramsJSON struct {
-	ChainID            uint64 `json:"chainId"`
-	GenesisTimestamp   uint64 `json:"genesisTimestamp"`
-	GasLimit           uint64 `json:"gasLimit"`
-	BaseFee            string `json:"baseFee"`
-	MaxCyclesPerInput  uint64 `json:"maxCyclesPerInput"`
-	AppContract        string `json:"appContract"`
-	EIP1559Denominator uint64 `json:"eip1559Denominator"`
-	EIP1559Elasticity  uint64 `json:"eip1559Elasticity"`
-}
+// Vectors carry the chain's consensus parameters as the real configuration
+// document (chain.Params, BLOCKS-SPEC §4), so a vector file pins the shape an
+// implementation is actually handed rather than a lookalike of it.
 
-func (p paramsJSON) config(t *testing.T) Config {
+func (p Params) config(t *testing.T) Config {
 	t.Helper()
-	return Config{
-		ChainID:            p.ChainID,
-		GenesisTimestamp:   p.GenesisTimestamp,
-		GasLimit:           p.GasLimit,
-		BaseFee:            undec(t, p.BaseFee),
-		MaxCyclesPerInput:  p.MaxCyclesPerInput,
-		AppContract:        common.HexToAddress(p.AppContract),
-		EIP1559Denominator: p.EIP1559Denominator,
-		EIP1559Elasticity:  p.EIP1559Elasticity,
-	}
+	return p.Apply(Config{})
 }
 
-func defaultParams() paramsJSON {
-	return paramsJSON{
+func defaultParams() Params {
+	return Params{
 		ChainID:            901,
 		GenesisTimestamp:   1_700_000_000,
 		GasLimit:           30_000_000,
-		BaseFee:            "1000000000",
+		BaseFee:            big.NewInt(1_000_000_000),
 		MaxCyclesPerInput:  1_000_000_000,
-		AppContract:        common.Address{}.Hex(),
+		AppContract:        common.Address{},
 		EIP1559Denominator: DefaultEIP1559Denominator,
 		EIP1559Elasticity:  DefaultEIP1559Elasticity,
 	}
@@ -430,8 +411,8 @@ type genesisFile struct {
 }
 
 type genesisCase struct {
-	Name   string     `json:"name"`
-	Params paramsJSON `json:"params"`
+	Name   string `json:"name"`
+	Params Params `json:"params"`
 	// MachineRoot is the root hash of the snapshot the node is handed.
 	MachineRoot string     `json:"machineRoot"`
 	Header      headerJSON `json:"header"`
@@ -441,7 +422,7 @@ type genesisCase struct {
 
 // genesisHeaderFor runs the real genesis construction against a machine that
 // answers with the vector's root and nothing else.
-func genesisHeaderFor(t *testing.T, p paramsJSON, machineRoot string) *types.Header {
+func genesisHeaderFor(t *testing.T, p Params, machineRoot string) *types.Header {
 	t.Helper()
 	m := newScriptedMachine(common.HexToHash(machineRoot), nil)
 	c, err := New(context.Background(), p.config(t), m, nil)
@@ -454,14 +435,14 @@ func genesisHeaderFor(t *testing.T, p paramsJSON, machineRoot string) *types.Hea
 func TestConformanceGenesis(t *testing.T) {
 	sparse := defaultParams()
 	sparse.GenesisTimestamp = 0
-	sparse.BaseFee = "1"
+	sparse.BaseFee = big.NewInt(1)
 	sparse.GasLimit = 20_000_000
 	sparse.EIP1559Denominator = 50
 	sparse.EIP1559Elasticity = 10
 
 	inputs := []struct {
 		name        string
-		params      paramsJSON
+		params      Params
 		machineRoot string
 	}{
 		{"devnet defaults", defaultParams(), hexs(crypto.Keccak256([]byte("op-cartesi conformance snapshot")))},
@@ -1574,7 +1555,7 @@ type blockFile struct {
 
 type blockChainCase struct {
 	Name               string          `json:"name"`
-	Params             paramsJSON      `json:"params"`
+	Params             Params          `json:"params"`
 	GenesisMachineRoot string          `json:"genesisMachineRoot"`
 	GenesisHash        string          `json:"genesisHash"`
 	Blocks             []blockStepJSON `json:"blocks"`
@@ -1885,7 +1866,7 @@ type importFile struct {
 // answers re-executing the payload consumes. Each case runs against a fresh
 // chain built from exactly this, so a VALID import cannot affect the next.
 type importSetup struct {
-	Params             paramsJSON   `json:"params"`
+	Params             Params       `json:"params"`
 	GenesisMachineRoot string       `json:"genesisMachineRoot"`
 	GenesisHash        string       `json:"genesisHash"`
 	MachineResponses   []scriptStep `json:"machineResponses"`

@@ -186,7 +186,7 @@ go run ./cmd/op-cartesi genesis -h
 
 The engine (authenticated, for op-node) and public `eth_*` endpoints listen on `127.0.0.1:8551` and `127.0.0.1:8545` by default. On startup the node logs the genesis block hash and state root.
 
-The chain flags passed to `genesis` and `run` must match: they determine the L2 genesis block hash, and op-node refuses to start if the engine's genesis disagrees with its rollup config. `chainFlags()` in `devnet/lib/opcartesi.ts` is the single copy of them both are built from.
+`genesis` and `run` must describe the same chain: its parameters determine the L2 genesis block hash, and op-node refuses to start if the engine's genesis disagrees with its rollup config. `op-cartesi config` writes them as one document (`-chain-config`) both read.
 
 ## Fork support
 

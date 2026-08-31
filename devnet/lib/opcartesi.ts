@@ -30,22 +30,41 @@ export interface MachineOptions {
     snapshot?: string;
 }
 
-/** The consensus-relevant flags, shared by `genesis` and `run`. */
-export function chainFlags(machine: MachineOptions = {}): string[] {
+/** Writes the chain configuration document: the consensus parameters every
+ * node of this chain must agree on (docs/BLOCKS-SPEC.md §4).
+ *
+ * The engine writes it rather than this file, so there is one implementation
+ * of what the parameters are and what their defaults mean. This used to be a
+ * list of Go command-line flags built here and pasted onto both `genesis` and
+ * `run` — which worked while the only engine was the Go one, and is exactly
+ * what an engine in another language could not consume. */
+export async function writeChainConfig(): Promise<void> {
     const p = chainParams();
-    const remote = machine.remote ?? process.env.MACHINE_REMOTE ?? "";
-    const snapshot = machine.snapshot ?? process.env.MACHINE_SNAPSHOT ?? "";
-    return [
+    await must([
+        ...opCartesi(),
+        "config",
         "-chain-id",
         String(p.l2ChainId),
-        "-checkpoint-interval",
-        p.checkpointInterval,
         "-genesis.timestamp",
         p.genesisTimestamp,
         "-gas-limit",
         p.gasLimit,
         "-max-cycles-per-input",
         p.maxCyclesPerInput,
+        "-out",
+        paths.chainConfig,
+    ]);
+}
+
+/** How an engine is told which chain to serve, and which machine to drive.
+ * The first half is the document; the second is this node's own business and
+ * differs between the sequencer and the verifier. */
+export function engineFlags(machine: MachineOptions = {}): string[] {
+    const remote = machine.remote ?? process.env.MACHINE_REMOTE ?? "";
+    const snapshot = machine.snapshot ?? process.env.MACHINE_SNAPSHOT ?? "";
+    return [
+        "-chain-config",
+        paths.chainConfig,
         ...(remote ? ["-machine.remote", remote] : []),
         ...(snapshot ? ["-machine.snapshot", snapshot] : []),
     ];
@@ -70,7 +89,7 @@ export async function generateRollupConfig(machine: MachineOptions): Promise<voi
         [
             ...opCartesi(),
             "genesis",
-            ...chainFlags(machine),
+            ...engineFlags(machine),
             "-out",
             paths.rollupConfig,
             "-l1.chain-id",
@@ -115,7 +134,7 @@ export function runEngine(options: EngineOptions): Promise<never> {
         [
             ...opCartesi(),
             "run",
-            ...chainFlags(options),
+            ...engineFlags(options),
             ...(dataDir ? ["-datadir", dataDir] : []),
             "-engine.addr",
             options.engineAddr,

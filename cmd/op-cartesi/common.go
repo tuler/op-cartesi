@@ -5,60 +5,134 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"math/big"
+	"strings"
+
+	"github.com/ethereum/go-ethereum/common"
 
 	"github.com/tuler/op-cartesi/chain"
 	"github.com/tuler/op-cartesi/machine"
 	"github.com/tuler/op-cartesi/mempool"
 )
 
-// chainFlags are the consensus-relevant settings. They must be identical on
-// every node of the chain: they determine the genesis block hash and how
-// blocks are built and validated. Both `run` and `genesis` register them so
-// the generated rollup.json describes the chain the node actually serves.
+// chainFlags is how a node is told what to serve: the consensus parameters,
+// which every node of the chain must agree on, and the local policy, which
+// they need not.
 //
-// The fork schedule is not among them: every fork through Isthmus is active
-// from genesis and none of them is optional. See chain.Config.
+// The consensus half is better given as a document than as flags —
+// -chain-config, chain.Params, docs/BLOCKS-SPEC.md §4 — because it has to
+// reach implementations that do not share this flag syntax. The individual
+// flags remain for a single node started by hand, and refuse to be combined
+// with the document rather than quietly deciding which wins.
+//
+// The fork schedule is in neither: every fork through Isthmus is active from
+// genesis and none of them is optional. See chain.Config.
 type chainFlags struct {
-	machineRemote       string
-	machineSnapshot     string
-	chainID             uint64
-	genesisTime         uint64
-	gasLimit            uint64
-	maxCycles           uint64
+	machineRemote   string
+	machineSnapshot string
+	chainConfigPath string
+
+	// The consensus parameters (§4.1, §4.2).
+	chainID     uint64
+	genesisTime uint64
+	gasLimit    uint64
+	baseFee     string
+	maxCycles   uint64
+	appContract string
+	denominator uint64
+	elasticity  uint64
+
+	// Local policy (§4.3).
 	snapshots           int
 	checkpointInterval  uint64
 	checkpointRetention int
-	denominator         uint64
-	elasticity          uint64
+
+	// fs is kept so chainConfig can tell an explicitly-set flag from a
+	// default, which is what makes the -chain-config conflict detectable.
+	fs *flag.FlagSet
+}
+
+// consensusFlagNames are the flags -chain-config supersedes.
+var consensusFlagNames = []string{
+	"chain-id", "genesis.timestamp", "gas-limit", "base-fee",
+	"max-cycles-per-input", "app-contract", "eip1559.denominator", "eip1559.elasticity",
 }
 
 func (f *chainFlags) register(fs *flag.FlagSet) {
+	f.fs = fs
 	fs.StringVar(&f.machineRemote, "machine.remote", "", "URL of a cartesi-jsonrpc-machine server; empty runs the in-memory mock (dev only)")
 	fs.StringVar(&f.machineSnapshot, "machine.snapshot", "", "directory of a stored machine to load into the server; empty uses whatever it already has")
+	fs.StringVar(&f.chainConfigPath, "chain-config", "", "JSON document holding the chain's consensus parameters (docs/BLOCKS-SPEC.md §4); supersedes the flags below")
+
 	fs.Uint64Var(&f.chainID, "chain-id", 901, "L2 chain id")
 	fs.Uint64Var(&f.genesisTime, "genesis.timestamp", 0, "timestamp of the genesis block")
 	fs.Uint64Var(&f.gasLimit, "gas-limit", 30_000_000, "fallback block gas limit")
+	fs.StringVar(&f.baseFee, "base-fee", "1000000000", "the constant base fee every header carries, in wei")
 	fs.Uint64Var(&f.maxCycles, "max-cycles-per-input", 1_000_000_000, "mcycle budget per input")
+	fs.StringVar(&f.appContract, "app-contract", "", "L1 application contract address reported to the guest in every input envelope")
+	fs.Uint64Var(&f.denominator, "eip1559.denominator", chain.DefaultEIP1559Denominator, "Holocene EIP-1559 base fee change denominator")
+	fs.Uint64Var(&f.elasticity, "eip1559.elasticity", chain.DefaultEIP1559Elasticity, "Holocene EIP-1559 elasticity multiplier")
+
 	fs.IntVar(&f.snapshots, "snapshots", 32, "number of recent blocks to keep machine snapshots for")
 	fs.Uint64Var(&f.checkpointInterval, "checkpoint-interval", 100, "blocks between machine checkpoints; 0 disables them")
 	fs.IntVar(&f.checkpointRetention, "checkpoint-retention", 3, "how many machine checkpoints to keep on disk")
-	fs.Uint64Var(&f.denominator, "eip1559.denominator", chain.DefaultEIP1559Denominator, "Holocene EIP-1559 base fee change denominator")
-	fs.Uint64Var(&f.elasticity, "eip1559.elasticity", chain.DefaultEIP1559Elasticity, "Holocene EIP-1559 elasticity multiplier")
 }
 
-func (f *chainFlags) chainConfig() chain.Config {
-	cfg := chain.Config{
-		ChainID:             f.chainID,
-		GenesisTimestamp:    f.genesisTime,
-		GasLimit:            f.gasLimit,
-		MaxCyclesPerInput:   f.maxCycles,
+// params resolves the consensus parameters, from the document when one is
+// given and from the flags otherwise.
+func (f *chainFlags) params() (chain.Params, error) {
+	if f.chainConfigPath == "" {
+		baseFee, ok := new(big.Int).SetString(f.baseFee, 10)
+		if !ok {
+			return chain.Params{}, fmt.Errorf("-base-fee %q is not a decimal integer", f.baseFee)
+		}
+		return chain.Params{
+			ChainID:            f.chainID,
+			GenesisTimestamp:   f.genesisTime,
+			GasLimit:           f.gasLimit,
+			BaseFee:            baseFee,
+			MaxCyclesPerInput:  f.maxCycles,
+			AppContract:        common.HexToAddress(f.appContract),
+			EIP1559Denominator: f.denominator,
+			EIP1559Elasticity:  f.elasticity,
+		}, nil
+	}
+	// Both would be silently reconciled otherwise, and a node serving a
+	// chain its operator did not describe is the failure this document
+	// exists to prevent.
+	if conflicting := f.explicitConsensusFlags(); len(conflicting) > 0 {
+		return chain.Params{}, fmt.Errorf("-chain-config sets the consensus parameters; remove -%s",
+			strings.Join(conflicting, ", -"))
+	}
+	return chain.LoadParams(f.chainConfigPath)
+}
+
+// explicitConsensusFlags names the consensus flags the command line actually
+// set, as opposed to those sitting at their defaults.
+func (f *chainFlags) explicitConsensusFlags() []string {
+	consensus := make(map[string]bool, len(consensusFlagNames))
+	for _, name := range consensusFlagNames {
+		consensus[name] = true
+	}
+	var found []string
+	f.fs.Visit(func(fl *flag.Flag) {
+		if consensus[fl.Name] {
+			found = append(found, fl.Name)
+		}
+	})
+	return found
+}
+
+func (f *chainFlags) chainConfig() (chain.Config, error) {
+	params, err := f.params()
+	if err != nil {
+		return chain.Config{}, err
+	}
+	return params.Apply(chain.Config{
 		MaxSnapshots:        f.snapshots,
 		CheckpointInterval:  f.checkpointInterval,
 		CheckpointRetention: f.checkpointRetention,
-		EIP1559Denominator:  f.denominator,
-		EIP1559Elasticity:   f.elasticity,
-	}
-	return cfg
+	}), nil
 }
 
 // openMachine connects to the emulator and checks the machine it holds is
@@ -96,20 +170,24 @@ func (f *chainFlags) openMachine(ctx context.Context) (machine.Machine, error) {
 // the emulator, so the operator's snapshot is not what the node runs. Only a
 // first start uses it.
 func (f *chainFlags) openChain(ctx context.Context, dataDir string, pool *mempool.Pool) (*chain.Chain, error) {
+	cfg, err := f.chainConfig()
+	if err != nil {
+		return nil, err
+	}
 	if dataDir == "" {
 		m, err := f.openMachine(ctx)
 		if err != nil {
 			return nil, err
 		}
 		slog.Warn("running without -datadir; the chain is in memory and a restart loses it")
-		return chain.New(ctx, f.chainConfig(), m, pool)
+		return chain.New(ctx, cfg, m, pool)
 	}
 
 	store, err := chain.OpenStore(dataDir)
 	if err != nil {
 		return nil, err
 	}
-	restored, ok, err := chain.Restore(ctx, f.chainConfig(), store, f.loadCheckpoint, pool)
+	restored, ok, err := chain.Restore(ctx, cfg, store, f.loadCheckpoint, pool)
 	if err != nil {
 		store.Close()
 		return nil, err
@@ -123,7 +201,7 @@ func (f *chainFlags) openChain(ctx context.Context, dataDir string, pool *mempoo
 		store.Close()
 		return nil, err
 	}
-	c, err := chain.New(ctx, f.chainConfig(), m, pool)
+	c, err := chain.New(ctx, cfg, m, pool)
 	if err != nil {
 		store.Close()
 		return nil, err
