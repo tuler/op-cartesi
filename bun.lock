@@ -8,47 +8,6 @@
         "@biomejs/biome": "2.5.8",
       },
     },
-    "abi-drive/js": {
-      "name": "@op-cartesi/abis",
-      "version": "0.0.0",
-      "dependencies": {
-        "@op-cartesi/accounts": "workspace:*",
-        "viem": "^2.55.18",
-      },
-      "devDependencies": {
-        "@types/node": "^26.2.0",
-        "typescript": "^7.0.2",
-        "vitest": "^4.1.10",
-      },
-    },
-    "accounts-drive/js": {
-      "name": "@op-cartesi/accounts",
-      "version": "0.1.0",
-      "dependencies": {
-        "@noble/hashes": "^2.2.0",
-      },
-      "devDependencies": {
-        "@types/node": "^26.2.0",
-        "tsdown": "^0.22.14",
-        "typescript": "^7.0.2",
-      },
-    },
-    "app": {
-      "name": "@op-cartesi/app",
-      "version": "0.0.0",
-      "dependencies": {
-        "@cartesi/rollup": "alpha",
-        "@op-cartesi/abis": "workspace:*",
-        "@op-cartesi/accounts": "workspace:*",
-        "@op-cartesi/evm": "workspace:*",
-        "viem": "^2.55.18",
-      },
-      "devDependencies": {
-        "@types/node": "^26.2.0",
-        "typescript": "^7.0.2",
-        "vitest": "^4.1.10",
-      },
-    },
     "demo": {
       "name": "demo",
       "version": "0.0.0",
@@ -74,7 +33,48 @@
         "typescript": "^7.0.2",
       },
     },
-    "evm-compat/js": {
+    "guest/ts": {
+      "name": "@op-cartesi/app",
+      "version": "0.0.0",
+      "dependencies": {
+        "@cartesi/rollup": "alpha",
+        "@op-cartesi/abis": "workspace:*",
+        "@op-cartesi/accounts": "workspace:*",
+        "@op-cartesi/evm": "workspace:*",
+        "viem": "^2.55.18",
+      },
+      "devDependencies": {
+        "@types/node": "^26.2.0",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+      },
+    },
+    "lib/abi-drive/js": {
+      "name": "@op-cartesi/abis",
+      "version": "0.0.0",
+      "dependencies": {
+        "@op-cartesi/accounts": "workspace:*",
+        "viem": "^2.55.18",
+      },
+      "devDependencies": {
+        "@types/node": "^26.2.0",
+        "typescript": "^7.0.2",
+        "vitest": "^4.1.10",
+      },
+    },
+    "lib/accounts-drive/js": {
+      "name": "@op-cartesi/accounts",
+      "version": "0.1.0",
+      "dependencies": {
+        "@noble/hashes": "^2.2.0",
+      },
+      "devDependencies": {
+        "@types/node": "^26.2.0",
+        "tsdown": "^0.22.14",
+        "typescript": "^7.0.2",
+      },
+    },
+    "lib/evm-compat/js": {
       "name": "@op-cartesi/evm",
       "version": "0.0.0",
       "dependencies": {
@@ -124,7 +124,7 @@
 
     "@biomejs/cli-win32-x64": ["@biomejs/cli-win32-x64@2.5.8", "", { "os": "win32", "cpu": "x64" }, "sha512-I2czzXTY61f3nFJxXoMDq80t7MivxDEnCjE+8sDKoFfcKMaoQdkqhIFQ3KyY0XLzeSpUBYeNAXgD+iOV/BU0VA=="],
 
-    "@cartesi/rollup": ["@cartesi/rollup@1.0.0-alpha.1", "", { "dependencies": { "node-addon-api": "^8.3.0", "node-gyp-build": "^4.8.4" } }, "sha512-zeXB5Ak509JgrDRpNwldw1J8z0JKnrMZyEvSpZY9RNkUi740hpMxunGhTLDRyd634xL3Owgz19BAuRWK+GowSg=="],
+    "@cartesi/rollup": ["@cartesi/rollup@1.0.0-alpha.2", "", { "dependencies": { "node-addon-api": "^8.3.0", "node-gyp-build": "^4.8.4" } }, "sha512-kusuJM2L7XtsGlu9fd0uf7fgG11JhFjgAPmjMY3GxZFEbI56hVlcR7bGMfJ061Ff02OA5/Zkh+W/A/8NBhIzNA=="],
 
     "@esbuild/aix-ppc64": ["@esbuild/aix-ppc64@0.28.2", "", { "os": "aix", "cpu": "ppc64" }, "sha512-XExcO+dvLKvVtNTibSTBej1NCAbaGhWn9Ww1ZPx80qsahhPFe/8jgWP0IchNe0F3HwkU7n8ejhH8bjonqht8mQ=="],
 
@@ -186,13 +186,13 @@
 
     "@noble/hashes": ["@noble/hashes@2.3.0", "", {}, "sha512-oN+QwyX7VSHotibwubG3kpzbwKrfnyR6OOO+3Nk/53ADL7FmgHHz4TgrbaYKvvOw09u6QTx0oiH1cNCIOuN0CQ=="],
 
-    "@op-cartesi/abis": ["@op-cartesi/abis@workspace:abi-drive/js"],
+    "@op-cartesi/abis": ["@op-cartesi/abis@workspace:lib/abi-drive/js"],
 
-    "@op-cartesi/accounts": ["@op-cartesi/accounts@workspace:accounts-drive/js"],
+    "@op-cartesi/accounts": ["@op-cartesi/accounts@workspace:lib/accounts-drive/js"],
 
-    "@op-cartesi/app": ["@op-cartesi/app@workspace:app"],
+    "@op-cartesi/app": ["@op-cartesi/app@workspace:guest/ts"],
 
-    "@op-cartesi/evm": ["@op-cartesi/evm@workspace:evm-compat/js"],
+    "@op-cartesi/evm": ["@op-cartesi/evm@workspace:lib/evm-compat/js"],
 
     "@op-cartesi/scripts": ["@op-cartesi/scripts@workspace:scripts"],
 

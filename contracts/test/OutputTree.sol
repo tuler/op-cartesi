@@ -17,7 +17,7 @@ import {LibKeccak256} from "cartesi-rollups-contracts/src/library/LibKeccak256.s
 /// which is the right split: a chain never builds the tree in a contract, it
 /// only checks a proof against a root someone else built.
 ///
-/// The node's own builder is `chain/outputtree.go`, and
+/// The node's own builder is `host/go/chain/outputtree.go`, and
 /// `testMatchesTheGoImplementation` pins the two together.
 library OutputTree {
     /// @notice CanonicalMachine.LOG2_MAX_OUTPUTS.

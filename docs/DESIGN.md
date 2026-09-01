@@ -192,14 +192,14 @@ The chain maintains exactly that trie, and `withdrawalsRoot` is its root:
   from the chain-wide input index plus a per-input ordinal, which makes it
   unique with no stored counter — nothing on L1 requires the counter to be
   dense, only the withdrawal hash to be unique. The passer predeploy itself
-  is routed too (`app/src/handlers/passer.ts`): `initiateWithdrawal(target,
+  is routed too (`guest/ts/src/handlers/passer.ts`): `initiateWithdrawal(target,
   gasLimit, data)` burns `msg.value` and emits the message with the caller's
   exact fields, and a plain transfer is the real passer's `receive()` — so
   viem's `initiateWithdrawal`, the first step of the [stock withdrawal
   guide](https://specs.optimism.io/protocol/withdrawals.html#withdrawal-flow),
   starts a withdrawal without knowing the execution layer is not an EVM.
   `withdrawEther` remains as a convenience over the same burn.
-- **The host maintains the trie** (`chain/passertrie.go`): a genuine
+- **The host maintains the trie** (`host/go/chain/passertrie.go`): a genuine
   Ethereum storage trie over geth's own `trie` package, secure-keyed the way
   geth keys account storage, holding the `sentMessages` slot of every
   withdrawal hash. It is cumulative like the outputs tree, carried per block
@@ -246,9 +246,9 @@ What it costs:
   slot, plus the messenger encodings §6 adds — and it is pinned by cross-tests
   in three directions, all through one file — the shared vectors of
   [`conformance/`](../conformance/README.md): the guest's TypeScript encoders
-  replay it (`evm-compat/js/test/conformance.test.ts`), the node generates it
+  replay it (`lib/evm-compat/js/test/conformance.test.ts`), the node generates it
   and checks every proof in it with geth's verifier
-  (`chain/conformance_test.go`), and the vendored Solidity verifier judges the
+  (`host/go/chain/conformance_test.go`), and the vendored Solidity verifier judges the
   same bytes (`contracts/test/PasserTrieVectors.t.sol`).
 - **The account proof stays impossible.** Anything that verifies the
   `0x4200…0016` *account* against `stateRoot` — a third-party prover service,

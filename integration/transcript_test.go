@@ -33,10 +33,10 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 
-	"github.com/tuler/op-cartesi/chain"
-	"github.com/tuler/op-cartesi/engineapi"
-	"github.com/tuler/op-cartesi/machine"
-	"github.com/tuler/op-cartesi/mempool"
+	"github.com/tuler/op-cartesi/host/go/chain"
+	"github.com/tuler/op-cartesi/host/go/engineapi"
+	"github.com/tuler/op-cartesi/host/go/machine"
+	"github.com/tuler/op-cartesi/host/go/mempool"
 )
 
 var update = flag.Bool("update", false, "rewrite ../conformance/engine/sequencing.json")

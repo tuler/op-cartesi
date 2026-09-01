@@ -72,7 +72,7 @@ The chain also builds blocks on a **real Cartesi Machine**: the JSON-RPC client 
 ```sh
 cartesi build
 OP_CARTESI_TEST_SNAPSHOT=./.cartesi/image \
-OP_CARTESI_TEST_LEDGER_SNAPSHOT=./.cartesi/image go test ./...
+OP_CARTESI_TEST_LEDGER_SNAPSHOT=./.cartesi/image go test ./host/go/...
 ```
 
 The second variable turns on the deposit and token tests, which need a guest that means something by its inputs rather than merely consuming them — the routed guest of [`demo`](demo/README.md), which is what `cartesi build` builds.
@@ -139,26 +139,27 @@ Only these versions are served, for the reason in [Fork support](#fork-support).
 
 | Package | Purpose |
 |---|---|
-| `cmd/op-cartesi` | CLI: wires the machine, chain, and the two RPC listeners together. |
-| `machine` | `Machine` interface (advance-input / inspect / root-hash / fork / close), a deterministic in-memory mock for development and tests, and a client for the emulator's `cartesi-jsonrpc-machine` remote protocol. The node never boots a machine: a snapshot arrives already parked at its first input yield, so genesis is the snapshot's own root hash. |
-| `chain` | Block store and its durable half (`rawdb` over pebble, plus machine checkpoints), genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning, and the per-transaction record of machine emissions. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
-| `engineapi` | `engine_*`, `eth_*` and `cartesi_*` JSON-RPC services, Engine API JWT authentication, HTTP handler assembly. |
-| `mempool` | Bounded FIFO transaction ingress (the OP Stack has no public L2 mempool; the sequencer's RPC is the only entry point). |
-| `rollup` | Generates the `rollup.json` document op-node reads. |
-| `integration` | Separate Go module: compatibility tests driving the shim with op-node's wire types. Kept out of the main module so the shim itself depends only on op-geth. |
+| `host/go/cmd/op-cartesi` | CLI: wires the machine, chain, and the two RPC listeners together. |
+| `host/go/machine` | `Machine` interface (advance-input / inspect / root-hash / fork / close), a deterministic in-memory mock for development and tests, and a client for the emulator's `cartesi-jsonrpc-machine` remote protocol. The node never boots a machine: a snapshot arrives already parked at its first input yield, so genesis is the snapshot's own root hash. |
+| `host/go/chain` | Block store and its durable half (`rawdb` over pebble, plus machine checkpoints), genesis construction, payload building (sequencer) and payload import/re-execution (verifier), reorgs and snapshot pruning, and the per-transaction record of machine emissions. Blocks are Ethereum-shaped headers whose `stateRoot` is the machine's Merkle root; gas is metered in machine mcycles. |
+| `host/go/engineapi` | `engine_*`, `eth_*` and `cartesi_*` JSON-RPC services, Engine API JWT authentication, HTTP handler assembly. |
+| `host/go/mempool` | Bounded FIFO transaction ingress (the OP Stack has no public L2 mempool; the sequencer's RPC is the only entry point). |
+| `host/go/rollup` | Generates the `rollup.json` document op-node reads. |
+| `integration` | Separate Go module: compatibility tests driving *an* engine — this one, or any that listens — with op-node's wire types. |
 | `devnet` | Brings the devnet up: anvil, the OP Stack L1 suite, the machine, the shim and op-node, one docker compose service each — plus the deploy steps and the configuration everything else reads. |
 | `scripts` | Client scripts for a running devnet — deposits, withdrawals, balances — and the machine snapshot they run against. |
 
 ## Development
 
 ```sh
-go build ./...
-go test ./...
-(cd integration && go test ./...)   # op-node compatibility suite
+# The repository is several Go modules, joined by go.work: the engine, the
+# two drive libraries, and the conformance harness.
+go build ./host/go/...
+go test ./host/go/... ./lib/accounts-drive/go/... ./lib/abi-drive/go/... ./integration/...
 
 # The TypeScript side is a bun workspace: the drive libraries
-# (accounts-drive/js, abi-drive/js), the EVM-compat wire vocabulary
-# (evm-compat/js), the guest runtime (app), the devnet guest
+# (lib/accounts-drive/js, lib/abi-drive/js), the EVM-compat wire vocabulary
+# (lib/evm-compat/js), the guest runtime (app), the devnet guest
 # application (demo), the devnet itself (devnet) and the client
 # scripts that drive it (scripts).
 bun install
@@ -171,17 +172,17 @@ bun run check         # format + lint + import order, report only
 bun run check:fix     # ... and apply the safe fixes
 
 # Run with the in-memory mock machine (no emulator needed):
-go run ./cmd/op-cartesi run
+go run ./host/go/cmd/op-cartesi run
 
 # Run against a real emulator:
 cartesi-jsonrpc-machine --server-address=127.0.0.1:6000 ... &
-go run ./cmd/op-cartesi run \
+go run ./host/go/cmd/op-cartesi run \
   -machine.remote http://127.0.0.1:6000 \
   -engine.jwt-secret ./jwt.hex \
   -chain-id 901 -genesis.timestamp 1720000000
 
 # Generate the rollup.json op-node needs (same chain flags as `run`):
-go run ./cmd/op-cartesi genesis -h
+go run ./host/go/cmd/op-cartesi genesis -h
 ```
 
 The engine (authenticated, for op-node) and public `eth_*` endpoints listen on `127.0.0.1:8551` and `127.0.0.1:8545` by default. On startup the node logs the genesis block hash and state root.

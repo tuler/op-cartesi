@@ -19,7 +19,7 @@ import { exec, must, say } from "./proc.ts";
 export function opCartesi(): string[] {
     if (process.env.OP_CARTESI_BIN) return [process.env.OP_CARTESI_BIN];
     if (existsSync(paths.opCartesiBin)) return [paths.opCartesiBin];
-    return ["go", "run", "./cmd/op-cartesi"];
+    return ["go", "run", "./host/go/cmd/op-cartesi"];
 }
 
 export interface MachineOptions {

@@ -2,7 +2,7 @@
 
 **Status: adopted.** This document is the research and the design decision
 it led to; the format is specified in ACCOUNTS-DRIVE-SPEC.md, implemented
-in six languages under accounts-drive/, and roadmap steps 1–2 (§10) run on
+in six languages under lib/accounts-drive/, and roadmap steps 1–2 (§10) run on
 the devnet. It fills the gap the README
 lists as "no account model in the shim", and it does so where the README
 says the durable fix belongs — in the guest, covered by the state root.
@@ -39,7 +39,7 @@ Three consumers want per-account state, and today none of them can have it:
 
 The obvious answer — ask the guest — is the wrong tool. `eth_call` runs the
 machine's inspect protocol: fork the emulator server, feed a query, execute
-the guest until it yields, discard the fork (`chain/inspect.go`). That is a
+the guest until it yields, discard the fork (`host/go/chain/inspect.go`). That is a
 process spawn plus a guest round trip per query, on a path where the guest
 dominates (a devnet block replays in about 1.9 s, almost all of it guest
 time). It also answers in whatever ad-hoc encoding the app chose — the

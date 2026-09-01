@@ -9,11 +9,11 @@
 // the guest talking *about the chain*: reports are the machine's per-input
 // diagnostics, explicitly not provable and therefore never in a receipt, and
 // for a rejected input they are the only account of why it failed
-// (engineapi/cartesi.go). They are read back over cartesi_getTransactionEmissions,
+// (host/go/engineapi/cartesi.go). They are read back over cartesi_getTransactionEmissions,
 // which means this works against any node — it is pointed at the sequencer's
 // RPC here, but the verifier's serves the same thing.
 //
-// Reports carry the router's one-byte tag (EVM-COMPAT §8, evm-compat/js
+// Reports carry the router's one-byte tag (EVM-COMPAT §8, lib/evm-compat/js
 // types.ts): app diagnostics, eth_call return data, or revert data.
 
 import { TAG_APP, TAG_RETURN, TAG_REVERT } from "@op-cartesi/evm";

@@ -28,8 +28,8 @@ contract ProofChecker {
 
 /// @notice Pins the node's outputs tree to Cartesi's on-chain verifier.
 ///
-/// The node builds the tree in `chain/outputtree.go` and the proof in
-/// `chain/outputproof.go`; the chain that has to accept the result is this
+/// The node builds the tree in `host/go/chain/outputtree.go` and the proof in
+/// `host/go/chain/outputproof.go`; the chain that has to accept the result is this
 /// one. The two implementations share no code, so the agreement is checked
 /// against the shared vectors
 /// (`conformance/commitments/outputs-tree.json`, BLOCKS-SPEC §10): the outputs

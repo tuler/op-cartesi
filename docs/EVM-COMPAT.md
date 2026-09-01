@@ -5,7 +5,7 @@ design it leads to; a normative companion spec (the routing standard's
 byte-level contract, in the mold of ACCOUNTS-DRIVE-SPEC.md) remains to be
 written. The router, the journal, and the built-in contract family of
 §5–§10 are implemented and tested in
-[`app/`](../app/README.md) — TypeScript on `@cartesi/rollup`,
+[`guest/ts/`](../guest/ts/README.md) — TypeScript on `@cartesi/rollup`,
 with viem supplying transaction parsing, recovery and ABI plumbing — and
 that guest **is the devnet guest**: `cartesi build` builds it, the
 devnet scripts speak its bridge and façades, and the shim's `eth_call`
@@ -59,7 +59,7 @@ the guest side of that boundary is another story:
   returns a bare 32-byte hex string in an encoding only `balance.sh` knows.
 - **Receipts carry Cartesi outputs, not events.** Logs are synthesized as
   `CartesiOutput(uint64,bytes)` from a single system address
-  (`chain/receipts.go`) — the right call for provability, but nothing
+  (`host/go/chain/receipts.go`) — the right call for provability, but nothing
   downstream of an ABI decoder can interpret them.
 
 Meanwhile the reuse argument that shaped the guest has inverted. The
@@ -163,7 +163,7 @@ The user-visible complaint — "the EvmAdvance wrapping is not making sense"
 
 1. **The wire encoding**: `EvmAdvance(chainId, appContract, msgSender,
    blockNumber, blockTimestamp, prevRandao, index, payload)` around each
-   raw transaction, built by `chain/input.go`, reconstructed by verifiers.
+   raw transaction, built by `host/go/chain/input.go`, reconstructed by verifiers.
 2. **The guest implementation**: libcmt and the `rollup` CLI — the rootfs
    tooling that decodes the envelope, owns the yield protocol, and
    maintains the outputs accumulator.
@@ -215,7 +215,7 @@ them:
 
 - **The outputs accumulator.** libcmt maintains the Cartesi outputs Merkle
   root incrementally and reports it in the TX buffer at each accepted
-  yield; `machine/remote_test.go` pins that behavior, the realmachine
+  yield; `host/go/machine/remote_test.go` pins that behavior, the realmachine
   tests check host and guest agree, and DESIGN §8 requirement 2 makes the
   in-machine root settlement-critical (`DaveConsensus._validateOutputTree`
   proves exactly that leaf). The router MUST maintain the same accumulator
@@ -352,8 +352,8 @@ does not need to, because the machine already covers the other two cases:
 | | What undoes it |
 |---|---|
 | Ledger, on REVERT | the journal |
-| Application RAM, on REJECT | the machine — builder and verifier alike run each input on a fork and discard it unless it accepted (`chain/chain.go`) |
-| Application RAM, during inspect | the machine — queries run on a fork that is thrown away (`chain/inspect.go`) |
+| Application RAM, on REJECT | the machine — builder and verifier alike run each input on a fork and discard it unless it accepted (`host/go/chain/chain.go`) |
+| Application RAM, during inspect | the machine — queries run on a fork that is thrown away (`host/go/chain/inspect.go`) |
 | Application RAM, on REVERT | **nothing** |
 
 So there is exactly one case where an application's own state outlives a
@@ -543,7 +543,7 @@ passthrough it is today).
 The same envelope, under a second selector — `EvmSimulate`, same fields —
 runs the *advance* path on the inspect fork with enforcement skipped
 (no signature, no nonce, no fee): the discarded-fork simulation entry
-point that `engineapi/eth.go` explicitly names as the missing piece for a
+point that `host/go/engineapi/eth.go` explicitly names as the missing piece for a
 real `eth_estimateGas`. The host already measures an inspect's cycles, so
 estimation is the shim converting measured cycles at `CyclesPerGas` with
 a safety margin — no new guest reporting needed. v1 reserves the
@@ -728,7 +728,7 @@ what the machine speaks by reading drive bytes, with zero knowledge of the
 application's implementation. It is the natural bridge for outside
 communication: the shim serves contract discovery from the same
 read-memory path `AccountAt` already uses. *(done — `eth_getCode`
-(`chain/code.go`) answers `0xEF 0xC7 0x51 <kind>` for every routed
+(`host/go/chain/code.go`) answers `0xEF 0xC7 0x51 <kind>` for every routed
 address: kind 0 system and 1 application from the ABI drive, 2 for token
 façades derived from the accounts drive; the `0xEF` prefix is
 EIP-3541-reserved, so no real EVM bytecode can collide with a marker. And
@@ -742,7 +742,7 @@ block.)*
 |---|---|
 | **Consensus / wire** | **Nothing.** EvmAdvance unchanged, block format unchanged, outputs tree and voucher encodings unchanged, op-node/op-batcher/op-proposer untouched, L1 contracts untouched. |
 | **Guest** | The router (native, reference implementation of the standard) replaces `bank-app.sh`: CMIO loop, outputs accumulator, typed-tx sighash, enforcement, journal, manifest dispatch, built-in family. The accounts drive and its libraries: unchanged. *(done, as workspace libraries — `@op-cartesi/app` the runtime, `@op-cartesi/evm` the wire vocabulary, `@op-cartesi/abis` the ABI drive; `demo` is an application of them, §10a)* |
-| **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `engineapi/eth.go`)*; `eth_getCode` serves the routed-address markers and `cartesi_getContracts` the full surface with ABIs, both from the drives *(done — `chain/code.go`, §10a)*; receipts try the `EvmLog` decode; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
+| **Shim** | `eth_call` builds `EvmCall` (CallArgs grows `From`/`Value`) and maps rejection to revert-with-data *(done — `host/go/engineapi/eth.go`)*; `eth_getCode` serves the routed-address markers and `cartesi_getContracts` the full surface with ABIs, both from the drives *(done — `host/go/chain/code.go`, §10a)*; receipts try the `EvmLog` decode; mempool already passes typed txs; `eth_estimateGas` unchanged until `EvmSimulate` is wired. |
 | **Devnet** | `build-snapshot.sh` ships the router; the dialect scripts collapse into standard tooling — `cast send $TOKEN "transfer(address,uint256)" …`, `cast call $TOKEN "balanceOf(address)" …`, `cast send $BRIDGE "withdrawEther(address)" --value …` — and `send-l2-tx.sh` drops `--legacy`. Scripts getting shorter is the acceptance test. |
 | **Tests** | The realmachine suite keeps its role with the new guest *(done — its inputs now speak the standard)*; enforcement (sighash, recovery, nonce) is covered by the router's vitest suite, retiring `test-guest.lua`; golden accounts-drive vectors already cover the ledger. |
 

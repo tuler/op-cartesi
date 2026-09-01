@@ -28,7 +28,7 @@ forge test
 
 The suite reads [`../conformance`](../conformance/README.md) — hence the
 read-only `fs_permissions` entry in `foundry.toml`. Regenerating those files is
-a Go command (`go test ./chain -run TestConformance -update`); this side only
+a Go command (`go test ./host/go/chain -run TestConformance -update`); this side only
 consumes them.
 
 `dependencies/` is generated and gitignored. `remappings.txt` is checked in and
@@ -44,7 +44,7 @@ Cartesi Rollups is pinned to **3.0.0-alpha.6**. Two things follow from that:
 - 3.0 removed the on-chain tree *builder* (`LibMerkle32`) and kept only the
   verifier (`LibOutputValidityProof` over `LibBinaryMerkleTree`), which is the
   right split: a contract never builds the outputs tree, it only checks a proof
-  against a root. The builder now lives in the node (`chain/outputtree.go`),
+  against a root. The builder now lives in the node (`host/go/chain/outputtree.go`),
   with a copy in `test/OutputTree.sol` for the tests. Since the two share no
   code, `test/OutputTree.t.sol` checks both against
   `../conformance/commitments/outputs-tree.json` — the same outputs, the same

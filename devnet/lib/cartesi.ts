@@ -1,4 +1,4 @@
-// The cartesi_ RPC namespace (engineapi/cartesi.go) as a viem client
+// The cartesi_ RPC namespace (host/go/engineapi/cartesi.go) as a viem client
 // extension — the .extend(cartesiActions()) counterpart of viem's own
 // walletActionsL1/publicActionsL1: typed methods over the schema, with the
 // wire's hex quantities converted at the boundary so call sites speak

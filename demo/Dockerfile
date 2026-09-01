@@ -28,26 +28,26 @@ EOF
 # native addon ships prebuilds and node-gyp-build picks the riscv64 one at
 # runtime. The build context is the REPO ROOT (../cartesi.toml sets
 # context = "."), because the app is a bun workspace member whose
-# @op-cartesi/accounts dependency lives in accounts-drive/js.
+# @op-cartesi/accounts dependency lives in lib/accounts-drive/js.
 FROM --platform=$BUILDPLATFORM oven/bun:1.3 AS build-stage
 
 WORKDIR /opt/cartesi
 
 # Manifests first, for layer caching; bun resolves the whole workspace.
 COPY package.json bun.lock ./
-COPY accounts-drive/js/package.json accounts-drive/js/
-COPY abi-drive/js/package.json abi-drive/js/
-COPY evm-compat/js/package.json evm-compat/js/
-COPY app/package.json app/
+COPY lib/accounts-drive/js/package.json lib/accounts-drive/js/
+COPY lib/abi-drive/js/package.json lib/abi-drive/js/
+COPY lib/evm-compat/js/package.json lib/evm-compat/js/
+COPY guest/ts/package.json guest/ts/
 COPY demo/package.json demo/
 COPY devnet/package.json devnet/
 COPY scripts/package.json scripts/
 RUN bun install --frozen-lockfile
 
-COPY accounts-drive/ accounts-drive/
-COPY abi-drive/ abi-drive/
-COPY evm-compat/ evm-compat/
-COPY app/ app/
+COPY lib/accounts-drive/ lib/accounts-drive/
+COPY lib/abi-drive/ lib/abi-drive/
+COPY lib/evm-compat/ lib/evm-compat/
+COPY guest/ts/ guest/ts/
 COPY demo/ demo/
 COPY scripts/ scripts/
 RUN cd demo && bun run build

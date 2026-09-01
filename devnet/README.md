@@ -240,7 +240,7 @@ parent's own bind address on a fresh port — `0.0.0.0:42693` for a server
 started with `--server-address=0.0.0.0:6300`. Dialing that verbatim means
 dialing your own machine, which is right only when the server is on it. `Fork`
 substitutes the host it reached the parent on, so `machine:6300` forks to
-`machine:42693` (`machine/jsonrpc.go`, `TestForkEndpoint`).
+`machine:42693` (`host/go/machine/jsonrpc.go`, `TestForkEndpoint`).
 
 ### Watching the guest
 

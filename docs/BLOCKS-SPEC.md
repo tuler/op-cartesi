@@ -8,7 +8,7 @@ an input reaches the machine in, the rules that turn a list of transactions
 plus a machine into a header, and the two commitments that header carries.
 
 It exists so that the state transition is a *specification* rather than
-whatever [`chain/`](../chain) happens to do. Two audiences need that:
+whatever [`host/go/chain/`](../host/go/chain) happens to do. Two audiences need that:
 
 - **An independent execution engine** — a second implementation, in another
   language, that must produce byte-identical blocks. The wire surface it
@@ -711,7 +711,7 @@ specification when it happens.
 
 This specification is not testable as prose, so it has a companion corpus:
 [`conformance/`](../conformance), fixtures both implementations read, in the
-shape [`accounts-drive/testdata/golden.json`](../accounts-drive/testdata/golden.json)
+shape [`lib/accounts-drive/testdata/golden.json`](../lib/accounts-drive/testdata/golden.json)
 already has for the drives.
 
 | Vector set | Pins | Section |

@@ -31,11 +31,11 @@ import (
 	"github.com/ethereum/go-ethereum/node"
 	"github.com/ethereum/go-ethereum/rpc"
 
-	"github.com/tuler/op-cartesi/chain"
-	"github.com/tuler/op-cartesi/engineapi"
-	"github.com/tuler/op-cartesi/machine"
-	"github.com/tuler/op-cartesi/mempool"
-	opcrollup "github.com/tuler/op-cartesi/rollup"
+	"github.com/tuler/op-cartesi/host/go/chain"
+	"github.com/tuler/op-cartesi/host/go/engineapi"
+	"github.com/tuler/op-cartesi/host/go/machine"
+	"github.com/tuler/op-cartesi/host/go/mempool"
+	opcrollup "github.com/tuler/op-cartesi/host/go/rollup"
 )
 
 // Environment variables selecting a remote engine.

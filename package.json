@@ -2,10 +2,10 @@
     "name": "op-cartesi",
     "private": true,
     "workspaces": [
-        "accounts-drive/js",
-        "abi-drive/js",
-        "evm-compat/js",
-        "app",
+        "lib/accounts-drive/js",
+        "lib/abi-drive/js",
+        "lib/evm-compat/js",
+        "guest/ts",
         "demo",
         "devnet",
         "scripts"

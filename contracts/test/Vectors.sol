@@ -5,7 +5,7 @@ import {Vm} from "forge-std/Vm.sol";
 
 /// @title Vectors
 /// @notice Reads the shared conformance vectors (`../conformance`, generated
-/// by `go test ./chain -run TestConformance -update`) so the Solidity suite
+/// by `go test ./host/go/chain -run TestConformance -update`) so the Solidity suite
 /// judges the node's bytes from the same file the node and the guest do.
 ///
 /// Before this existed, each root, hash and proof node below was a `bytes32`

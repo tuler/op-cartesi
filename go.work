@@ -1,0 +1,16 @@
+// The repository holds several Go modules and no longer one at its root: the
+// engine is host/go, the drive libraries are lib/*/go, and the conformance
+// harness is integration. This file makes them one build from here —
+// `go build ./...` and `go test ./...` at the repository root — without any of
+// them depending on that being true.
+//
+// The replace directives in each go.mod stay: they are what makes a module
+// usable on its own, and what an external consumer sees.
+go 1.26.0
+
+use (
+	./host/go
+	./integration
+	./lib/abi-drive/go
+	./lib/accounts-drive/go
+)

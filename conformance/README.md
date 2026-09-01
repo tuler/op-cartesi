@@ -6,7 +6,7 @@ sides read**, rather than as constants copied from one implementation into
 another's tests.
 
 That is the same discipline
-[`accounts-drive/testdata/golden.json`](../accounts-drive/testdata/golden.json)
+[`lib/accounts-drive/testdata/golden.json`](../lib/accounts-drive/testdata/golden.json)
 already applies to the drives, where six languages replay one file. Here it
 applies to the chain: the node computes these values in Go, the guest computes
 several of them in TypeScript, and the L1 contracts verify two of them in
@@ -32,9 +32,9 @@ implementation, and hides which side is the reference.
 
 ## Who reads them
 
-- **The node (Go)** — [`chain/conformance_test.go`](../chain/conformance_test.go)
+- **The node (Go)** — [`host/go/chain/conformance_test.go`](../host/go/chain/conformance_test.go)
   generates every file and replays every one of them.
-- **The guest (TypeScript)** — [`evm-compat/js/test/conformance.test.ts`](../evm-compat/js/test/conformance.test.ts)
+- **The guest (TypeScript)** — [`lib/evm-compat/js/test/conformance.test.ts`](../lib/evm-compat/js/test/conformance.test.ts)
   replays the four sets `@op-cartesi/evm` implements: withdrawals, events,
   the call envelope, and output leaf hashing.
 - **The contracts (Solidity)** — [`contracts/test/Vectors.sol`](../contracts/test/Vectors.sol)
@@ -85,7 +85,7 @@ emitting one rather than the other.
 ## Regenerating
 
 ```sh
-go test ./chain -run TestConformance -update             # everything else
+go test ./host/go/chain -run TestConformance -update             # everything else
 go test ./integration -run TestEngineTranscript -update  # the transcript
 ```
 
@@ -122,7 +122,7 @@ replays a case by standing up a stub machine over that list:
 
 That is enough to pin every header rule without an emulator. Vectors that need
 a real machine do not belong here — they are the snapshot-gated tests in
-`chain/` and `machine/`.
+`host/go/chain/` and `host/go/machine/`.
 
 ## What is deliberately not pinned
 

@@ -7,7 +7,7 @@ import (
 	"github.com/ethereum-optimism/optimism/op-service/eth"
 	"github.com/ethereum/go-ethereum/common"
 
-	"github.com/tuler/op-cartesi/chain"
+	"github.com/tuler/op-cartesi/host/go/chain"
 )
 
 // TestIsthmusOutputRootThroughOpNode is the point of Isthmus support: op-node

@@ -8,7 +8,7 @@ go 1.26.0
 require (
 	github.com/ethereum-optimism/optimism v1.19.2
 	github.com/ethereum/go-ethereum v1.17.0
-	github.com/tuler/op-cartesi v0.0.0
+	github.com/tuler/op-cartesi/host/go v0.0.0
 )
 
 require (
@@ -82,8 +82,8 @@ require (
 	github.com/syndtr/goleveldb v1.0.1-0.20220614013038-64ee5596c38a // indirect
 	github.com/tklauser/go-sysconf v0.3.14 // indirect
 	github.com/tklauser/numcpus v0.8.0 // indirect
-	github.com/tuler/op-cartesi/abi-drive/go v0.0.0-00010101000000-000000000000 // indirect
-	github.com/tuler/op-cartesi/accounts-drive/go v0.0.0-00010101000000-000000000000 // indirect
+	github.com/tuler/op-cartesi/lib/abi-drive/go v0.0.0-00010101000000-000000000000 // indirect
+	github.com/tuler/op-cartesi/lib/accounts-drive/go v0.0.0-00010101000000-000000000000 // indirect
 	github.com/urfave/cli/v2 v2.27.6 // indirect
 	github.com/wlynxg/anet v0.0.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
@@ -103,12 +103,12 @@ require (
 	gopkg.in/yaml.v2 v2.4.0 // indirect
 )
 
-replace github.com/tuler/op-cartesi => ../
+replace github.com/tuler/op-cartesi/host/go => ../host/go
 
 // Replace directives of a replaced module are ignored, so the shim's own
 // replace for the in-repo accounts-drive library must be repeated here.
-replace github.com/tuler/op-cartesi/accounts-drive/go => ../accounts-drive/go
+replace github.com/tuler/op-cartesi/lib/accounts-drive/go => ../lib/accounts-drive/go
 
-replace github.com/tuler/op-cartesi/abi-drive/go => ../abi-drive/go
+replace github.com/tuler/op-cartesi/lib/abi-drive/go => ../lib/abi-drive/go
 
 replace github.com/ethereum/go-ethereum => github.com/ethereum-optimism/op-geth v1.101702.2

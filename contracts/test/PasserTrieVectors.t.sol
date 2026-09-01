@@ -8,7 +8,7 @@ import {RLPReader} from "../src/vendor/optimism/RLPReader.sol";
 import {PasserTrieFixture} from "./PasserTrie.sol";
 import {Vectors} from "./Vectors.sol";
 
-/// @notice Pins the node's withdrawal trie (`chain/passertrie.go`) to the
+/// @notice Pins the node's withdrawal trie (`host/go/chain/passertrie.go`) to the
 /// Solidity verifier `OptimismPortal` uses.
 ///
 /// Everything below — the roots, the withdrawal hashes, the proof nodes —

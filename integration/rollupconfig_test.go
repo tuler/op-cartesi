@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	opcrollup "github.com/tuler/op-cartesi/rollup"
+	opcrollup "github.com/tuler/op-cartesi/host/go/rollup"
 )
 
 // The field set op-node's rollup.Config declares at v1.19.2. op-node's own

@@ -16,8 +16,8 @@
 #           TypeScript — deploy-l1.ts, compose/genesis.ts, deploy-outputs.ts —
 #           unchanged from the way mprocs runs them.
 #
-# Build context is the repo root: the Go build needs the whole module, and the
-# app is a bun workspace whose members live outside devnet/.
+# Build context is the repo root: the Go build needs the whole host/go module,
+# and the guest is a bun workspace whose members live outside devnet/.
 
 ARG MACHINE_IMAGE=cartesi/machine-emulator:0.21.0
 ARG BUN_IMAGE=oven/bun:1.3
@@ -31,13 +31,16 @@ FROM ${GO_IMAGE} AS go-build
 WORKDIR /src
 # The manifests first, for layer caching — the two drive libraries among them,
 # since go.mod replaces them with directories in this repository.
-COPY go.mod go.sum ./
-COPY accounts-drive/go/go.mod accounts-drive/go/
-COPY abi-drive/go/go.mod abi-drive/go/
-RUN go mod download
+COPY host/go/go.mod host/go/go.sum host/go/
+COPY lib/accounts-drive/go/go.mod lib/accounts-drive/go/
+COPY lib/abi-drive/go/go.mod lib/abi-drive/go/
+RUN cd host/go && go mod download
 COPY . .
+# GOWORK=off: the repository's go.work exists for a developer running one
+# command over every module, and would pull the conformance harness into a
+# build that only needs the engine.
 # Static, because the two images it lands in have different libcs.
-RUN CGO_ENABLED=0 go build -o /out/op-cartesi ./cmd/op-cartesi
+RUN cd host/go && CGO_ENABLED=0 GOWORK=off go build -o /out/op-cartesi ./cmd/op-cartesi
 
 FROM ${FOUNDRY_IMAGE} AS foundry
 FROM ${OP_DEPLOYER_IMAGE} AS op-deployer
@@ -78,10 +81,10 @@ WORKDIR /repo
 
 # Manifests first, for layer caching; bun resolves the whole workspace.
 COPY package.json bun.lock ./
-COPY accounts-drive/js/package.json accounts-drive/js/
-COPY abi-drive/js/package.json abi-drive/js/
-COPY evm-compat/js/package.json evm-compat/js/
-COPY app/package.json app/
+COPY lib/accounts-drive/js/package.json lib/accounts-drive/js/
+COPY lib/abi-drive/js/package.json lib/abi-drive/js/
+COPY lib/evm-compat/js/package.json lib/evm-compat/js/
+COPY guest/ts/package.json guest/ts/
 COPY demo/package.json demo/
 COPY devnet/package.json devnet/
 COPY scripts/package.json scripts/
